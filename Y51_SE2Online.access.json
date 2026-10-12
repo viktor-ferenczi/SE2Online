@@ -1,0 +1,11 @@
+{
+  "Version": 1,
+  "WhitelistOnly": false,
+  "Pvp": null,
+  "OfflineRaid": null,
+  "PcuLimit": 0,
+  "WorldPcu": 400000,
+  "Admins": [],
+  "Bans": [],
+  "Whitelist": []
+}
