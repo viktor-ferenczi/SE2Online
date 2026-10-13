@@ -10,6 +10,9 @@ public sealed partial class HostSession
 {
 	private readonly ChatThrottle _chatThrottle = new();
 	private readonly List<(PeerId Peer, long DueMs)> _removals = new();
+	private const int PasswordTries = 5;
+	private const long PasswordWindowMs = 60_000;
+	private readonly Dictionary<ulong, (int Count, long SinceMs)> _passwordFails = new();
 	private readonly Dictionary<PeerId, string> _adminMessages = new();
 	private long _nextAdminPushMs;
 	private string _adminSignature = "";
@@ -59,10 +62,38 @@ public sealed partial class HostSession
 	/// <summary>Returns a reject reason for a join that passed version checks, or null to admit it.</summary>
 	private bool CheckAccess(PeerId peer, JoinRequest req)
 	{
-		var verdict = _o.Access.CheckJoin(PeerAlias.SteamOf(peer.Value), req.Password, _o.Password, _o.SessionName, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+		ulong account = PeerAlias.SteamOf(peer.Value);
+		long now = _clock();
+		(byte Code, string Text)? verdict;
+		lock (_passwordFails)
+		{
+			if (_passwordFails.TryGetValue(account, out var fails) && now - fails.SinceMs >= PasswordWindowMs)
+			{
+				_passwordFails.Remove(account);
+				fails = default;
+			}
+			if (fails.Count >= PasswordTries)
+			{
+				verdict = (JoinRejectCode.Generic, $"Too many wrong passwords. Try again in {(PasswordWindowMs - (now - fails.SinceMs)) / 1000 + 1} s.");
+			}
+			else
+			{
+				verdict = _o.Access.CheckJoin(account, req.Password, _o.Password, _o.SessionName, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+				if (verdict?.Code == JoinRejectCode.Password && !string.IsNullOrEmpty(req.Password))
+				{
+					if (_passwordFails.Count >= 4096)
+					{
+						foreach (ulong stale in _passwordFails.Where(f => now - f.Value.SinceMs >= PasswordWindowMs).Select(f => f.Key).ToList()) _passwordFails.Remove(stale);
+					}
+					_passwordFails[account] = (fails.Count + 1, fails.Count == 0 ? now : fails.SinceMs);
+				}
+			}
+		}
 		if (verdict == null) return true;
-		_log.Error($"sync(host): refusing {peer} '{req.PlayerName}': {(verdict.Value.Code == JoinRejectCode.Removed ? "banned" : verdict.Value.Text)}");
+		_log.Error($"sync(host): refusing {peer} '{req.PlayerName}': {(verdict.Value.Code == JoinRejectCode.Removed ? "banned" : verdict.Value.Text)}; disconnecting");
 		_t.Send(peer, Channel.Control, TextMessage.Encode(SyncMsg.JoinReject, verdict.Value.Code, verdict.Value.Text));
+		// Queued after the reject on the same reliable lane, and the link lingers, so the reject arrives first.
+		_t.Disconnect(peer, DisconnectCodes.NotAllowed, verdict.Value.Code == JoinRejectCode.Removed ? "banned" : verdict.Value.Text);
 		return false;
 	}
 

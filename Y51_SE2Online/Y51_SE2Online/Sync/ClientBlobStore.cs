@@ -17,6 +17,8 @@ public sealed class ClientBlobStore
 	{
 		public byte[] Data;
 
+		public int Total;
+
 		public int Received;
 	}
 
@@ -41,6 +43,13 @@ public sealed class ClientBlobStore
 	public long StallMs { get; set; } = 30000L;
 
 	public int MaxBlobBytes { get; set; } = 536870912;
+
+	/// <summary>Cap on the buffers of all blobs still being received; the host streams them one at a time.</summary>
+	public long MaxPartialBytes { get; set; } = 1073741824L;
+
+	public int MaxPartialBlobs { get; set; } = 64;
+
+	private long _partialBytes;
 
 	public int Count
 	{
@@ -103,7 +112,7 @@ public sealed class ClientBlobStore
 			}
 			if (p.MissingOnHost)
 			{
-				_partial.Remove(p.Id);
+				Forget(p.Id);
 				if (_missingOnHost.Add(p.Id))
 				{
 					_fresh.Add(p.Id);
@@ -115,31 +124,65 @@ public sealed class ClientBlobStore
 				Rejected++;
 				return false;
 			}
-			BytesReceived += p.Bytes.Length;
 			if (p.Offset == 0 && p.Bytes.Length == p.Total)
 			{
+				Forget(p.Id);
+				BytesReceived += p.Bytes.Length;
 				Complete(p.Id, p.Bytes);
 				return true;
 			}
-			if (!_partial.TryGetValue(p.Id, out Partial value) || value.Data.Length != p.Total)
+			// The host packs each blob's pieces in offset order on the ordered bulk channel, so the buffer
+			// only grows with bytes that actually arrived, never to a declared Total up front.
+			_partial.TryGetValue(p.Id, out Partial value);
+			if (p.Offset == 0)
 			{
-				Dictionary<Guid, Partial> partial = _partial;
-				Guid id = p.Id;
-				Partial partial2 = new Partial
+				Forget(p.Id);
+				if (_partial.Count >= MaxPartialBlobs)
 				{
-					Data = new byte[p.Total]
-				};
-				value = partial2;
-				partial[id] = partial2;
+					Rejected++;
+					return false;
+				}
+				value = new Partial { Data = Array.Empty<byte>(), Total = p.Total };
+				_partial[p.Id] = value;
+			}
+			else if (value == null || value.Total != p.Total || value.Received != p.Offset)
+			{
+				Forget(p.Id);
+				Rejected++;
+				return false;
+			}
+			int needed = p.Offset + p.Bytes.Length;
+			if (needed > value.Data.Length)
+			{
+				int size = (int)Math.Min(p.Total, Math.Max(needed, (long)value.Data.Length * 2));
+				if (_partialBytes - value.Data.Length + size > MaxPartialBytes)
+				{
+					Forget(p.Id);
+					Rejected++;
+					return false;
+				}
+				byte[] grown = new byte[size];
+				value.Data.AsSpan(0, value.Received).CopyTo(grown);
+				_partialBytes += size - value.Data.Length;
+				value.Data = grown;
 			}
 			p.Bytes.CopyTo(value.Data, p.Offset);
-			value.Received += p.Bytes.Length;
-			if (value.Received >= p.Total)
+			value.Received = needed;
+			BytesReceived += p.Bytes.Length;
+			if (value.Received == p.Total)
 			{
-				_partial.Remove(p.Id);
+				Forget(p.Id);
 				Complete(p.Id, value.Data);
 			}
 			return true;
+		}
+	}
+
+	private void Forget(Guid id)
+	{
+		if (_partial.Remove(id, out Partial value))
+		{
+			_partialBytes -= value.Data.Length;
 		}
 	}
 

@@ -11,9 +11,7 @@ public sealed class Reassembler
 
 		public byte[] Buffer;
 
-		public bool[] Have;
-
-		public int Received;
+		public uint Received;
 
 		public long LastActivityMs;
 
@@ -25,6 +23,9 @@ public sealed class Reassembler
 	private readonly HashSet<uint> _recentlyCompleted = new();
 
 	private readonly Queue<uint> _recentOrder = new();
+
+	// Senders always use TransportOptions.FragmentPayload (32 KiB); tiny sizes only inflate per-fragment overhead.
+	public const uint MinFragmentSize = 1024;
 
 	public int MaxMessageBytes { get; }
 
@@ -60,8 +61,8 @@ public sealed class Reassembler
 	{
 		if (_pending.TryGetValue(transferId, out var pending))
 		{
-			received = pending.Received;
-			count = pending.Have.Length;
+			received = (int)pending.Received;
+			count = (int)pending.First.Count;
 			startedMs = pending.StartedMs;
 			return true;
 		}
@@ -74,6 +75,10 @@ public sealed class Reassembler
 	{
 		complete = null;
 		string error = h.Validate(payload.Length);
+		if (error is null && h.FragmentSize < MinFragmentSize)
+		{
+			error = $"fragment size {h.FragmentSize} below {MinFragmentSize}";
+		}
 		if (error is null && h.TotalLength > MaxMessageBytes)
 		{
 			error = $"message of {h.TotalLength} B exceeds limit {MaxMessageBytes}";
@@ -100,19 +105,13 @@ public sealed class Reassembler
 			{
 				return Reject($"too many concurrent transfers ({_pending.Count})");
 			}
-			if (BufferedBytes + h.TotalLength > MaxBufferedBytes)
-			{
-				return Reject($"buffer limit: {BufferedBytes} + {h.TotalLength} > {MaxBufferedBytes}");
-			}
 			pending = new Pending
 			{
 				First = h,
-				Buffer = new byte[h.TotalLength],
-				Have = new bool[h.Count],
+				Buffer = Array.Empty<byte>(),
 				StartedMs = nowMs
 			};
 			_pending.Add(h.TransferId, pending);
-			BufferedBytes += h.TotalLength;
 		}
 		else if (pending.First.Count != h.Count || pending.First.TotalLength != h.TotalLength || pending.First.FragmentSize != h.FragmentSize)
 		{
@@ -120,15 +119,36 @@ public sealed class Reassembler
 			return Reject($"transfer {h.TransferId}: geometry changed mid-transfer");
 		}
 		pending.LastActivityMs = nowMs;
-		if (pending.Have[h.Index])
+		if (h.Index < pending.Received)
 		{
 			Duplicates++;
 			return ReassemblyResult.Duplicate;
 		}
-		payload.CopyTo(pending.Buffer.AsSpan((int)((long)h.Index * h.FragmentSize)));
-		pending.Have[h.Index] = true;
+		// Bulk frames ride one reliable ordered lane, so fragments arrive in order; the buffer grows with
+		// the bytes actually received instead of trusting the declared TotalLength up front.
+		if (h.Index != pending.Received)
+		{
+			Drop(h.TransferId, pending);
+			return Reject($"transfer {h.TransferId}: fragment {h.Index} arrived before {pending.Received}");
+		}
+		long offset = (long)h.Index * h.FragmentSize;
+		long needed = offset + payload.Length;
+		if (needed > pending.Buffer.Length)
+		{
+			long size = Math.Min(h.TotalLength, Math.Max(needed, (long)pending.Buffer.Length * 2));
+			if (BufferedBytes - pending.Buffer.Length + size > MaxBufferedBytes)
+			{
+				Drop(h.TransferId, pending);
+				return Reject($"buffer limit: {BufferedBytes} + {size - pending.Buffer.Length} > {MaxBufferedBytes}");
+			}
+			byte[] grown = new byte[size];
+			pending.Buffer.AsSpan(0, (int)offset).CopyTo(grown);
+			BufferedBytes += size - pending.Buffer.Length;
+			pending.Buffer = grown;
+		}
+		payload.CopyTo(pending.Buffer.AsSpan((int)offset));
 		pending.Received++;
-		if (pending.Received < pending.Have.Length)
+		if (pending.Received < h.Count)
 		{
 			return ReassemblyResult.Partial;
 		}

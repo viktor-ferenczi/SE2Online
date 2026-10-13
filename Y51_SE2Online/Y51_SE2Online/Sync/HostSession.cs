@@ -213,6 +213,7 @@ public sealed partial class HostSession : IStorySink
 		_t.PeerConnected += OnConnected;
 		_t.PeerDisconnected += OnDisconnected;
 		_t.MessageReceived += OnMessage;
+		_t.BulkGate = IsAdmitted;
 		_log.Info($"sync(host): ready; state budget {_o.StateBudgetBytesPerSec / 1024} KiB/s per client, rate caps {_o.Caps.Describe()}");
 	}
 
@@ -236,6 +237,14 @@ public sealed partial class HostSession : IStorySink
 			interval = _o.Caps.IntervalMsFor(shortName);
 			_intervalByKey[key] = interval;
 			return interval;
+		}
+	}
+
+	private bool IsAdmitted(PeerId peer)
+	{
+		lock (_sync)
+		{
+			return _clients.TryGetValue(peer, out RemoteClient client) && client.Player != null;
 		}
 	}
 
@@ -358,7 +367,8 @@ public sealed partial class HostSession : IStorySink
 		}
 		catch (Exception ex) when (ex is ArgumentOutOfRangeException or IndexOutOfRangeException)
 		{
-			_log.Warn($"sync(host): malformed {(SyncMsg)data[0]} from {peer} ({data.Length} B)");
+			_log.Warn($"sync(host): malformed {(SyncMsg)data[0]} from {peer} ({data.Length} B); disconnecting");
+			_t.Disconnect(peer, DisconnectCodes.ProtocolError, $"malformed {(SyncMsg)data[0]}");
 		}
 	}
 

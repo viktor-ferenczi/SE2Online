@@ -20,7 +20,12 @@ public sealed class TransportOptions
 
 	public int StateAckTimeoutMs = 2000;
 
-	public int MaxEarlyFrames = 512;
+	public int MaxEarlyFrames = 16;
+
+	public int MaxEarlyBytes = 65536;
+
+	/// <summary>Largest bulk message a peer may send while <see cref="MpTransport.BulkGate"/> says it is not admitted yet.</summary>
+	public int MaxBulkBytesBeforeAdmit = 65536;
 
 	public int MaxProtocolErrors = 16;
 
