@@ -27,8 +27,13 @@ internal static class GameKeys
 		try
 		{
 			if (!InputDeviceManager.HasValue) return false;
-			IInputDevice keyboard = Singleton<InputDeviceManager>.Instance.Keyboard;
-			return keyboard != null && keyboard.GetDigitalState(new DigitalInput(vk, GenericDeviceClass.Keyboard));
+			var key = new DigitalInput(vk, GenericDeviceClass.Keyboard);
+			// All keyboards, not just the default one: a plugin can register its own as the default (Remote does).
+			foreach (var keyboard in Singleton<InputDeviceManager>.Instance.GetAllDevices(GenericDeviceClass.Keyboard))
+			{
+				if (keyboard.GetDigitalState(key)) return true;
+			}
+			return false;
 		}
 		catch (Exception)
 		{
