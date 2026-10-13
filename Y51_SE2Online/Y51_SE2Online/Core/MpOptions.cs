@@ -9,26 +9,42 @@ namespace Y51_SE2Online.Core;
 
 public sealed class MpOptions
 {
-    public int MaxPlayers { get; internal set; } = 8;
+	public int MaxPlayers { get; internal set; } = 8;
 
-    public bool FriendsOnly { get; internal set; } = true;
+	public bool FriendsOnly { get; internal set; } = true;
 
-    public bool UseSteamIp { get; private set; }
-    public IPEndPoint SteamListenIp { get; private set; }
-    public bool Dedicated { get; internal set; }
-    public bool Advertise { get; internal set; } = true;
-    public string SessionName { get; internal set; } = "My SE2 session";
-    public string Description { get; internal set; } = "";
-    public string PublicAddress { get; internal set; } = "";
-    public string Password { get; internal set; } = "";
-    public bool Pvp { get; internal set; } = true;
-    public bool OfflineRaidProtection { get; internal set; } = true;
-    public int? PcuLimit { get; internal set; }
-    public bool? SunRotation { get; internal set; }
-    public double? SunPeriodMinutes { get; internal set; }
-    public string JoinPassword { get; internal set; } = "";
-    public string ServersDirectory { get; internal set; } = "https://se2-online-servers.yellow51.dev";
-    public string SessionsDirectory { get; internal set; } = "https://se2-online-sessions.yellow51.dev";
+	public bool UseSteamIp { get; private set; }
+
+	public IPEndPoint SteamListenIp { get; private set; }
+
+	public bool Dedicated { get; internal set; }
+
+	public bool Advertise { get; internal set; } = true;
+
+	public string SessionName { get; internal set; } = "My SE2 session";
+
+	public string Description { get; internal set; } = "";
+
+	public string PublicAddress { get; internal set; } = "";
+
+	public string Password { get; internal set; } = "";
+
+	public bool Pvp { get; internal set; } = true;
+
+	public bool OfflineRaidProtection { get; internal set; } = true;
+
+	public int? PcuLimit { get; internal set; }
+
+	public bool? SunRotation { get; internal set; }
+
+	public double? SunPeriodMinutes { get; internal set; }
+
+	public string JoinPassword { get; internal set; } = "";
+
+	public string ServersDirectory { get; internal set; } = "https://se2-online-servers.yellow51.dev";
+
+	public string SessionsDirectory { get; internal set; } = "https://se2-online-sessions.yellow51.dev";
+
 	public const int DefaultVirtualPort = 7742;
 
 	public const int DefaultIpPort = 7742;
@@ -109,9 +125,9 @@ public sealed class MpOptions
 
 	public bool AdaptiveInterp { get; private set; } = true;
 
-	public Dictionary<string, double> RateCaps { get; } = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+	public Dictionary<string, double> RateCaps { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-	public HashSet<ulong> Allow { get; } = new HashSet<ulong>();
+	public HashSet<ulong> Allow { get; } = new();
 
 	public bool JoinFriends { get; private set; }
 
@@ -123,164 +139,99 @@ public sealed class MpOptions
 
 	public double NametagRange { get; private set; } = 200.0;
 
-	public bool JoinSteamDynamic
-	{
-		get
-		{
-			if (JoinSteamId == 0L && JoinIp == null)
-			{
-				if (!JoinFriends)
-				{
-					return JoinWait;
-				}
-				return true;
-			}
-			return false;
-		}
-	}
+	public bool JoinSteamDynamic => JoinSteamId == 0 && JoinIp is null && (JoinFriends || JoinWait);
 
-	public List<string> Recognised { get; } = new List<string>();
+	public List<string> Recognised { get; } = new();
 
-	public List<string> Errors { get; } = new List<string>();
+	public List<string> Errors { get; } = new();
 
-	public bool Host
-	{
-		get
-		{
-			if (!HostSteam)
-			{
-				return HostIp != null;
-			}
-			return true;
-		}
-	}
+	public bool Host => HostSteam || HostIp != null;
 
-	public bool Join
-	{
-		get
-		{
-			if (JoinSteamId == 0L && JoinIp == null && !JoinFriends)
-			{
-				return JoinWait;
-			}
-			return true;
-		}
-	}
+	public bool Join => JoinSteamId != 0 || JoinIp is not null || JoinFriends || JoinWait;
 
-	public bool Networking
-	{
-		get
-		{
-			if (Host || Join)
-			{
-				return Errors.Count == 0;
-			}
-			return false;
-		}
-	}
+	public bool Networking => (Host || Join) && Errors.Count == 0;
 
-	public bool Any
-	{
-		get
-		{
-			if (!Probe && !Host)
-			{
-				return Join;
-			}
-			return true;
-		}
-	}
+	public bool Any => Probe || Host || Join;
 
 	public bool NeedsSteam
 	{
 		get
 		{
-			if (UseSteamIp || Dedicated) return true;
-			if (!HostSteam && JoinSteamId == 0L)
+			if (UseSteamIp || Dedicated)
 			{
-				if (JoinIp == null)
-				{
-					if (!JoinFriends)
-					{
-						return JoinWait;
-					}
-					return true;
-				}
-				return false;
+				return true;
 			}
-			return true;
+			return HostSteam || JoinSteamId != 0 || (JoinIp is null && (JoinFriends || JoinWait));
 		}
 	}
 
 	public static MpOptions Parse(IEnumerable<string>? args)
 	{
-		MpOptions mpOptions = new MpOptions();
-		if (args == null)
+		var options = new MpOptions();
+		if (args is null)
 		{
-			return mpOptions;
+			return options;
 		}
 		foreach (string arg in args)
 		{
-			if (arg == null)
+			if (arg is null)
 			{
 				continue;
 			}
 			string text = arg.Trim().Trim('"');
-			if (!text.StartsWith("-y51online:", StringComparison.OrdinalIgnoreCase))
+			if (!text.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
 			{
 				continue;
 			}
-			string text2 = text.Substring("-y51online:".Length);
-			int num = text2.IndexOf(':');
-			string key = ((num < 0) ? text2 : text2.Substring(0, num)).ToLowerInvariant();
-			string value = ((num < 0) ? null : text2.Substring(num + 1));
+			string body = text.Substring(Prefix.Length);
+			int colon = body.IndexOf(':');
+			string key = (colon < 0 ? body : body.Substring(0, colon)).ToLowerInvariant();
+			string value = colon < 0 ? null : body.Substring(colon + 1);
 			try
 			{
-				if (!mpOptions.Apply(key, value))
+				if (!options.Apply(key, value))
 				{
-					mpOptions.Errors.Add("unknown argument '" + text + "'");
+					options.Errors.Add($"unknown argument '{text}'");
 				}
 				else
 				{
-					mpOptions.Recognised.Add(text);
+					options.Recognised.Add(text);
 				}
 			}
 			catch (FormatException ex)
 			{
-				mpOptions.Errors.Add("bad argument '" + text + "': " + ex.Message);
+				options.Errors.Add($"bad argument '{text}': {ex.Message}");
 			}
 		}
-		if (mpOptions.Host && mpOptions.Join)
+		if (options.Host && options.Join)
 		{
-			mpOptions.Errors.Add("host and join arguments are mutually exclusive");
+			options.Errors.Add("host and join arguments are mutually exclusive");
 		}
-		if (mpOptions.JoinSteamId != 0L && mpOptions.JoinIp != null)
+		if (options.JoinSteamId != 0 && options.JoinIp is not null)
 		{
-			mpOptions.Errors.Add("-y51online:join and -y51online:join-ip are mutually exclusive");
+			options.Errors.Add("-y51online:join and -y51online:join-ip are mutually exclusive");
 		}
-		if (mpOptions.JoinIp != null && (mpOptions.JoinFriends || mpOptions.JoinWait))
+		if (options.JoinIp is not null && (options.JoinFriends || options.JoinWait))
 		{
-			mpOptions.Errors.Add("-y51online:join:friends / join:wait and -y51online:join-ip are mutually exclusive");
+			options.Errors.Add("-y51online:join:friends / join:wait and -y51online:join-ip are mutually exclusive");
 		}
-		if (mpOptions.HostIp != null && !TestAllowNonLoopbackTcp && !IsLoopback(mpOptions.HostIp.Address))
+		if (options.HostIp is not null && !TestAllowNonLoopbackTcp && !IsLoopback(options.HostIp.Address))
 		{
-			mpOptions.Errors.Add($"-y51online:host-ip is for same-PC tests and only listens on 127.0.0.1 / ::1 (got {mpOptions.HostIp.Address}); to play over the internet or a LAN, host with -y51online:host (Steam)");
+			options.Errors.Add($"-y51online:host-ip is for same-PC tests and only listens on 127.0.0.1 / ::1 (got {options.HostIp.Address}); to play over the internet or a LAN, host with -y51online:host (Steam)");
 		}
-		if (mpOptions.JoinIp != null && !mpOptions.UseSteamIp && !TestAllowNonLoopbackTcp && !IsLoopback(mpOptions.JoinIp.Address))
+		if (options.JoinIp is not null && !options.UseSteamIp && !TestAllowNonLoopbackTcp && !IsLoopback(options.JoinIp.Address))
 		{
-			mpOptions.Errors.Add($"-y51online:join-ip is for same-PC tests and only connects to 127.0.0.1 / ::1 (got {mpOptions.JoinIp.Address}); join a friend over Steam with -y51online:join");
+			options.Errors.Add($"-y51online:join-ip is for same-PC tests and only connects to 127.0.0.1 / ::1 (got {options.JoinIp.Address}); join a friend over Steam with -y51online:join");
 		}
-		if (mpOptions.HostSteam && mpOptions.HostIp != null)
+		if (options.HostSteam && options.HostIp is not null)
 		{
-			mpOptions.Errors.Add("-y51online:host and -y51online:host-ip are mutually exclusive (one link per session in this build)");
+			options.Errors.Add("-y51online:host and -y51online:host-ip are mutually exclusive (one link per session in this build)");
 		}
-		return mpOptions;
+		return options;
 	}
 
-	private static bool IsLoopback(IPAddress address)
-	{
-		return IPAddress.IsLoopback(address) || (address.IsIPv4MappedToIPv6 && IPAddress.IsLoopback(address.MapToIPv4()));
-	}
+	private static bool IsLoopback(IPAddress address) =>
+		IPAddress.IsLoopback(address) || (address.IsIPv4MappedToIPv6 && IPAddress.IsLoopback(address.MapToIPv4()));
 
 	private bool Apply(string key, string? value)
 	{
@@ -295,7 +246,7 @@ public sealed class MpOptions
 			return true;
 		case "probe":
 			Probe = true;
-			if (value != null)
+			if (value is not null)
 			{
 				if (!value.Equals("nosize", StringComparison.OrdinalIgnoreCase))
 				{
@@ -305,41 +256,41 @@ public sealed class MpOptions
 			}
 			return true;
 		case "host":
-			if (value != null)
+			if (value is not null)
 			{
 				throw new FormatException("-y51online:host takes no value (use -y51online:host-ip:<port> for TCP)");
 			}
 			HostSteam = true;
 			return true;
 		case "host-ip":
-			HostIp = ((value == null) ? new IPEndPoint(IPAddress.Loopback, 7742) : TcpLink.ParseEndpoint(value, IPAddress.Loopback));
+			HostIp = value is null ? new IPEndPoint(IPAddress.Loopback, 7742) : TcpLink.ParseEndpoint(value, IPAddress.Loopback);
 			return true;
 		case "join":
-			if (value != null && value.Equals("friends", StringComparison.OrdinalIgnoreCase))
+			if (value is not null && value.Equals("friends", StringComparison.OrdinalIgnoreCase))
 			{
 				JoinFriends = true;
 				return true;
 			}
-			if (value != null && value.Equals("wait", StringComparison.OrdinalIgnoreCase))
+			if (value is not null && value.Equals("wait", StringComparison.OrdinalIgnoreCase))
 			{
 				JoinWait = true;
 				return true;
 			}
-			if (value != null && value.StartsWith("friend:", StringComparison.OrdinalIgnoreCase))
+			if (value is not null && value.StartsWith("friend:", StringComparison.OrdinalIgnoreCase))
 			{
-				string text = value.Substring("friend:".Length).Trim().Trim('"');
-				if (text.Length == 0 || text.Length > 64)
+				string filter = value.Substring("friend:".Length).Trim().Trim('"');
+				if (filter.Length == 0 || filter.Length > 64)
 				{
 					throw new FormatException("expected -y51online:join:friend:<part of the friend's Steam name, or its SteamID64>");
 				}
 				JoinFriends = true;
-				JoinFriendFilter = text;
+				JoinFriendFilter = filter;
 				return true;
 			}
 			JoinSteamId = ParseSteamId(value);
 			return true;
 		case "join-ip":
-			JoinIp = ((value == null) ? new IPEndPoint(IPAddress.Loopback, 7742) : TcpLink.ParseEndpoint(value, IPAddress.Loopback));
+			JoinIp = value is null ? new IPEndPoint(IPAddress.Loopback, 7742) : TcpLink.ParseEndpoint(value, IPAddress.Loopback);
 			if (JoinIp.Address.Equals(IPAddress.Any))
 			{
 				throw new FormatException("join address 0.0.0.0 is not connectable; use 127.0.0.1 or the host's LAN address");
@@ -349,7 +300,7 @@ public sealed class MpOptions
 			VirtualPort = ParseInt(value, 0, 65535);
 			return true;
 		case "spike":
-			if (value != null)
+			if (value is not null)
 			{
 				throw new FormatException("-y51online:spike takes no value");
 			}
@@ -377,10 +328,10 @@ public sealed class MpOptions
 		case "missions":
 			ClientMissions = value?.ToLowerInvariant() switch
 			{
-				"auto" => (bool?)null, 
-				"on" => true, 
-				"off" => false, 
-				_ => throw new FormatException("expected -y51online:missions:auto, :on or :off"), 
+				"auto" => null,
+				"on" => true,
+				"off" => false,
+				_ => throw new FormatException("expected -y51online:missions:auto, :on or :off"),
 			};
 			return true;
 		case "statebudget":
@@ -392,31 +343,30 @@ public sealed class MpOptions
 			{
 				throw new FormatException("expected -y51online:cap:<DataTypeShortName>=<Hz>");
 			}
-			string key2 = value.Substring(0, value.IndexOf('='));
-			string text6 = value.Substring(value.IndexOf('=') + 1);
-			if (!double.TryParse(text6, NumberStyles.Float, CultureInfo.InvariantCulture, out var result3) || result3 < 0.0 || result3 > 1000.0)
+			string typeName = value.Substring(0, value.IndexOf('='));
+			string rateText = value.Substring(value.IndexOf('=') + 1);
+			if (!double.TryParse(rateText, NumberStyles.Float, CultureInfo.InvariantCulture, out var hz) || hz < 0.0 || hz > 1000.0)
 			{
-				throw new FormatException("rate '" + text6 + "' must be 0..1000 Hz (0 = never send)");
+				throw new FormatException($"rate '{rateText}' must be 0..1000 Hz (0 = never send)");
 			}
-			RateCaps[key2] = result3;
+			RateCaps[typeName] = hz;
 			return true;
 		}
 		case "name":
 		{
-			string text5 = (value ?? "").Trim();
-			if (text5.Length == 0 || text5.Length > 32)
+			string name = (value ?? "").Trim();
+			if (name.Length == 0 || name.Length > 32)
 			{
 				throw new FormatException("expected a player name of 1-32 characters");
 			}
-			string text2 = text5;
-			for (int i = 0; i < text2.Length; i++)
+			foreach (char c in name)
 			{
-				if (char.IsControl(text2[i]))
+				if (char.IsControl(c))
 				{
 					throw new FormatException("player name contains a control character");
 				}
 			}
-			PlayerName = text5;
+			PlayerName = name;
 			return true;
 		}
 		case "interp":
@@ -426,43 +376,21 @@ public sealed class MpOptions
 			Character = false;
 			return true;
 		case "predict":
-		{
-			string text2 = value?.ToLowerInvariant();
-			bool predict;
-			if (!(text2 == "on"))
+			Predict = value?.ToLowerInvariant() switch
 			{
-				if (!(text2 == "off"))
-				{
-					throw new FormatException("expected -y51online:predict:on or :off");
-				}
-				predict = false;
-			}
-			else
-			{
-				predict = true;
-			}
-			Predict = predict;
+				"on" => true,
+				"off" => false,
+				_ => throw new FormatException("expected -y51online:predict:on or :off"),
+			};
 			return true;
-		}
 		case "spawn":
-		{
-			string text2 = value?.ToLowerInvariant();
-			bool predict;
-			if (!(text2 == "respawn"))
+			SpawnNearHost = value?.ToLowerInvariant() switch
 			{
-				if (!(text2 == "host"))
-				{
-					throw new FormatException("expected -y51online:spawn:respawn or :host");
-				}
-				predict = true;
-			}
-			else
-			{
-				predict = false;
-			}
-			SpawnNearHost = predict;
+				"respawn" => false,
+				"host" => true,
+				_ => throw new FormatException("expected -y51online:spawn:respawn or :host"),
+			};
 			return true;
-		}
 		case "rejoin":
 			Rejoin = OnOff(value, "rejoin");
 			return true;
@@ -494,97 +422,62 @@ public sealed class MpOptions
 			AdaptiveInterp = OnOff(value, "adaptive");
 			return true;
 		case "identities":
-		{
-			string text2 = value?.ToLowerInvariant();
-			bool predict;
-			if (!(text2 == "on"))
+			Identities = value?.ToLowerInvariant() switch
 			{
-				if (!(text2 == "off"))
-				{
-					throw new FormatException("expected -y51online:identities:on or :off");
-				}
-				predict = false;
-			}
-			else
-			{
-				predict = true;
-			}
-			Identities = predict;
+				"on" => true,
+				"off" => false,
+				_ => throw new FormatException("expected -y51online:identities:on or :off"),
+			};
 			return true;
-		}
 		case "grids":
-		{
-			string text2 = value?.ToLowerInvariant();
-			GridPermissionMode grids;
-			if (!(text2 == "team"))
+			Grids = value?.ToLowerInvariant() switch
 			{
-				if (!(text2 == "strict"))
-				{
-					throw new FormatException("expected -y51online:grids:team or :strict");
-				}
-				grids = GridPermissionMode.Strict;
-			}
-			else
-			{
-				grids = GridPermissionMode.Team;
-			}
-			Grids = grids;
+				"team" => GridPermissionMode.Team,
+				"strict" => GridPermissionMode.Strict,
+				_ => throw new FormatException("expected -y51online:grids:team or :strict"),
+			};
 			return true;
-		}
 		case "research":
-		{
-			string text2 = value?.ToLowerInvariant();
-			ResearchMode research;
-			if (!(text2 == "shared"))
+			Research = value?.ToLowerInvariant() switch
 			{
-				if (!(text2 == "own"))
-				{
-					throw new FormatException("expected -y51online:research:shared or :own");
-				}
-				research = ResearchMode.Own;
-			}
-			else
-			{
-				research = ResearchMode.Shared;
-			}
-			Research = research;
+				"shared" => ResearchMode.Shared,
+				"own" => ResearchMode.Own,
+				_ => throw new FormatException("expected -y51online:research:shared or :own"),
+			};
 			return true;
-		}
 		case "nametags":
 		{
-			string text4 = (value ?? "on").Trim().ToLowerInvariant();
-			if (text4 == "on")
+			string setting = (value ?? "on").Trim().ToLowerInvariant();
+			if (setting == "on")
 			{
 				Nametags = true;
 			}
-			else if (text4 == "off")
+			else if (setting == "off")
 			{
 				Nametags = false;
 			}
 			else
 			{
-				if (!double.TryParse(text4, NumberStyles.Float, CultureInfo.InvariantCulture, out var result2) || !(result2 >= 1.0) || !(result2 <= 100000.0))
+				// Negated comparisons so NaN is rejected as well.
+				if (!double.TryParse(setting, NumberStyles.Float, CultureInfo.InvariantCulture, out var range) || !(range >= 1.0) || !(range <= 100000.0))
 				{
 					throw new FormatException("expected -y51online:nametags:on, :off or a range in metres (1-100000)");
 				}
 				Nametags = true;
-				NametagRange = result2;
+				NametagRange = range;
 			}
 			return true;
 		}
 		case "allow":
-		{
 			if (string.IsNullOrEmpty(value))
 			{
 				throw new FormatException("expected a comma-separated SteamID64 list");
 			}
-			string[] array = value.Split(',');
-			foreach (string s in array)
+			foreach (string id in value.Split(','))
 			{
-				Allow.Add(ParseSteamId(s));
+				Allow.Add(ParseSteamId(id));
 			}
 			return true;
-		}
 		default:
 			return false;
 		}
@@ -594,34 +487,27 @@ public sealed class MpOptions
 	{
 		if (string.IsNullOrWhiteSpace(s) || !ulong.TryParse(s.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var result))
 		{
-			throw new FormatException("'" + s + "' is not a SteamID64 for a player or game server");
+			throw new FormatException($"'{s}' is not a SteamID64 for a player or game server");
 		}
 		ulong accountType = (result >> 52) & 15;
 		if ((result >> 56) != 1 || (uint)result == 0 || accountType is not (1 or 3 or 4)
 			|| (accountType == 1 && ((result >> 32) & 0xFFFFF) != 1))
 		{
-			throw new FormatException("'" + s + "' is not a public player or game-server SteamID64");
+			throw new FormatException($"'{s}' is not a public player or game-server SteamID64");
 		}
 		return result;
 	}
 
-	private static bool OnOff(string? value, string name)
+	private static bool OnOff(string? value, string name) => value?.ToLowerInvariant() switch
 	{
-		string text = value?.ToLowerInvariant();
-		if (!(text == "on"))
-		{
-			if (text == "off")
-			{
-				return false;
-			}
-			throw new FormatException("expected -y51online:" + name + ":on or :off");
-		}
-		return true;
-	}
+		"on" => true,
+		"off" => false,
+		_ => throw new FormatException($"expected -y51online:{name}:on or :off"),
+	};
 
 	private static int ParseInt(string? s, int min, int max)
 	{
-		if (s == null || !int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result) || result < min || result > max)
+		if (s is null || !int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result) || result < min || result > max)
 		{
 			throw new FormatException($"expected an integer in [{min}, {max}]");
 		}
@@ -630,141 +516,142 @@ public sealed class MpOptions
 
 	public string Describe()
 	{
-		List<string> list = new List<string>();
+		var parts = new List<string>();
 		if (Probe)
 		{
-			list.Add(ProbeBundleSize ? "probe" : "probe(nosize)");
+			parts.Add(ProbeBundleSize ? "probe" : "probe(nosize)");
 		}
 		if (HostSteam)
 		{
-			list.Add("host(steam)");
+			parts.Add("host(steam)");
 		}
-		if (HostIp != null)
+		if (HostIp is not null)
 		{
-			list.Add($"host(tcp {HostIp})");
+			parts.Add($"host(tcp {HostIp})");
 		}
-		if (JoinSteamId != 0L)
+		if (JoinSteamId != 0)
 		{
-			list.Add($"join(steam {JoinSteamId})");
+			parts.Add($"join(steam {JoinSteamId})");
 		}
-		else if (JoinFriends && JoinIp == null)
+		else if (JoinFriends && JoinIp is null)
 		{
-			list.Add((JoinFriendFilter != null) ? ("join(steam friends matching '" + JoinFriendFilter + "')") : "join(steam friends)");
+			parts.Add(JoinFriendFilter is not null ? $"join(steam friends matching '{JoinFriendFilter}')" : "join(steam friends)");
 		}
-		else if (JoinWait && JoinIp == null)
+		else if (JoinWait && JoinIp is null)
 		{
-			list.Add("join(steam: wait for a Join Game click)");
+			parts.Add("join(steam: wait for a Join Game click)");
 		}
-		if (JoinIp != null)
+		if (JoinIp is not null)
 		{
-			list.Add($"join(tcp {JoinIp})");
+			parts.Add($"join(tcp {JoinIp})");
 		}
 		if (Host || Join)
 		{
 			if (NeedsSteam)
 			{
-				list.Add($"vport={VirtualPort}");
-				list.Add($"sendrate={SendRateMinBytes / 1024}..{SendRateMaxBytes / 1024}KiB/s");
+				parts.Add($"vport={VirtualPort}");
+				parts.Add($"sendrate={SendRateMinBytes / 1024}..{SendRateMaxBytes / 1024}KiB/s");
 			}
-			list.Add(Sync ? "sync=on" : "sync=off");
+			parts.Add(Sync ? "sync=on" : "sync=off");
 			if (Spike)
 			{
-				list.Add($"spike blob={BlobBytes / 1048576}MiB");
+				parts.Add($"spike blob={BlobBytes / 1048576}MiB");
 			}
 			if (Join && !ClientGame)
 			{
-				list.Add("noclientgame");
+				parts.Add("noclientgame");
 			}
 			if (Join && !Spectator)
 			{
-				list.Add("nospectator");
+				parts.Add("nospectator");
 			}
 			if (Join && ClientMissions.HasValue)
 			{
-				list.Add("missions=" + (ClientMissions.Value ? "on" : "off"));
+				parts.Add("missions=" + (ClientMissions.Value ? "on" : "off"));
 			}
-			if (Join && PlayerName != null)
+			if (Join && PlayerName is not null)
 			{
-				list.Add("name='" + PlayerName + "'");
+				parts.Add($"name='{PlayerName}'");
 			}
 			if (Join && InterpMs != 60)
 			{
-				list.Add($"interp={InterpMs}ms");
+				parts.Add($"interp={InterpMs}ms");
 			}
 			if (Join && !Character)
 			{
-				list.Add("nocharacter");
+				parts.Add("nocharacter");
 			}
 			if (!Predict)
 			{
-				list.Add("predict=off");
+				parts.Add("predict=off");
 			}
 			if (Join && !Rejoin)
 			{
-				list.Add("rejoin=off");
+				parts.Add("rejoin=off");
 			}
 			if (!ExitFix)
 			{
-				list.Add("exitfix=off");
+				parts.Add("exitfix=off");
 			}
 			if (!AudioFix)
 			{
-				list.Add("audiofix=off");
+				parts.Add("audiofix=off");
 			}
 			if (Host && !OnePilot)
 			{
-				list.Add("onepilot=off");
+				parts.Add("onepilot=off");
 			}
 			if (!BuildFix)
 			{
-				list.Add("buildfix=off");
+				parts.Add("buildfix=off");
 			}
 			if (!ControlFix)
 			{
-				list.Add("controlfix=off");
+				parts.Add("controlfix=off");
 			}
 			if (Join && FastSmooth)
 			{
-				list.Add("fastsmooth=on");
+				parts.Add("fastsmooth=on");
 			}
 			if (Join && !BodyFilter)
 			{
-				list.Add("bodyfilter=off");
+				parts.Add("bodyfilter=off");
 			}
 			if (Join && !DeckFrame)
 			{
-				list.Add("deckframe=off");
+				parts.Add("deckframe=off");
 			}
 			if (Join && !AdaptiveInterp)
 			{
-				list.Add("adaptive=off");
+				parts.Add("adaptive=off");
 			}
 			if (Host && SpawnNearHost)
 			{
-				list.Add("spawn=host");
+				parts.Add("spawn=host");
 			}
-			list.Add(Nametags ? ("nametags<=" + NametagRange.ToString(CultureInfo.InvariantCulture) + "m") : "nametags=off");
+			parts.Add(Nametags ? $"nametags<={NametagRange.ToString(CultureInfo.InvariantCulture)}m" : "nametags=off");
 			if (Host)
 			{
-				list.Add(Identities ? ("identities=on grids=" + ((Grids == GridPermissionMode.Team) ? "team" : "strict") + " research=" + ((Research == ResearchMode.Shared) ? "shared" : "own")) : "identities=off");
+				parts.Add(Identities
+					? $"identities=on grids={(Grids == GridPermissionMode.Team ? "team" : "strict")} research={(Research == ResearchMode.Shared ? "shared" : "own")}"
+					: "identities=off");
 			}
 			if (Host)
 			{
-				list.Add($"statebudget={StateBudgetBytesPerSec / 1024}KiB/s");
+				parts.Add($"statebudget={StateBudgetBytesPerSec / 1024}KiB/s");
 			}
-			foreach (KeyValuePair<string, double> rateCap in RateCaps)
+			foreach (var cap in RateCaps)
 			{
-				list.Add($"cap {rateCap.Key}={rateCap.Value.ToString(CultureInfo.InvariantCulture)}Hz");
+				parts.Add($"cap {cap.Key}={cap.Value.ToString(CultureInfo.InvariantCulture)}Hz");
 			}
 			if (Allow.Count > 0)
 			{
-				list.Add("allow=" + string.Join(",", Allow));
+				parts.Add("allow=" + string.Join(",", Allow));
 			}
-
 		}
-		if (list.Count != 0)
+		if (parts.Count != 0)
 		{
-			return string.Join(" ", list);
+			return string.Join(" ", parts);
 		}
 		return "none";
 	}

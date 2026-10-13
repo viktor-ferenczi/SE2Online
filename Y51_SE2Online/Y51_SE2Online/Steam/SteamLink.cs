@@ -1,12 +1,12 @@
-using System.Linq;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
+using System.Linq;
 using System.Net;
+using System.Runtime.InteropServices;
+using Steamworks;
 using Y51_SE2Online.Core;
 using Y51_SE2Online.Net;
-using Steamworks;
 
 namespace Y51_SE2Online.Steam;
 
@@ -37,11 +37,11 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 
 	private readonly SteamNetworkingConfigValue_t[] _options;
 
-	private readonly ConnectionTable _table = new ConnectionTable();
+	private readonly ConnectionTable _table = new();
 
-	private readonly ConcurrentQueue<SteamNetConnectionStatusChangedCallback_t> _status = new ConcurrentQueue<SteamNetConnectionStatusChangedCallback_t>();
+	private readonly ConcurrentQueue<SteamNetConnectionStatusChangedCallback_t> _status = new();
 
-	private readonly Dictionary<uint, Conn> _conns = new Dictionary<uint, Conn>();
+	private readonly Dictionary<uint, Conn> _conns = new();
 
 	private readonly nint[] _recv = new nint[64];
 
@@ -52,9 +52,13 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 	private Callback<SteamNetConnectionStatusChangedCallback_t>? _statusCallback;
 
 	private HSteamListenSocket _listen = HSteamListenSocket.Invalid;
+
 	private HSteamListenSocket _ipListen = HSteamListenSocket.Invalid;
+
 	private readonly SteamSocketApi _api;
+
 	private readonly bool _gameServer;
+
 	private readonly IPEndPoint _listenAddress;
 
 	private HSteamNetPollGroup _pollGroup = HSteamNetPollGroup.Invalid;
@@ -63,7 +67,7 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 
 	public long CallbacksSeen;
 
-	private readonly List<LinkEvent> _pendingEvents = new List<LinkEvent>();
+	private readonly List<LinkEvent> _pendingEvents = new();
 
 	public string Name => _gameServer ? "steam-dedicated" : "steam-p2p-ip";
 
@@ -81,7 +85,7 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 		_accept = accept;
 		_sendRateMin = Math.Min(sendRateMin, sendRateMax);
 		_sendRateMax = sendRateMax;
-		_options = new SteamNetworkingConfigValue_t[5]
+		_options = new[]
 		{
 			Int32(ESteamNetworkingConfigValue.k_ESteamNetworkingConfig_SendRateMin, _sendRateMin),
 			Int32(ESteamNetworkingConfigValue.k_ESteamNetworkingConfig_SendRateMax, sendRateMax),
@@ -93,19 +97,26 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 
 	private static SteamNetworkingConfigValue_t Int32(ESteamNetworkingConfigValue key, int value)
 	{
-		SteamNetworkingConfigValue_t result = new SteamNetworkingConfigValue_t
+		var config = new SteamNetworkingConfigValue_t
 		{
 			m_eValue = key,
 			m_eDataType = ESteamNetworkingConfigDataType.k_ESteamNetworkingConfig_Int32
 		};
-		result.m_val.m_int32 = value;
-		return result;
+		config.m_val.m_int32 = value;
+		return config;
 	}
 
 	public void Start(bool listen)
 	{
-		try { StartCore(listen); }
-		catch { Dispose(); throw; }
+		try
+		{
+			StartCore(listen);
+		}
+		catch
+		{
+			Dispose();
+			throw;
+		}
 	}
 
 	private void StartCore(bool listen)
@@ -114,7 +125,9 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 		{
 			throw new InvalidOperationException("SteamNetworkingMessage_t layout mismatch: " + detail);
 		}
-		_statusCallback = _gameServer ? Callback<SteamNetConnectionStatusChangedCallback_t>.CreateGameServer(OnStatusChanged) : Callback<SteamNetConnectionStatusChangedCallback_t>.Create(OnStatusChanged);
+		_statusCallback = _gameServer
+			? Callback<SteamNetConnectionStatusChangedCallback_t>.CreateGameServer(OnStatusChanged)
+			: Callback<SteamNetConnectionStatusChangedCallback_t>.Create(OnStatusChanged);
 		_api.InitAuthentication();
 		_pollGroup = _api.CreatePollGroup();
 		if (_pollGroup == HSteamNetPollGroup.Invalid)
@@ -123,21 +136,27 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 		}
 		if (listen)
 		{
-			if (_gameServer && _listenAddress == null) throw new InvalidOperationException("Dedicated Steam servers require an IP listen address.");
+			if (_gameServer && _listenAddress == null)
+			{
+				throw new InvalidOperationException("Dedicated Steam servers require an IP listen address.");
+			}
 			if (!_gameServer)
 			{
-			_listen = _api.CreateListenSocketP2P(_vport, _options.Length, _options);
-			if (_listen == HSteamListenSocket.Invalid)
-			{
-				throw new InvalidOperationException($"CreateListenSocketP2P({_vport}) failed");
-			}
-			_log.Info($"listening for P2P connections on virtual port {_vport}");
+				_listen = _api.CreateListenSocketP2P(_vport, _options.Length, _options);
+				if (_listen == HSteamListenSocket.Invalid)
+				{
+					throw new InvalidOperationException($"CreateListenSocketP2P({_vport}) failed");
+				}
+				_log.Info($"listening for P2P connections on virtual port {_vport}");
 			}
 			if (_listenAddress != null)
 			{
 				var address = NativeAddress(_listenAddress);
 				_ipListen = _api.CreateListenSocketIP(ref address, _options.Length, _options);
-				if (_ipListen == HSteamListenSocket.Invalid) throw new InvalidOperationException("Could not listen on " + _listenAddress + ". Check that its UDP port is available.");
+				if (_ipListen == HSteamListenSocket.Invalid)
+				{
+					throw new InvalidOperationException("Could not listen on " + _listenAddress + ". Check that its UDP port is available.");
+				}
 				_log.Info("Steam Networking Sockets IP listener: " + _listenAddress);
 			}
 		}
@@ -146,7 +165,10 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 	private static SteamNetworkingIPAddr NativeAddress(IPEndPoint endpoint)
 	{
 		var result = new SteamNetworkingIPAddr { m_ipv6 = new byte[16] };
-		if (!result.ParseString(endpoint.ToString())) throw new FormatException("Steam could not parse the IP endpoint.");
+		if (!result.ParseString(endpoint.ToString()))
+		{
+			throw new FormatException("Steam could not parse the IP endpoint.");
+		}
 		return result;
 	}
 
@@ -154,7 +176,10 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 	{
 		var address = NativeAddress(endpoint);
 		var connection = _api.ConnectByIPAddress(ref address, _options.Length, _options);
-		if (connection == HSteamNetConnection.Invalid) return 0;
+		if (connection == HSteamNetConnection.Invalid)
+		{
+			return 0;
+		}
 		_api.SetConnectionPollGroup(connection, _pollGroup);
 		_conns[connection.m_HSteamNetConnection] = new Conn { Handle = connection };
 		ApplyRates(connection);
@@ -164,51 +189,57 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 
 	public uint Connect(ulong steamId)
 	{
-		if (_gameServer) throw new InvalidOperationException("Dedicated servers cannot initiate P2P connections.");
-		SteamNetworkingIdentity identityRemote = default;
-		identityRemote.SetSteamID64(steamId);
-		HSteamNetConnection hSteamNetConnection = _api.ConnectP2P(ref identityRemote, _vport, _options.Length, _options);
-		if (hSteamNetConnection == HSteamNetConnection.Invalid)
+		if (_gameServer)
+		{
+			throw new InvalidOperationException("Dedicated servers cannot initiate P2P connections.");
+		}
+		SteamNetworkingIdentity identity = default;
+		identity.SetSteamID64(steamId);
+		var connection = _api.ConnectP2P(ref identity, _vport, _options.Length, _options);
+		if (connection == HSteamNetConnection.Invalid)
 		{
 			_log.Error($"ConnectP2P({steamId}, vport {_vport}) returned an invalid handle");
-			return 0u;
+			return 0;
 		}
-		_api.SetConnectionPollGroup(hSteamNetConnection, _pollGroup);
-		Register(hSteamNetConnection, steamId, incoming: false);
-		_log.Info($"connecting to {steamId} on virtual port {_vport} (conn {hSteamNetConnection.m_HSteamNetConnection})");
-		return hSteamNetConnection.m_HSteamNetConnection;
+		_api.SetConnectionPollGroup(connection, _pollGroup);
+		Register(connection, steamId, incoming: false);
+		_log.Info($"connecting to {steamId} on virtual port {_vport} (conn {connection.m_HSteamNetConnection})");
+		return connection.m_HSteamNetConnection;
 	}
 
 	private void Register(HSteamNetConnection h, ulong remote, bool incoming)
 	{
-		uint hSteamNetConnection = h.m_HSteamNetConnection;
+		uint id = h.m_HSteamNetConnection;
 		// Another game instance on the same Steam account is a separate player, not a reconnect;
 		// the transport's Hello instance check still replaces a genuinely stale connection.
 		if (incoming && _conns.Values.Any(c => c.Remote == remote && c.Connected))
 		{
 			int slot = 1;
-			while (slot <= PeerAlias.MaxSlots && _conns.Values.Any(c => c.Remote == PeerAlias.Make(remote, slot) && c.Connected)) slot++;
+			while (slot <= PeerAlias.MaxSlots && _conns.Values.Any(c => c.Remote == PeerAlias.Make(remote, slot) && c.Connected))
+			{
+				slot++;
+			}
 			if (slot > PeerAlias.MaxSlots)
 			{
-				_api.CloseConnection(h, 1005, "too many game instances on this Steam account", false);
+				_api.CloseConnection(h, DisconnectCodes.NotAllowed, "too many game instances on this Steam account", false);
 				return;
 			}
 			remote = PeerAlias.Make(remote, slot);
-			_log.Info($"incoming conn {hSteamNetConnection}: this Steam account is already connected; the new game instance joins as peer {remote}");
+			_log.Info($"incoming conn {id}: this Steam account is already connected; the new game instance joins as peer {remote}");
 		}
-		foreach (ConnectionTable.Entry item in _table.Add(hSteamNetConnection, remote, incoming, MpClock.NowMs()))
+		foreach (var superseded in _table.Add(id, remote, incoming, MpClock.NowMs()))
 		{
-			if (_conns.Remove(item.Conn, out Conn value))
+			if (_conns.Remove(superseded.Conn, out var stale))
 			{
-				_log.Warn($"conn {item.Conn} from {remote} ({(value.Connected ? "connected" : "still connecting")}) superseded by newer conn {hSteamNetConnection}: closing the stale one");
-				_api.CloseConnection(value.Handle, 1006, "superseded by a newer connection", bEnableLinger: false);
-				if (value.Connected)
+				_log.Warn($"conn {superseded.Conn} from {remote} ({(stale.Connected ? "connected" : "still connecting")}) superseded by newer conn {id}: closing the stale one");
+				_api.CloseConnection(stale.Handle, DisconnectCodes.Superseded, "superseded by a newer connection", bEnableLinger: false);
+				if (stale.Connected)
 				{
-					_pendingEvents.Add(new LinkEvent(LinkEventKind.Disconnected, item.Conn, remote, 1006, "superseded by a newer connection"));
+					_pendingEvents.Add(new LinkEvent(LinkEventKind.Disconnected, superseded.Conn, remote, DisconnectCodes.Superseded, "superseded by a newer connection"));
 				}
 			}
 		}
-		_conns[hSteamNetConnection] = new Conn
+		_conns[id] = new Conn
 		{
 			Handle = h,
 			Remote = remote,
@@ -221,11 +252,11 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 	{
 		try
 		{
-			bool flag = SetConnInt(h, ESteamNetworkingConfigValue.k_ESteamNetworkingConfig_SendRateMin, _sendRateMin);
-			bool flag2 = SetConnInt(h, ESteamNetworkingConfigValue.k_ESteamNetworkingConfig_SendRateMax, _sendRateMax);
-			if (!flag || !flag2)
+			bool minOk = SetConnInt(h, ESteamNetworkingConfigValue.k_ESteamNetworkingConfig_SendRateMin, _sendRateMin);
+			bool maxOk = SetConnInt(h, ESteamNetworkingConfigValue.k_ESteamNetworkingConfig_SendRateMax, _sendRateMax);
+			if (!minOk || !maxOk)
 			{
-				_log.WarnOnce("steam-rate-set", $"SetConfigValue(SendRateMin/Max) on a connection failed (min ok={flag}, max ok={flag2}); relying on socket options");
+				_log.WarnOnce("steam-rate-set", $"SetConfigValue(SendRateMin/Max) on a connection failed (min ok={minOk}, max ok={maxOk}); relying on socket options");
 			}
 		}
 		catch (Exception ex)
@@ -236,19 +267,13 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 
 	private unsafe bool SetConnInt(HSteamNetConnection h, ESteamNetworkingConfigValue key, int value)
 	{
-		int num = value;
-		return _api.SetConfigValue(key, ESteamNetworkingConfigScope.k_ESteamNetworkingConfig_Connection, (nint)h.m_HSteamNetConnection, ESteamNetworkingConfigDataType.k_ESteamNetworkingConfig_Int32, (nint)(&num));
+		int nativeValue = value;
+		return _api.SetConfigValue(key, ESteamNetworkingConfigScope.k_ESteamNetworkingConfig_Connection, (nint)h.m_HSteamNetConnection, ESteamNetworkingConfigDataType.k_ESteamNetworkingConfig_Int32, (nint)(&nativeValue));
 	}
 
-	public bool HasConnection(uint conn)
-	{
-		return _conns.ContainsKey(conn);
-	}
+	public bool HasConnection(uint conn) => _conns.ContainsKey(conn);
 
-	private void OnStatusChanged(SteamNetConnectionStatusChangedCallback_t s)
-	{
-		_status.Enqueue(s);
-	}
+	private void OnStatusChanged(SteamNetConnectionStatusChangedCallback_t s) => _status.Enqueue(s);
 
 	public unsafe void Pump(List<LinkEvent> events, List<LinkMessage> messages)
 	{
@@ -261,44 +286,44 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 			events.AddRange(_pendingEvents);
 			_pendingEvents.Clear();
 		}
-		SteamNetConnectionStatusChangedCallback_t result;
-		while (_status.TryDequeue(out result))
+		SteamNetConnectionStatusChangedCallback_t status;
+		while (_status.TryDequeue(out status))
 		{
 			CallbacksSeen++;
-			HandleStatus(in result, events);
+			HandleStatus(in status, events);
 		}
-		for (int i = 0; i < 32; i++)
+		for (int batch = 0; batch < 32; batch++)
 		{
-			int num = _api.ReceiveMessagesOnPollGroup(_pollGroup, _recv, _recv.Length);
-			if (num <= 0)
+			int count = _api.ReceiveMessagesOnPollGroup(_pollGroup, _recv, _recv.Length);
+			if (count <= 0)
 			{
 				break;
 			}
-			for (int j = 0; j < num; j++)
+			for (int i = 0; i < count; i++)
 			{
-				nint num2 = _recv[j];
+				nint message = _recv[i];
 				try
 				{
-					nint pointer = Marshal.ReadIntPtr(num2, SteamMessageLayout.Data);
-					int num3 = Marshal.ReadInt32(num2, SteamMessageLayout.Size);
-					uint num4 = (uint)Marshal.ReadInt32(num2, SteamMessageLayout.Conn);
-					byte[] array = new byte[num3];
-					if (num3 > 0)
+					nint data = Marshal.ReadIntPtr(message, SteamMessageLayout.Data);
+					int size = Marshal.ReadInt32(message, SteamMessageLayout.Size);
+					uint connId = (uint)Marshal.ReadInt32(message, SteamMessageLayout.Conn);
+					byte[] payload = new byte[size];
+					if (size > 0)
 					{
-						new ReadOnlySpan<byte>((void*)pointer, num3).CopyTo(array);
+						new ReadOnlySpan<byte>((void*)data, size).CopyTo(payload);
 					}
-					if (_conns.TryGetValue(num4, out Conn value) && !value.Connected)
+					if (_conns.TryGetValue(connId, out var c) && !c.Connected)
 					{
-						TryPromote(value, events);
+						TryPromote(c, events);
 					}
-					messages.Add(new LinkMessage(num4, array));
+					messages.Add(new LinkMessage(connId, payload));
 				}
 				finally
 				{
-					SteamNetworkingMessage_t.Release(num2);
+					SteamNetworkingMessage_t.Release(message);
 				}
 			}
-			if (num < _recv.Length)
+			if (count < _recv.Length)
 			{
 				break;
 			}
@@ -307,7 +332,7 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 
 	private void TryPromote(Conn c, List<LinkEvent> events)
 	{
-		if (_api.GetConnectionInfo(c.Handle, out var pInfo) && pInfo.m_eState == ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected)
+		if (_api.GetConnectionInfo(c.Handle, out var info) && info.m_eState == ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected)
 		{
 			MarkConnected(c, events);
 		}
@@ -315,53 +340,53 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 
 	private void HandleStatus(in SteamNetConnectionStatusChangedCallback_t s, List<LinkEvent> events)
 	{
-		uint hSteamNetConnection = s.m_hConn.m_HSteamNetConnection;
-		ESteamNetworkingConnectionState eState = s.m_info.m_eState;
-		ulong steamID = s.m_info.m_identityRemote.GetSteamID64();
-		_conns.TryGetValue(hSteamNetConnection, out Conn value);
+		uint id = s.m_hConn.m_HSteamNetConnection;
+		var state = s.m_info.m_eState;
+		ulong remote = s.m_info.m_identityRemote.GetSteamID64();
+		_conns.TryGetValue(id, out var c);
 		// Steam reports other local game instances' connections (same account) to this process too; only
 		// connections arriving on our own listen sockets are ours to accept or close.
-		if (value == null && (s.m_info.m_hListenSocket.m_HSteamListenSocket == 0 || (s.m_info.m_hListenSocket != _listen && s.m_info.m_hListenSocket != _ipListen)))
+		if (c == null && (s.m_info.m_hListenSocket.m_HSteamListenSocket == 0 || (s.m_info.m_hListenSocket != _listen && s.m_info.m_hListenSocket != _ipListen)))
 		{
 			return;
 		}
-		switch (eState)
+		switch (state)
 		{
 		case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connecting:
-			if (value == null)
+			if (c == null)
 			{
-				AcceptIncoming(s.m_hConn, steamID);
+				AcceptIncoming(s.m_hConn, remote);
 				break;
 			}
-			_log.Info($"conn {hSteamNetConnection} to {steamID}: connecting");
+			_log.Info($"conn {id} to {remote}: connecting");
 			break;
 		case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_FindingRoute:
-			_log.Info($"conn {hSteamNetConnection} to {steamID}: finding route");
+			_log.Info($"conn {id} to {remote}: finding route");
 			break;
 		case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected:
-			if (value != null && !value.Connected)
+			if (c != null && !c.Connected)
 			{
-				MarkConnected(value, events);
+				MarkConnected(c, events);
 			}
 			break;
 		case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_ClosedByPeer:
 		case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
 		{
-			bool flag = eState == ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_ClosedByPeer;
-			int eEndReason = s.m_info.m_eEndReason;
-			string szEndDebug = s.m_info.m_szEndDebug;
-			_log.Info($"conn {hSteamNetConnection} to {steamID}: {(flag ? "closed by peer" : "problem detected locally")} (was {Short(s.m_eOldState)}), end reason {eEndReason} {EndReasonName(eEndReason)}: '{szEndDebug}'");
-			if (value != null)
+			bool byPeer = state == ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_ClosedByPeer;
+			int endReason = s.m_info.m_eEndReason;
+			string endDebug = s.m_info.m_szEndDebug;
+			_log.Info($"conn {id} to {remote}: {(byPeer ? "closed by peer" : "problem detected locally")} (was {Short(s.m_eOldState)}), end reason {endReason} {EndReasonName(endReason)}: '{endDebug}'");
+			if (c != null)
 			{
-				_conns.Remove(hSteamNetConnection);
-				_table.Remove(hSteamNetConnection);
-				if (value.Connected)
+				_conns.Remove(id);
+				_table.Remove(id);
+				if (c.Connected)
 				{
-					events.Add(new LinkEvent(LinkEventKind.Disconnected, hSteamNetConnection, value.Remote, eEndReason, EndReasonName(eEndReason) + ": " + szEndDebug, flag));
+					events.Add(new LinkEvent(LinkEventKind.Disconnected, id, c.Remote, endReason, EndReasonName(endReason) + ": " + endDebug, byPeer));
 				}
 				else
 				{
-					events.Add(new LinkEvent(LinkEventKind.Disconnected, hSteamNetConnection, value.Remote, eEndReason, "connect failed, " + EndReasonName(eEndReason) + ": " + szEndDebug, flag));
+					events.Add(new LinkEvent(LinkEventKind.Disconnected, id, c.Remote, endReason, "connect failed, " + EndReasonName(endReason) + ": " + endDebug, byPeer));
 				}
 			}
 			_api.CloseConnection(s.m_hConn, 0, null, bEnableLinger: false);
@@ -372,25 +397,29 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 
 	private void AcceptIncoming(HSteamNetConnection h, ulong remote)
 	{
-		if (remote == 0) { _api.CloseConnection(h, 1005, "Steam identity required", false); return; }
-		uint hSteamNetConnection = h.m_HSteamNetConnection;
+		if (remote == 0)
+		{
+			_api.CloseConnection(h, DisconnectCodes.NotAllowed, "Steam identity required", false);
+			return;
+		}
+		uint id = h.m_HSteamNetConnection;
 		if (!_accept(remote))
 		{
 			_log.Warn($"rejecting incoming connection from {remote} (not on -y51online:allow list)");
-			_api.CloseConnection(h, 1005, "not on allow list", bEnableLinger: false);
+			_api.CloseConnection(h, DisconnectCodes.NotAllowed, "not on allow list", bEnableLinger: false);
 			return;
 		}
-		EResult eResult = _api.AcceptConnection(h);
-		if (eResult != EResult.k_EResultOK)
+		var result = _api.AcceptConnection(h);
+		if (result != EResult.k_EResultOK)
 		{
-			_log.Warn($"AcceptConnection from {remote} failed: {eResult}");
+			_log.Warn($"AcceptConnection from {remote} failed: {result}");
 			_api.CloseConnection(h, 0, null, bEnableLinger: false);
 		}
 		else
 		{
 			_api.SetConnectionPollGroup(h, _pollGroup);
 			Register(h, remote, incoming: true);
-			_log.Info($"accepted incoming connection from {remote} (conn {hSteamNetConnection})");
+			_log.Info($"accepted incoming connection from {remote} (conn {id})");
 		}
 	}
 
@@ -398,21 +427,30 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 	{
 		if (!_api.GetConnectionInfo(c.Handle, out var info) || info.m_identityRemote.GetSteamID64() == 0)
 		{
-			_api.CloseConnection(c.Handle, 1005, "Authenticated Steam identity required", false);
-			events.Add(new LinkEvent(LinkEventKind.Disconnected, c.Handle.m_HSteamNetConnection, c.Remote, 1005, "No authenticated Steam identity"));
+			_api.CloseConnection(c.Handle, DisconnectCodes.NotAllowed, "Authenticated Steam identity required", false);
+			events.Add(new LinkEvent(LinkEventKind.Disconnected, c.Handle.m_HSteamNetConnection, c.Remote, DisconnectCodes.NotAllowed, "No authenticated Steam identity"));
 			_conns.Remove(c.Handle.m_HSteamNetConnection);
 			return;
 		}
 		ulong identity = info.m_identityRemote.GetSteamID64();
-		if (c.Remote == 0) { c.Remote = identity; _table.Add(c.Handle.m_HSteamNetConnection, identity, c.Incoming, MpClock.NowMs()); }
-		else if (PeerAlias.SteamOf(c.Remote) != identity) { _api.CloseConnection(c.Handle, 1005, "Steam identity mismatch", false); return; }
+		if (c.Remote == 0)
+		{
+			// IP connections learn the peer's Steam identity only once authenticated.
+			c.Remote = identity;
+			_table.Add(c.Handle.m_HSteamNetConnection, identity, c.Incoming, MpClock.NowMs());
+		}
+		else if (PeerAlias.SteamOf(c.Remote) != identity)
+		{
+			_api.CloseConnection(c.Handle, DisconnectCodes.NotAllowed, "Steam identity mismatch", false);
+			return;
+		}
 		c.Connected = true;
 		_table.MarkConnected(c.Handle.m_HSteamNetConnection);
-		EResult eResult = _api.ConfigureConnectionLanes(c.Handle, LanePlan.Priorities.Length, LanePlan.Priorities, LanePlan.Weights);
-		c.LanesOk = eResult == EResult.k_EResultOK;
+		var lanes = _api.ConfigureConnectionLanes(c.Handle, LanePlan.Priorities.Length, LanePlan.Priorities, LanePlan.Weights);
+		c.LanesOk = lanes == EResult.k_EResultOK;
 		if (!c.LanesOk)
 		{
-			_log.Warn($"ConfigureConnectionLanes failed ({eResult}); all channels share lane 0");
+			_log.Warn($"ConfigureConnectionLanes failed ({lanes}); all channels share lane 0");
 		}
 		_log.Info($"conn {c.Handle.m_HSteamNetConnection} to {c.Remote}: CONNECTED ({(c.Incoming ? "incoming" : "outgoing")}), lanes {(c.LanesOk ? "ok" : "off")}; {QuickStatus(c.Handle.m_HSteamNetConnection)}");
 		events.Add(new LinkEvent(LinkEventKind.Connected, c.Handle.m_HSteamNetConnection, c.Remote));
@@ -420,7 +458,7 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 
 	public unsafe LinkSendResult Send(uint conn, Channel channel, bool reliable, ReadOnlySpan<byte> frame)
 	{
-		if (!_conns.TryGetValue(conn, out Conn value) || !value.Connected)
+		if (!_conns.TryGetValue(conn, out var c) || !c.Connected)
 		{
 			return LinkSendResult.Failed;
 		}
@@ -428,188 +466,176 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 		{
 			return LinkSendResult.Failed;
 		}
-		nint num = _api.AllocateMessage(frame.Length);
-		if (num == IntPtr.Zero)
+		nint message = _api.AllocateMessage(frame.Length);
+		if (message == IntPtr.Zero)
 		{
 			return LinkSendResult.Busy;
 		}
-		nint pointer = Marshal.ReadIntPtr(num, SteamMessageLayout.Data);
-		frame.CopyTo(new Span<byte>((void*)pointer, frame.Length));
-		Marshal.WriteInt32(num, SteamMessageLayout.Conn, (int)conn);
-		Marshal.WriteInt32(num, SteamMessageLayout.Flags, (!reliable) ? 1 : 9);
-		Marshal.WriteInt16(num, SteamMessageLayout.Lane, (short)(value.LanesOk ? channel : Channel.Control));
-		_sendPtr[0] = num;
+		nint data = Marshal.ReadIntPtr(message, SteamMessageLayout.Data);
+		frame.CopyTo(new Span<byte>((void*)data, frame.Length));
+		Marshal.WriteInt32(message, SteamMessageLayout.Conn, (int)conn);
+		// k_nSteamNetworkingSend_UnreliableNoNagle (1) or k_nSteamNetworkingSend_ReliableNoNagle (9)
+		Marshal.WriteInt32(message, SteamMessageLayout.Flags, !reliable ? 1 : 9);
+		Marshal.WriteInt16(message, SteamMessageLayout.Lane, (short)(c.LanesOk ? channel : Channel.Control));
+		_sendPtr[0] = message;
 		_api.SendMessages(1, _sendPtr, _sendResult);
-		long num2 = _sendResult[0];
-		if (num2 >= 0)
+		long result = _sendResult[0];
+		if (result >= 0)
 		{
 			return LinkSendResult.Ok;
 		}
-		EResult eResult = (EResult)(-num2);
-		if (eResult == EResult.k_EResultLimitExceeded)
+		// A negative result is the message's -EResult.
+		var error = (EResult)(-result);
+		if (error == EResult.k_EResultLimitExceeded)
 		{
 			return LinkSendResult.Busy;
 		}
-		_log.WarnOnce($"steam-send-{eResult}", $"SendMessages to {value.Remote} failed: {eResult}");
+		_log.WarnOnce($"steam-send-{error}", $"SendMessages to {c.Remote} failed: {error}");
 		return LinkSendResult.Failed;
 	}
 
 	public bool HasLanePriorities(uint conn)
 	{
-		if (_conns.TryGetValue(conn, out Conn value))
+		if (_conns.TryGetValue(conn, out var c))
 		{
-			return value.LanesOk;
+			return c.LanesOk;
 		}
 		return false;
 	}
 
 	public int GetPendingReliableBytes(uint conn)
 	{
-		if (!_conns.TryGetValue(conn, out Conn value))
+		if (!_conns.TryGetValue(conn, out var c))
 		{
 			return int.MaxValue;
 		}
-		SteamNetConnectionRealTimeStatus_t pStatus = new SteamNetConnectionRealTimeStatus_t
-		{
-			reserved = new uint[16]
-		};
-		SteamNetConnectionRealTimeLaneStatus_t pLanes = new SteamNetConnectionRealTimeLaneStatus_t
-		{
-			reserved = new uint[10]
-		};
-		if (_api.GetConnectionRealTimeStatus(value.Handle, ref pStatus, 0, ref pLanes) != EResult.k_EResultOK)
+		var status = new SteamNetConnectionRealTimeStatus_t { reserved = new uint[16] };
+		var lanes = new SteamNetConnectionRealTimeLaneStatus_t { reserved = new uint[10] };
+		if (_api.GetConnectionRealTimeStatus(c.Handle, ref status, 0, ref lanes) != EResult.k_EResultOK)
 		{
 			return int.MaxValue;
 		}
-		return pStatus.m_cbPendingReliable;
+		return status.m_cbPendingReliable;
 	}
 
 	public void Close(uint conn, int code, string reason, bool linger)
 	{
 		_table.Remove(conn);
-		if (_conns.Remove(conn, out Conn value))
+		if (_conns.Remove(conn, out var c))
 		{
-			_api.CloseConnection(value.Handle, code, Truncate(reason, 120), linger);
+			_api.CloseConnection(c.Handle, code, Truncate(reason, 120), linger);
 		}
 	}
 
-	public int ConnectionCountFor(ulong remote)
-	{
-		return _table.CountFor(remote);
-	}
+	public int ConnectionCountFor(ulong remote) => _table.CountFor(remote);
 
 	public IEnumerable<(uint Conn, ulong Remote, bool Connected)> Connections()
 	{
-		foreach (KeyValuePair<uint, Conn> conn in _conns)
+		foreach (var pair in _conns)
 		{
-			yield return (Conn: conn.Key, Remote: conn.Value.Remote, Connected: conn.Value.Connected);
+			yield return (pair.Key, pair.Value.Remote, pair.Value.Connected);
 		}
 	}
 
 	public string QuickStatus(uint conn)
 	{
-		if (!_conns.TryGetValue(conn, out Conn value))
+		if (!_conns.TryGetValue(conn, out var c))
 		{
 			return "no such connection";
 		}
-		if (!_api.GetConnectionInfo(value.Handle, out var pInfo))
+		if (!_api.GetConnectionInfo(c.Handle, out var info))
 		{
 			return "GetConnectionInfo failed";
 		}
-		SteamNetConnectionRealTimeStatus_t pStatus = new SteamNetConnectionRealTimeStatus_t
+		var status = new SteamNetConnectionRealTimeStatus_t { reserved = new uint[16] };
+		var lanes = new SteamNetConnectionRealTimeLaneStatus_t { reserved = new uint[10] };
+		var statusResult = _api.GetConnectionRealTimeStatus(c.Handle, ref status, 0, ref lanes);
+		string route = (info.m_nFlags & 0x10) != 0
+			? $"RELAYED via SDR pop={PopId(info.m_idPOPRelay.m_SteamNetworkingPOPID)} (remote pop {PopId(info.m_idPOPRemote.m_SteamNetworkingPOPID)})"
+			: "DIRECT " + Addr(info.m_addrRemote);
+		string flags = Flags(info.m_nFlags);
+		if (statusResult == EResult.k_EResultOK)
 		{
-			reserved = new uint[16]
-		};
-		SteamNetConnectionRealTimeLaneStatus_t pLanes = new SteamNetConnectionRealTimeLaneStatus_t
-		{
-			reserved = new uint[10]
-		};
-		EResult connectionRealTimeStatus = _api.GetConnectionRealTimeStatus(value.Handle, ref pStatus, 0, ref pLanes);
-		string value2 = (((pInfo.m_nFlags & 0x10) != 0) ? $"RELAYED via SDR pop={PopId(pInfo.m_idPOPRelay.m_SteamNetworkingPOPID)} (remote pop {PopId(pInfo.m_idPOPRemote.m_SteamNetworkingPOPID)})" : ("DIRECT " + Addr(pInfo.m_addrRemote)));
-		string value3 = Flags(pInfo.m_nFlags);
-		if (connectionRealTimeStatus == EResult.k_EResultOK)
-		{
-			return $"route={value2} flags={value3} ping={pStatus.m_nPing} ms quality local={pStatus.m_flConnectionQualityLocal:0.00} remote={pStatus.m_flConnectionQualityRemote:0.00} out={pStatus.m_flOutBytesPerSec / 1024f:0.0} KiB/s in={pStatus.m_flInBytesPerSec / 1024f:0.0} KiB/s sendRate={pStatus.m_nSendRateBytesPerSecond / 1024} KiB/s pendingRel={pStatus.m_cbPendingReliable} unackedRel={pStatus.m_cbSentUnackedReliable} pendingUnrel={pStatus.m_cbPendingUnreliable} queue={(double)pStatus.m_usecQueueTime.m_SteamNetworkingMicroseconds / 1000.0:0.0} ms desc='{pInfo.m_szConnectionDescription}'";
+			return $"route={route} flags={flags} ping={status.m_nPing} ms quality local={status.m_flConnectionQualityLocal:0.00} remote={status.m_flConnectionQualityRemote:0.00} out={status.m_flOutBytesPerSec / 1024f:0.0} KiB/s in={status.m_flInBytesPerSec / 1024f:0.0} KiB/s sendRate={status.m_nSendRateBytesPerSecond / 1024} KiB/s pendingRel={status.m_cbPendingReliable} unackedRel={status.m_cbSentUnackedReliable} pendingUnrel={status.m_cbPendingUnreliable} queue={(double)status.m_usecQueueTime.m_SteamNetworkingMicroseconds / 1000.0:0.0} ms desc='{info.m_szConnectionDescription}'";
 		}
-		return $"route={value2} flags={value3} (realtime status {connectionRealTimeStatus})";
+		return $"route={route} flags={flags} (realtime status {statusResult})";
 	}
 
 	public string DetailedStatus(uint conn)
 	{
-		if (!_conns.TryGetValue(conn, out Conn value))
+		if (!_conns.TryGetValue(conn, out var c))
 		{
 			return "no such connection";
 		}
-		int detailedConnectionStatus = _api.GetDetailedConnectionStatus(value.Handle, out var pszBuf, 8192);
-		if (detailedConnectionStatus != 0)
+		int result = _api.GetDetailedConnectionStatus(c.Handle, out var text, 8192);
+		if (result != 0)
 		{
-			return $"GetDetailedConnectionStatus returned {detailedConnectionStatus}";
+			return $"GetDetailedConnectionStatus returned {result}";
 		}
-		return pszBuf;
+		return text;
 	}
 
 	public static string RelayStatus(bool gameServer = false)
 	{
-		SteamRelayNetworkStatus_t pDetails;
-		ESteamNetworkingAvailability relayNetworkStatus = gameServer
-			? SteamGameServerNetworkingUtils.GetRelayNetworkStatus(out pDetails)
-			: SteamNetworkingUtils.GetRelayNetworkStatus(out pDetails);
-		return $"relay={Short(relayNetworkStatus)} anyRelay={Short(pDetails.m_eAvailAnyRelay)} netConfig={Short(pDetails.m_eAvailNetworkConfig)} pingMeasuring={pDetails.m_bPingMeasurementInProgress != 0} '{pDetails.m_debugMsg}'";
+		SteamRelayNetworkStatus_t details;
+		var relay = gameServer
+			? SteamGameServerNetworkingUtils.GetRelayNetworkStatus(out details)
+			: SteamNetworkingUtils.GetRelayNetworkStatus(out details);
+		return $"relay={Short(relay)} anyRelay={Short(details.m_eAvailAnyRelay)} netConfig={Short(details.m_eAvailNetworkConfig)} pingMeasuring={details.m_bPingMeasurementInProgress != 0} '{details.m_debugMsg}'";
 	}
 
-	public static bool RelayReady()
-	{
-		SteamRelayNetworkStatus_t pDetails;
-		return SteamNetworkingUtils.GetRelayNetworkStatus(out pDetails) == ESteamNetworkingAvailability.k_ESteamNetworkingAvailability_Current;
-	}
+	public static bool RelayReady() =>
+		SteamNetworkingUtils.GetRelayNetworkStatus(out _) == ESteamNetworkingAvailability.k_ESteamNetworkingAvailability_Current;
 
 	public static bool NetworkConfigReady()
 	{
-		SteamNetworkingUtils.GetRelayNetworkStatus(out SteamRelayNetworkStatus_t details);
+		SteamNetworkingUtils.GetRelayNetworkStatus(out var details);
 		return details.m_eAvailNetworkConfig == ESteamNetworkingAvailability.k_ESteamNetworkingAvailability_Current;
 	}
 
+	// "k_ESteamNetworkingAvailability_Current" -> "Current"
 	private static string Short<T>(T e) where T : Enum
 	{
-		string text = e.ToString();
-		int num = text.LastIndexOf('_');
-		if (num < 0)
+		string name = e.ToString();
+		int underscore = name.LastIndexOf('_');
+		if (underscore < 0)
 		{
-			return text;
+			return name;
 		}
-		return text.Substring(num + 1);
+		return name.Substring(underscore + 1);
 	}
 
+	// k_nSteamNetworkConnectionInfoFlags_*
 	private static string Flags(int f)
 	{
-		List<string> list = new List<string>();
+		var names = new List<string>();
 		if ((f & 1) != 0)
 		{
-			list.Add("unauthenticated");
+			names.Add("unauthenticated");
 		}
 		if ((f & 2) != 0)
 		{
-			list.Add("unencrypted");
+			names.Add("unencrypted");
 		}
 		if ((f & 4) != 0)
 		{
-			list.Add("loopback");
+			names.Add("loopback");
 		}
 		if ((f & 8) != 0)
 		{
-			list.Add("fast");
+			names.Add("fast");
 		}
 		if ((f & 0x10) != 0)
 		{
-			list.Add("relayed");
+			names.Add("relayed");
 		}
 		if ((f & 0x20) != 0)
 		{
-			list.Add("dualwifi");
+			names.Add("dualwifi");
 		}
-		if (list.Count != 0)
+		if (names.Count != 0)
 		{
-			return string.Join("|", list);
+			return string.Join("|", names);
 		}
 		return "none";
 	}
@@ -622,8 +648,8 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 			{
 				return "(no ip)";
 			}
-			a.ToString(out var buf, bWithPort: true);
-			return buf;
+			a.ToString(out var text, bWithPort: true);
+			return text;
 		}
 		catch (Exception)
 		{
@@ -631,18 +657,19 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 		}
 	}
 
+	// A POP id packs a 3- or 4-letter data-centre code; the optional 4th letter lives in the top byte.
 	public static string PopId(uint id)
 	{
 		if (id == 0)
 		{
 			return "-";
 		}
-		Span<char> span = stackalloc char[4];
-		span[0] = (char)((id >> 16) & 0xFF);
-		span[1] = (char)((id >> 8) & 0xFF);
-		span[2] = (char)(id & 0xFF);
-		span[3] = (char)((id >> 24) & 0xFF);
-		return new string((span[3] == '\0') ? span.Slice(0, 3) : span);
+		Span<char> chars = stackalloc char[4];
+		chars[0] = (char)((id >> 16) & 0xFF);
+		chars[1] = (char)((id >> 8) & 0xFF);
+		chars[2] = (char)(id & 0xFF);
+		chars[3] = (char)((id >> 24) & 0xFF);
+		return new string(chars[3] == '\0' ? chars.Slice(0, 3) : chars);
 	}
 
 	public static string EndReasonName(int reason)
@@ -651,44 +678,23 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 		{
 			return Short((ESteamNetConnectionEnd)reason);
 		}
-		if (reason < 3000)
+		return reason switch
 		{
-			if (reason >= 1000)
-			{
-				if (reason < 2000)
-				{
-					return reason switch
-					{
-						1000 => "App_Bye", 
-						1001 => "App_ProtocolError", 
-						1002 => "App_HelloTimeout", 
-						1003 => "App_PingTimeout", 
-						1004 => "App_Shutdown", 
-						1005 => "App_NotAllowed", 
-						1006 => "App_Superseded", 
-						1007 => "App_VersionMismatch", 
-						_ => "App", 
-					};
-				}
-				return "AppException";
-			}
-		}
-		else
-		{
-			if (reason < 5000)
-			{
-				if (reason < 4000)
-				{
-					return "Local";
-				}
-				return "Remote";
-			}
-			if (reason < 6000)
-			{
-				return "Misc";
-			}
-		}
-		return "?";
+			1000 => "App_Bye",
+			1001 => "App_ProtocolError",
+			1002 => "App_HelloTimeout",
+			1003 => "App_PingTimeout",
+			1004 => "App_Shutdown",
+			1005 => "App_NotAllowed",
+			1006 => "App_Superseded",
+			1007 => "App_VersionMismatch",
+			>= 1000 and < 2000 => "App",
+			>= 2000 and < 3000 => "AppException",
+			>= 3000 and < 4000 => "Local",
+			>= 4000 and < 5000 => "Remote",
+			>= 5000 and < 6000 => "Misc",
+			_ => "?",
+		};
 	}
 
 	private static string Truncate(string s, int n)
@@ -707,9 +713,9 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 			return;
 		}
 		_disposed = true;
-		foreach (Conn value in _conns.Values)
+		foreach (var c in _conns.Values)
 		{
-			_api.CloseConnection(value.Handle, 1004, "shutting down", bEnableLinger: true);
+			_api.CloseConnection(c.Handle, DisconnectCodes.Shutdown, "shutting down", bEnableLinger: true);
 		}
 		_conns.Clear();
 		_table.Clear();
@@ -717,7 +723,10 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 		{
 			_api.CloseListenSocket(_listen);
 		}
-		if (_ipListen != HSteamListenSocket.Invalid) _api.CloseListenSocket(_ipListen);
+		if (_ipListen != HSteamListenSocket.Invalid)
+		{
+			_api.CloseListenSocket(_ipListen);
+		}
 		if (_pollGroup != HSteamNetPollGroup.Invalid)
 		{
 			_api.DestroyPollGroup(_pollGroup);
@@ -725,4 +734,3 @@ internal sealed class SteamLink : IPacketLink, IDisposable
 		_statusCallback?.Dispose();
 	}
 }
-

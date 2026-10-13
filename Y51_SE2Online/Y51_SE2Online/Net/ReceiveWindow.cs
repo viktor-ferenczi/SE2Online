@@ -30,16 +30,16 @@ public sealed class ReceiveWindow
 	{
 		get
 		{
-			int num = 0;
+			int holes = 0;
 			for (int i = 0; i < 32; i++)
 			{
-				uint a = _latest - 1 - (uint)i;
-				if (_any && (_bits & (uint)(1 << i)) == 0 && Seq.Diff(a, _first) >= 0)
+				uint seq = _latest - 1 - (uint)i;
+				if (_any && (_bits & (uint)(1 << i)) == 0 && Seq.Diff(seq, _first) >= 0)
 				{
-					num++;
+					holes++;
 				}
 			}
-			return num;
+			return holes;
 		}
 	}
 
@@ -54,21 +54,22 @@ public sealed class ReceiveWindow
 			Received++;
 			return ReceiveResult.New;
 		}
-		int num = Seq.Diff(seq, _latest);
-		if (num > 0)
+		int ahead = Seq.Diff(seq, _latest);
+		if (ahead > 0)
 		{
-			Missing += HolesShiftedOut(num);
-			if (num > 33)
+			Missing += HolesShiftedOut(ahead);
+			// Of the ahead - 1 skipped seqs, the newest 32 stay in the window as holes; the rest are lost outright.
+			if (ahead > 33)
 			{
-				Missing += num - 33;
+				Missing += ahead - 33;
 			}
-			if (num < 32)
+			if (ahead < 32)
 			{
-				_bits = (_bits << num) | (uint)(1 << num - 1);
+				_bits = (_bits << ahead) | (uint)(1 << ahead - 1);
 			}
-			else if (num == 32)
+			else if (ahead == 32)
 			{
-				_bits = 2147483648u;
+				_bits = 0x80000000u;
 			}
 			else
 			{
@@ -78,24 +79,24 @@ public sealed class ReceiveWindow
 			Received++;
 			return ReceiveResult.New;
 		}
-		if (num == 0)
+		if (ahead == 0)
 		{
 			Duplicates++;
 			return ReceiveResult.Duplicate;
 		}
-		int num2 = -num;
-		if (num2 > 32 || Seq.Diff(seq, _first) < 0)
+		int behind = -ahead;
+		if (behind > 32 || Seq.Diff(seq, _first) < 0)
 		{
 			TooOld++;
 			return ReceiveResult.TooOld;
 		}
-		uint num3 = (uint)(1 << num2 - 1);
-		if ((_bits & num3) != 0)
+		uint mask = (uint)(1 << behind - 1);
+		if ((_bits & mask) != 0)
 		{
 			Duplicates++;
 			return ReceiveResult.Duplicate;
 		}
-		_bits |= num3;
+		_bits |= mask;
 		Late++;
 		Received++;
 		return ReceiveResult.Late;
@@ -103,17 +104,17 @@ public sealed class ReceiveWindow
 
 	private long HolesShiftedOut(int shift)
 	{
-		int num = ((shift > 32) ? 32 : shift);
-		long num2 = 0L;
-		for (int i = 0; i < num; i++)
+		int count = shift > 32 ? 32 : shift;
+		long holes = 0;
+		for (int i = 0; i < count; i++)
 		{
-			int num3 = 31 - i;
-			uint a = _latest - 1 - (uint)num3;
-			if ((_bits & (uint)(1 << num3)) == 0 && Seq.Diff(a, _first) >= 0)
+			int bit = 31 - i;
+			uint seq = _latest - 1 - (uint)bit;
+			if ((_bits & (uint)(1 << bit)) == 0 && Seq.Diff(seq, _first) >= 0)
 			{
-				num2++;
+				holes++;
 			}
 		}
-		return num2;
+		return holes;
 	}
 }

@@ -11,9 +11,9 @@ public sealed class AckTracker
 		public readonly long SentMs = sentMs;
 	}
 
-	private readonly Dictionary<uint, Entry> _inFlight = new Dictionary<uint, Entry>();
+	private readonly Dictionary<uint, Entry> _inFlight = new();
 
-	private readonly List<uint> _scratch = new List<uint>();
+	private readonly List<uint> _scratch = new();
 
 	public int InFlight => _inFlight.Count;
 
@@ -21,10 +21,7 @@ public sealed class AckTracker
 
 	public long Failed { get; private set; }
 
-	public void Register(uint seq, ulong token, long nowMs)
-	{
-		_inFlight[seq] = new Entry(token, nowMs);
-	}
+	public void Register(uint seq, ulong token, long nowMs) => _inFlight[seq] = new Entry(token, nowMs);
 
 	public void ProcessAck(uint ackSeq, uint ackBits, List<ulong> acked)
 	{
@@ -49,26 +46,26 @@ public sealed class AckTracker
 			return;
 		}
 		_scratch.Clear();
-		foreach (KeyValuePair<uint, Entry> item in _inFlight)
+		foreach (var pair in _inFlight)
 		{
-			if ((newestAck.HasValue && Seq.Diff(newestAck.Value, item.Key) > 32) || nowMs - item.Value.SentMs > timeoutMs)
+			if ((newestAck.HasValue && Seq.Diff(newestAck.Value, pair.Key) > 32) || nowMs - pair.Value.SentMs > timeoutMs)
 			{
-				_scratch.Add(item.Key);
+				_scratch.Add(pair.Key);
 			}
 		}
-		foreach (uint item2 in _scratch)
+		foreach (uint seq in _scratch)
 		{
-			failed.Add(_inFlight[item2].Token);
-			_inFlight.Remove(item2);
+			failed.Add(_inFlight[seq].Token);
+			_inFlight.Remove(seq);
 			Failed++;
 		}
 	}
 
 	private void TryAck(uint seq, List<ulong> acked)
 	{
-		if (_inFlight.Remove(seq, out var value))
+		if (_inFlight.Remove(seq, out var entry))
 		{
-			acked.Add(value.Token);
+			acked.Add(entry.Token);
 			Acked++;
 		}
 	}

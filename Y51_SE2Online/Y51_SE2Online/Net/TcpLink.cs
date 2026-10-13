@@ -25,12 +25,7 @@ public sealed class TcpLink : IPacketLink, IDisposable
 
 		public long StartedMs;
 
-		public readonly Queue<byte[]>[] Out = new Queue<byte[]>[3]
-		{
-			new Queue<byte[]>(),
-			new Queue<byte[]>(),
-			new Queue<byte[]>()
-		};
+		public readonly Queue<byte[]>[] Out = { new(), new(), new() };
 
 		public byte[]? Current;
 
@@ -51,7 +46,7 @@ public sealed class TcpLink : IPacketLink, IDisposable
 		public long LingerDeadlineMs;
 	}
 
-	public const ulong SyntheticIdBase = 9079256848778919936uL;
+	public const ulong SyntheticIdBase = 0x7E00000000000000uL;
 
 	private const byte CloseLane = byte.MaxValue;
 
@@ -61,11 +56,11 @@ public sealed class TcpLink : IPacketLink, IDisposable
 
 	private readonly Func<long> _clock;
 
-	private readonly Dictionary<uint, Conn> _conns = new Dictionary<uint, Conn>();
+	private readonly Dictionary<uint, Conn> _conns = new();
 
-	private readonly List<Conn> _lingering = new List<Conn>();
+	private readonly List<Conn> _lingering = new();
 
-	private readonly List<LinkEvent> _pendingEvents = new List<LinkEvent>();
+	private readonly List<LinkEvent> _pendingEvents = new();
 
 	private Socket? _listener;
 
@@ -92,41 +87,35 @@ public sealed class TcpLink : IPacketLink, IDisposable
 		_clock = clock ?? new Func<long>(MpClock.NowMs);
 	}
 
-	public static ulong SyntheticId(uint conn)
-	{
-		return 0x7E00000000000000uL | (ulong)conn;
-	}
+	public static ulong SyntheticId(uint conn) => SyntheticIdBase | conn;
 
-	public static bool IsSyntheticId(ulong id)
-	{
-		return (id & 0xFF00000000000000uL) == 9079256848778919936L;
-	}
+	public static bool IsSyntheticId(ulong id) => (id & 0xFF00000000000000uL) == SyntheticIdBase;
 
 	public static IPEndPoint ParseEndpoint(string text, IPAddress defaultAddress)
 	{
 		text = text.Trim();
-		if (int.TryParse(text, out var result))
+		if (int.TryParse(text, out var port))
 		{
-			return new IPEndPoint(defaultAddress, CheckPort(result));
+			return new IPEndPoint(defaultAddress, CheckPort(port));
 		}
-		if (IPEndPoint.TryParse(text, out IPEndPoint result2) && result2.Port != 0)
+		if (IPEndPoint.TryParse(text, out var parsed) && parsed.Port != 0)
 		{
-			return new IPEndPoint(result2.Address, CheckPort(result2.Port));
+			return new IPEndPoint(parsed.Address, CheckPort(parsed.Port));
 		}
-		int num = text.LastIndexOf(':');
-		if (num > 0 && int.TryParse(text.AsSpan(num + 1), out var result3))
+		int colon = text.LastIndexOf(':');
+		if (colon > 0 && int.TryParse(text.AsSpan(colon + 1), out var hostPort))
 		{
-			string text2 = text.Substring(0, num);
-			if (text2.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+			string host = text.Substring(0, colon);
+			if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
 			{
-				return new IPEndPoint(IPAddress.Loopback, CheckPort(result3));
+				return new IPEndPoint(IPAddress.Loopback, CheckPort(hostPort));
 			}
-			if (IPAddress.TryParse(text2, out IPAddress address))
+			if (IPAddress.TryParse(host, out var address))
 			{
-				return new IPEndPoint(address, CheckPort(result3));
+				return new IPEndPoint(address, CheckPort(hostPort));
 			}
 		}
-		throw new FormatException("'" + text + "' is not <port>, <ipv4>:<port> or localhost:<port>");
+		throw new FormatException($"'{text}' is not <port>, <ipv4>:<port> or localhost:<port>");
 	}
 
 	private static int CheckPort(int p)
@@ -140,7 +129,7 @@ public sealed class TcpLink : IPacketLink, IDisposable
 
 	public void Listen(IPEndPoint endpoint)
 	{
-		Socket socket = new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+		var socket = new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 		try
 		{
 			socket.ExclusiveAddressUse = true;
@@ -157,12 +146,12 @@ public sealed class TcpLink : IPacketLink, IDisposable
 
 	public uint Connect(IPEndPoint endpoint)
 	{
-		Socket socket = new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
+		var socket = new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
 		{
 			NoDelay = true,
 			Blocking = false
 		};
-		Conn conn = new Conn
+		var conn = new Conn
 		{
 			Id = _nextId++,
 			Socket = socket,
@@ -175,13 +164,14 @@ public sealed class TcpLink : IPacketLink, IDisposable
 			socket.Connect(endpoint);
 			conn.Connected = true;
 		}
-		catch (SocketException ex) when ((uint)(ex.SocketErrorCode - 10035) <= 2u)
+		catch (SocketException ex) when ((uint)(ex.SocketErrorCode - SocketError.WouldBlock) <= 2u)
 		{
+			// WouldBlock, InProgress or AlreadyInProgress: the non-blocking connect is still in flight.
 		}
-		catch (SocketException ex2)
+		catch (SocketException ex)
 		{
 			socket.Dispose();
-			_pendingEvents.Add(new LinkEvent(LinkEventKind.Disconnected, conn.Id, SyntheticId(conn.Id), (int)ex2.SocketErrorCode, $"connect to {endpoint} failed: {ex2.SocketErrorCode}"));
+			_pendingEvents.Add(new LinkEvent(LinkEventKind.Disconnected, conn.Id, SyntheticId(conn.Id), (int)ex.SocketErrorCode, $"connect to {endpoint} failed: {ex.SocketErrorCode}"));
 			return conn.Id;
 		}
 		_conns[conn.Id] = conn;
@@ -193,10 +183,7 @@ public sealed class TcpLink : IPacketLink, IDisposable
 		return conn.Id;
 	}
 
-	public bool HasConnection(uint conn)
-	{
-		return _conns.ContainsKey(conn);
-	}
+	public bool HasConnection(uint conn) => _conns.ContainsKey(conn);
 
 	public void Pump(List<LinkEvent> events, List<LinkMessage> messages)
 	{
@@ -211,28 +198,25 @@ public sealed class TcpLink : IPacketLink, IDisposable
 		}
 		Accept(events);
 		long now = _clock();
-		foreach (Conn item in Snapshot())
+		foreach (var c in Snapshot())
 		{
-			if (!item.Connected)
+			if (!c.Connected)
 			{
-				PollConnect(item, events, now);
+				PollConnect(c, events, now);
 			}
-			else if (Flush(item, events))
+			else if (Flush(c, events))
 			{
-				Receive(item, events, messages);
+				Receive(c, events, messages);
 			}
 		}
 		ServiceLingering(now);
 	}
 
-	private List<Conn> Snapshot()
-	{
-		return new List<Conn>(_conns.Values);
-	}
+	private List<Conn> Snapshot() => new(_conns.Values);
 
 	private void Accept(List<LinkEvent> events)
 	{
-		if (_listener == null)
+		if (_listener is null)
 		{
 			return;
 		}
@@ -247,18 +231,18 @@ public sealed class TcpLink : IPacketLink, IDisposable
 			{
 				break;
 			}
-			catch (SocketException ex2)
+			catch (SocketException ex)
 			{
-				_log.WarnOnce("tcp-accept-" + ex2.SocketErrorCode, $"tcp: accept failed: {ex2.SocketErrorCode}");
+				_log.WarnOnce("tcp-accept-" + ex.SocketErrorCode, $"tcp: accept failed: {ex.SocketErrorCode}");
 				break;
 			}
 			socket.Blocking = false;
 			socket.NoDelay = true;
-			Conn conn = new Conn
+			var conn = new Conn
 			{
 				Id = _nextId++,
 				Socket = socket,
-				Endpoint = (socket.RemoteEndPoint?.ToString() ?? "?"),
+				Endpoint = socket.RemoteEndPoint?.ToString() ?? "?",
 				StartedMs = _clock()
 			};
 			_conns[conn.Id] = conn;
@@ -279,8 +263,8 @@ public sealed class TcpLink : IPacketLink, IDisposable
 			}
 			if (c.Socket.Poll(0, SelectMode.SelectError))
 			{
-				SocketError socketError = (SocketError)(int)c.Socket.GetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Error);
-				Fail(c, events, (int)socketError, $"connect to {c.Endpoint} failed: {socketError}");
+				var error = (SocketError)(int)c.Socket.GetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Error);
+				Fail(c, events, (int)error, $"connect to {c.Endpoint} failed: {error}");
 				return;
 			}
 		}
@@ -314,29 +298,29 @@ public sealed class TcpLink : IPacketLink, IDisposable
 	{
 		while (true)
 		{
-			if (c.Current == null)
+			if (c.Current is null)
 			{
 				c.Current = NextMessage(c);
 				c.CurrentOffset = 0;
-				if (c.Current == null)
+				if (c.Current is null)
 				{
 					return true;
 				}
 			}
-			int num;
+			int sent;
 			try
 			{
-				num = c.Socket.Send(c.Current, c.CurrentOffset, c.Current.Length - c.CurrentOffset, SocketFlags.None);
+				sent = c.Socket.Send(c.Current, c.CurrentOffset, c.Current.Length - c.CurrentOffset, SocketFlags.None);
 			}
 			catch (SocketException ex) when (ex.SocketErrorCode == SocketError.WouldBlock)
 			{
 				return true;
 			}
-			catch (SocketException ex2)
+			catch (SocketException ex)
 			{
-				if (events != null)
+				if (events is not null)
 				{
-					Fail(c, events, (int)ex2.SocketErrorCode, $"send failed: {ex2.SocketErrorCode}");
+					Fail(c, events, (int)ex.SocketErrorCode, $"send failed: {ex.SocketErrorCode}");
 				}
 				return false;
 			}
@@ -344,8 +328,8 @@ public sealed class TcpLink : IPacketLink, IDisposable
 			{
 				return false;
 			}
-			c.CurrentOffset += num;
-			c.PendingBytes -= num;
+			c.CurrentOffset += sent;
+			c.PendingBytes -= sent;
 			if (c.CurrentOffset < c.Current.Length)
 			{
 				break;
@@ -357,10 +341,9 @@ public sealed class TcpLink : IPacketLink, IDisposable
 
 	private static byte[]? NextMessage(Conn c)
 	{
-		Channel[] serviceOrder = LanePlan.ServiceOrder;
-		foreach (Channel channel in serviceOrder)
+		foreach (var channel in LanePlan.ServiceOrder)
 		{
-			Queue<byte[]> queue = c.Out[(uint)channel];
+			var queue = c.Out[(uint)channel];
 			if (queue.Count > 0)
 			{
 				return queue.Dequeue();
@@ -377,77 +360,77 @@ public sealed class TcpLink : IPacketLink, IDisposable
 			{
 				Array.Resize(ref c.Recv, c.Recv.Length * 2);
 			}
-			int num;
+			int received;
 			try
 			{
-				num = c.Socket.Receive(c.Recv, c.RecvLen, c.Recv.Length - c.RecvLen, SocketFlags.None);
+				received = c.Socket.Receive(c.Recv, c.RecvLen, c.Recv.Length - c.RecvLen, SocketFlags.None);
 			}
 			catch (SocketException ex) when (ex.SocketErrorCode == SocketError.WouldBlock)
 			{
 				break;
 			}
-			catch (SocketException ex2)
+			catch (SocketException ex)
 			{
-				SocketError socketErrorCode = ex2.SocketErrorCode;
-				bool flag = (uint)(socketErrorCode - 10053) <= 1u;
-				bool byPeer = flag;
-				Closed(c, events, byPeer, (int)ex2.SocketErrorCode, $"receive failed: {ex2.SocketErrorCode}");
+				bool byPeer = (uint)(ex.SocketErrorCode - SocketError.ConnectionAborted) <= 1u; // aborted or reset
+				Closed(c, events, byPeer, (int)ex.SocketErrorCode, $"receive failed: {ex.SocketErrorCode}");
 				break;
 			}
-			if (num == 0)
+			if (received == 0)
 			{
 				Parse(c, messages);
 				Closed(c, events, byPeer: true, c.RemoteCloseCode, c.RemoteCloseReason ?? "connection closed by peer");
 				break;
 			}
-			c.RecvLen += num;
+			c.RecvLen += received;
 			if (!Parse(c, messages))
 			{
-				Closed(c, events, byPeer: false, 1001, "bad tcp framing");
+				Closed(c, events, byPeer: false, DisconnectCodes.ProtocolError, "bad tcp framing");
 				break;
 			}
 		}
 	}
 
+	// Frame: [u32 length of lane + payload][u8 lane][payload]
 	private bool Parse(Conn c, List<LinkMessage> messages)
 	{
-		int i;
-		int num;
-		for (i = 0; c.RecvLen - i >= 4; i += 4 + num)
+		int offset;
+		int length;
+		for (offset = 0; c.RecvLen - offset >= 4; offset += 4 + length)
 		{
-			num = (int)BinaryPrimitives.ReadUInt32LittleEndian(c.Recv.AsSpan(i));
-			if (num < 1 || num > MaxMessageSize + 1)
+			length = (int)BinaryPrimitives.ReadUInt32LittleEndian(c.Recv.AsSpan(offset));
+			if (length < 1 || length > MaxMessageSize + 1)
 			{
 				return false;
 			}
-			if (c.RecvLen - i - 4 < num)
+			if (c.RecvLen - offset - 4 < length)
 			{
 				break;
 			}
-			byte b = c.Recv[i + 4];
-			Span<byte> span = c.Recv.AsSpan(i + 5, num - 1);
-			if (b == byte.MaxValue)
+			byte lane = c.Recv[offset + 4];
+			var payload = c.Recv.AsSpan(offset + HeaderBytes, length - 1);
+			if (lane == CloseLane)
 			{
-				if (span.Length >= 6)
+				// Close payload: [i32 code][u16 reason length][utf8 reason]
+				if (payload.Length >= 6)
 				{
-					c.RemoteCloseCode = BinaryPrimitives.ReadInt32LittleEndian(span);
-					int val = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(4));
-					c.RemoteCloseReason = Encoding.UTF8.GetString(span.Slice(6, Math.Min(val, span.Length - 6)));
+					c.RemoteCloseCode = BinaryPrimitives.ReadInt32LittleEndian(payload);
+					int reasonLength = BinaryPrimitives.ReadUInt16LittleEndian(payload.Slice(4));
+					c.RemoteCloseReason = Encoding.UTF8.GetString(payload.Slice(6, Math.Min(reasonLength, payload.Length - 6)));
 				}
 			}
 			else
 			{
-				if (b > 2)
+				if (lane > (byte)Channel.State)
 				{
 					return false;
 				}
-				messages.Add(new LinkMessage(c.Id, span.ToArray()));
+				messages.Add(new LinkMessage(c.Id, payload.ToArray()));
 			}
 		}
-		if (i > 0)
+		if (offset > 0)
 		{
-			Buffer.BlockCopy(c.Recv, i, c.Recv, 0, c.RecvLen - i);
-			c.RecvLen -= i;
+			Buffer.BlockCopy(c.Recv, offset, c.Recv, 0, c.RecvLen - offset);
+			c.RecvLen -= offset;
 		}
 		return true;
 	}
@@ -463,7 +446,7 @@ public sealed class TcpLink : IPacketLink, IDisposable
 
 	public LinkSendResult Send(uint conn, Channel channel, bool reliable, ReadOnlySpan<byte> frame)
 	{
-		if (!_conns.TryGetValue(conn, out Conn value) || !value.Connected)
+		if (!_conns.TryGetValue(conn, out var c) || !c.Connected)
 		{
 			return LinkSendResult.Failed;
 		}
@@ -471,97 +454,98 @@ public sealed class TcpLink : IPacketLink, IDisposable
 		{
 			return LinkSendResult.Failed;
 		}
-		byte[] array = new byte[5 + frame.Length];
-		BinaryPrimitives.WriteUInt32LittleEndian(array, (uint)(frame.Length + 1));
-		array[4] = (byte)channel;
-		frame.CopyTo(array.AsSpan(5));
-		value.Out[(uint)channel].Enqueue(array);
-		value.PendingBytes += array.Length;
-		Flush(value, _pendingEvents);
+		byte[] message = new byte[HeaderBytes + frame.Length];
+		BinaryPrimitives.WriteUInt32LittleEndian(message, (uint)(frame.Length + 1));
+		message[4] = (byte)channel;
+		frame.CopyTo(message.AsSpan(HeaderBytes));
+		c.Out[(uint)channel].Enqueue(message);
+		c.PendingBytes += message.Length;
+		Flush(c, _pendingEvents);
 		return LinkSendResult.Ok;
 	}
 
 	public int GetPendingReliableBytes(uint conn)
 	{
-		if (!_conns.TryGetValue(conn, out Conn value))
+		if (!_conns.TryGetValue(conn, out var c))
 		{
 			return int.MaxValue;
 		}
-		return value.PendingBytes;
+		return c.PendingBytes;
 	}
 
 	public void Close(uint conn, int code, string reason, bool linger)
 	{
-		if (!_conns.Remove(conn, out Conn value))
+		if (!_conns.Remove(conn, out var c))
 		{
 			return;
 		}
-		byte[] bytes = Encoding.UTF8.GetBytes((reason.Length > 200) ? reason.Substring(0, 200) : reason);
-		byte[] array = new byte[11 + bytes.Length];
-		BinaryPrimitives.WriteUInt32LittleEndian(array, (uint)(7 + bytes.Length));
-		array[4] = byte.MaxValue;
-		BinaryPrimitives.WriteInt32LittleEndian(array.AsSpan(5), code);
-		BinaryPrimitives.WriteUInt16LittleEndian(array.AsSpan(9), (ushort)bytes.Length);
-		bytes.CopyTo(array.AsSpan(11));
-		if (!value.Connected)
+		byte[] reasonBytes = Encoding.UTF8.GetBytes(reason.Length > 200 ? reason.Substring(0, 200) : reason);
+		byte[] message = new byte[11 + reasonBytes.Length];
+		BinaryPrimitives.WriteUInt32LittleEndian(message, (uint)(7 + reasonBytes.Length));
+		message[4] = CloseLane;
+		BinaryPrimitives.WriteInt32LittleEndian(message.AsSpan(5), code);
+		BinaryPrimitives.WriteUInt16LittleEndian(message.AsSpan(9), (ushort)reasonBytes.Length);
+		reasonBytes.CopyTo(message.AsSpan(11));
+		if (!c.Connected)
 		{
-			Dispose(value.Socket);
+			Dispose(c.Socket);
 			return;
 		}
 		if (!linger)
 		{
-			for (int i = 0; i < value.Out.Length; i++)
+			for (int i = 0; i < c.Out.Length; i++)
 			{
-				value.Out[i].Clear();
+				c.Out[i].Clear();
 			}
-			if (value.Current != null && value.CurrentOffset == 0)
+			// A message already partly on the wire has to finish, or the peer loses framing.
+			if (c.Current is not null && c.CurrentOffset == 0)
 			{
-				value.Current = null;
+				c.Current = null;
 			}
 		}
-		value.Out[1].Enqueue(array);
-		value.PendingBytes += array.Length;
-		value.Lingering = true;
-		value.LingerDeadlineMs = _clock() + (linger ? LingerTimeoutMs : 200);
-		_lingering.Add(value);
+		c.Out[(int)Channel.Bulk].Enqueue(message);
+		c.PendingBytes += message.Length;
+		c.Lingering = true;
+		c.LingerDeadlineMs = _clock() + (linger ? LingerTimeoutMs : 200);
+		_lingering.Add(c);
 		ServiceLingering(_clock());
 	}
 
 	private void ServiceLingering(long now)
 	{
-		for (int num = _lingering.Count - 1; num >= 0; num--)
+		for (int i = _lingering.Count - 1; i >= 0; i--)
 		{
-			Conn conn = _lingering[num];
-			if (!Flush(conn, null) || (conn.Current == null && conn.Out[0].Count == 0 && conn.Out[1].Count == 0 && conn.Out[2].Count == 0) || now > conn.LingerDeadlineMs)
+			var c = _lingering[i];
+			if (!Flush(c, null) || (c.Current == null && c.Out[0].Count == 0 && c.Out[1].Count == 0 && c.Out[2].Count == 0) || now > c.LingerDeadlineMs)
 			{
 				try
 				{
-					conn.Socket.Shutdown(SocketShutdown.Both);
+					c.Socket.Shutdown(SocketShutdown.Both);
 				}
 				catch (Exception)
 				{
 				}
-				Dispose(conn.Socket);
-				_lingering.RemoveAt(num);
+				Dispose(c.Socket);
+				_lingering.RemoveAt(i);
 			}
 		}
 	}
 
 	public IEnumerable<(uint Conn, string Endpoint, bool Connected)> Connections()
 	{
-		foreach (Conn value in _conns.Values)
+		foreach (var c in _conns.Values)
 		{
-			yield return (Conn: value.Id, Endpoint: value.Endpoint, Connected: value.Connected);
+			yield return (c.Id, c.Endpoint, c.Connected);
 		}
 	}
 
 	public string QuickStatus(uint conn)
 	{
-		if (!_conns.TryGetValue(conn, out Conn value))
+		if (!_conns.TryGetValue(conn, out var c))
 		{
 			return "no such connection";
 		}
-		return $"route=TCP {value.Endpoint} pending={value.PendingBytes} B queued ctl/state/bulk={value.Out[0].Count}/{value.Out[2].Count}/{value.Out[1].Count}";
+		return $"route=TCP {c.Endpoint} pending={c.PendingBytes} B queued ctl/state/bulk={c.Out[0].Count}/{c.Out[2].Count}/{c.Out[1].Count}";
 	}
 
 	private static void Dispose(Socket s)
@@ -581,19 +565,19 @@ public sealed class TcpLink : IPacketLink, IDisposable
 		{
 			return;
 		}
-		foreach (uint item in new List<uint>(_conns.Keys))
+		foreach (uint conn in new List<uint>(_conns.Keys))
 		{
-			Close(item, 1004, "shutting down", linger: true);
+			Close(conn, DisconnectCodes.Shutdown, "shutting down", linger: true);
 		}
-		long num = _clock() + 500;
-		while (_lingering.Count > 0 && _clock() < num)
+		long deadline = _clock() + 500;
+		while (_lingering.Count > 0 && _clock() < deadline)
 		{
 			ServiceLingering(_clock());
 			Thread.Sleep(1);
 		}
 		ServiceLingering(long.MaxValue);
 		_disposed = true;
-		if (_listener != null)
+		if (_listener is not null)
 		{
 			Dispose(_listener);
 		}

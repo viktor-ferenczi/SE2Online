@@ -9,13 +9,13 @@ public sealed class LoopbackLink : IPacketLink, IDisposable
 
 	private readonly Random _rng;
 
-	private readonly Queue<LinkEvent> _events = new Queue<LinkEvent>();
+	private readonly Queue<LinkEvent> _events = new();
 
-	private readonly List<(uint Conn, byte[] Data, bool Reliable)> _inbound = new List<(uint, byte[], bool)>();
+	private readonly List<(uint Conn, byte[] Data, bool Reliable)> _inbound = new();
 
-	private readonly Dictionary<uint, (LoopbackLink Peer, uint PeerConn, ulong RemoteId)> _conns = new Dictionary<uint, (LoopbackLink, uint, ulong)>();
+	private readonly Dictionary<uint, (LoopbackLink Peer, uint PeerConn, ulong RemoteId)> _conns = new();
 
-	private readonly Dictionary<uint, int> _pendingReliable = new Dictionary<uint, int>();
+	private readonly Dictionary<uint, int> _pendingReliable = new();
 
 	private static uint _nextConn = 100u;
 
@@ -51,13 +51,13 @@ public sealed class LoopbackLink : IPacketLink, IDisposable
 	{
 		lock (a._sync)
 		{
-			uint num = _nextConn++;
-			uint num2 = _nextConn++;
-			a._conns[num] = (b, num2, b.LocalId);
-			b._conns[num2] = (a, num, a.LocalId);
-			a._events.Enqueue(new LinkEvent(LinkEventKind.Connected, num, b.LocalId));
-			b._events.Enqueue(new LinkEvent(LinkEventKind.Connected, num2, a.LocalId));
-			return (ConnA: num, ConnB: num2);
+			uint connA = _nextConn++;
+			uint connB = _nextConn++;
+			a._conns[connA] = (b, connB, b.LocalId);
+			b._conns[connB] = (a, connA, a.LocalId);
+			a._events.Enqueue(new LinkEvent(LinkEventKind.Connected, connA, b.LocalId));
+			b._events.Enqueue(new LinkEvent(LinkEventKind.Connected, connB, a.LocalId));
+			return (connA, connB);
 		}
 	}
 
@@ -69,12 +69,12 @@ public sealed class LoopbackLink : IPacketLink, IDisposable
 			{
 				events.Add(_events.Dequeue());
 			}
-			foreach (var (num, array, flag) in _inbound)
+			foreach (var (conn, data, reliable) in _inbound)
 			{
-				messages.Add(new LinkMessage(num, array));
-				if (flag && _conns.TryGetValue(num, out (LoopbackLink, uint, ulong) value))
+				messages.Add(new LinkMessage(conn, data));
+				if (reliable && _conns.TryGetValue(conn, out var link))
 				{
-					value.Item1.AddPending(value.Item2, -array.Length);
+					link.Peer.AddPending(link.PeerConn, -data.Length);
 				}
 			}
 			_inbound.Clear();
@@ -85,7 +85,7 @@ public sealed class LoopbackLink : IPacketLink, IDisposable
 	{
 		lock (_sync)
 		{
-			if (!_conns.TryGetValue(conn, out (LoopbackLink, uint, ulong) value))
+			if (!_conns.TryGetValue(conn, out var link))
 			{
 				return LinkSendResult.Failed;
 			}
@@ -103,21 +103,22 @@ public sealed class LoopbackLink : IPacketLink, IDisposable
 				DroppedUnreliable++;
 				return LinkSendResult.Ok;
 			}
-			byte[] array = frame.ToArray();
-			List<(uint, byte[], bool)> inbound = value.Item1._inbound;
+			byte[] data = frame.ToArray();
+			var inbound = link.Peer._inbound;
 			if (!reliable && UnreliableReorderRate > 0.0 && inbound.Count > 0 && _rng.NextDouble() < UnreliableReorderRate)
 			{
-				int index = inbound.Count - 1;
-				if (!inbound[index].Item3)
+				// Only jump ahead of an unreliable message; reliable ones must keep their order.
+				int last = inbound.Count - 1;
+				if (!inbound[last].Reliable)
 				{
-					inbound.Insert(index, (value.Item2, array, false));
+					inbound.Insert(last, (link.PeerConn, data, false));
 					return LinkSendResult.Ok;
 				}
 			}
-			inbound.Add((value.Item2, array, reliable));
+			inbound.Add((link.PeerConn, data, reliable));
 			if (reliable)
 			{
-				AddPending(conn, array.Length);
+				AddPending(conn, data.Length);
 			}
 			return LinkSendResult.Ok;
 		}
@@ -125,12 +126,12 @@ public sealed class LoopbackLink : IPacketLink, IDisposable
 
 	private void AddPending(uint conn, int delta)
 	{
-		_pendingReliable.TryGetValue(conn, out var value);
-		value += delta;
-		_pendingReliable[conn] = value;
-		if (value > MaxPendingReliableSeen)
+		_pendingReliable.TryGetValue(conn, out var pending);
+		pending += delta;
+		_pendingReliable[conn] = pending;
+		if (pending > MaxPendingReliableSeen)
 		{
-			MaxPendingReliableSeen = value;
+			MaxPendingReliableSeen = pending;
 		}
 	}
 
@@ -138,8 +139,7 @@ public sealed class LoopbackLink : IPacketLink, IDisposable
 	{
 		lock (_sync)
 		{
-			int value;
-			return _pendingReliable.TryGetValue(conn, out value) ? value : 0;
+			return _pendingReliable.TryGetValue(conn, out int pending) ? pending : 0;
 		}
 	}
 
@@ -147,18 +147,18 @@ public sealed class LoopbackLink : IPacketLink, IDisposable
 	{
 		lock (_sync)
 		{
-			if (!_conns.Remove(conn, out (LoopbackLink, uint, ulong) value))
+			if (!_conns.Remove(conn, out var link))
 			{
 				return;
 			}
 			_pendingReliable.Remove(conn);
 			if (!linger)
 			{
-				_inbound.RemoveAll(((uint Conn, byte[] Data, bool Reliable) m) => m.Conn == conn);
+				_inbound.RemoveAll(m => m.Conn == conn);
 			}
-			value.Item1._conns.Remove(value.Item2);
-			value.Item1._pendingReliable.Remove(value.Item2);
-			value.Item1._events.Enqueue(new LinkEvent(LinkEventKind.Disconnected, value.Item2, LocalId, code, reason, byPeer: true));
+			link.Peer._conns.Remove(link.PeerConn);
+			link.Peer._pendingReliable.Remove(link.PeerConn);
+			link.Peer._events.Enqueue(new LinkEvent(LinkEventKind.Disconnected, link.PeerConn, LocalId, code, reason, byPeer: true));
 		}
 	}
 
@@ -166,11 +166,11 @@ public sealed class LoopbackLink : IPacketLink, IDisposable
 	{
 		lock (_sync)
 		{
-			if (_conns.Remove(conn, out (LoopbackLink, uint, ulong) value))
+			if (_conns.Remove(conn, out var link))
 			{
-				_events.Enqueue(new LinkEvent(LinkEventKind.Disconnected, conn, value.Item3, code, reason));
-				value.Item1._conns.Remove(value.Item2);
-				value.Item1._events.Enqueue(new LinkEvent(LinkEventKind.Disconnected, value.Item2, LocalId, code, reason));
+				_events.Enqueue(new LinkEvent(LinkEventKind.Disconnected, conn, link.RemoteId, code, reason));
+				link.Peer._conns.Remove(link.PeerConn);
+				link.Peer._events.Enqueue(new LinkEvent(LinkEventKind.Disconnected, link.PeerConn, LocalId, code, reason));
 			}
 		}
 	}
@@ -179,9 +179,9 @@ public sealed class LoopbackLink : IPacketLink, IDisposable
 	{
 		lock (_sync)
 		{
-			foreach (uint item in new List<uint>(_conns.Keys))
+			foreach (uint conn in new List<uint>(_conns.Keys))
 			{
-				Close(item, 1004, "dispose", linger: false);
+				Close(conn, DisconnectCodes.Shutdown, "dispose", linger: false);
 			}
 		}
 	}
