@@ -28,21 +28,21 @@ public static class LookMath
 			return Quaternion.CreateFromAxisAngle(Up, 0f - rotation.Y);
 		case LookMode.Jetpack:
 		{
-			float num = 1f / 60f * maxTorque;
-			Quaternion identity = Quaternion.Identity;
+			float scale = 1f / 60f * maxTorque;
+			Quaternion step = Quaternion.Identity;
 			if (rotation.X != 0f)
 			{
-				identity *= Quaternion.CreateFromAxisAngle(Left, rotation.X * num);
+				step *= Quaternion.CreateFromAxisAngle(Left, rotation.X * scale);
 			}
 			if (rotation.Y != 0f)
 			{
-				identity *= Quaternion.CreateFromAxisAngle(Down, rotation.Y * num);
+				step *= Quaternion.CreateFromAxisAngle(Down, rotation.Y * scale);
 			}
 			if (rotation.Z != 0f)
 			{
-				identity *= Quaternion.CreateFromAxisAngle(Forward, rotation.Z * num);
+				step *= Quaternion.CreateFromAxisAngle(Forward, rotation.Z * scale);
 			}
-			return identity;
+			return step;
 		}
 		default:
 			return Quaternion.Identity;
@@ -51,49 +51,45 @@ public static class LookMath
 
 	public static float AngleDeg(Quaternion a, Quaternion b)
 	{
-		Quaternion quaternion = Quaternion.Conjugate(Quaternion.Normalize(a)) * Quaternion.Normalize(b);
-		float y = MathF.Sqrt(quaternion.X * quaternion.X + quaternion.Y * quaternion.Y + quaternion.Z * quaternion.Z);
-		return 2f * MathF.Atan2(y, MathF.Abs(quaternion.W)) * (180f / (float)Math.PI);
+		Quaternion d = Quaternion.Conjugate(Quaternion.Normalize(a)) * Quaternion.Normalize(b);
+		float sinHalf = MathF.Sqrt(d.X * d.X + d.Y * d.Y + d.Z * d.Z);
+		return 2f * MathF.Atan2(sinHalf, MathF.Abs(d.W)) * (180f / (float)Math.PI);
 	}
 
 	public static (float Deg, Quaternion Point, float U) ClosestOnArc(Quaternion a, Quaternion b, Quaternion h)
 	{
-		Vector4 vector = Vector4.Normalize(V(a));
-		Vector4 vector2 = Vector4.Normalize(V(b));
-		Vector4 vector3 = Vector4.Normalize(V(h));
-		float num = Vector4.Dot(vector, vector2);
-		if (num < 0f)
+		Vector4 va = Vector4.Normalize(V(a));
+		Vector4 vb = Vector4.Normalize(V(b));
+		Vector4 vh = Vector4.Normalize(V(h));
+		float cos = Vector4.Dot(va, vb);
+		if (cos < 0f)
 		{
-			vector2 = -vector2;
-			num = 0f - num;
+			vb = -vb;
+			cos = 0f - cos;
 		}
-		if (Vector4.Dot(vector3, vector) + Vector4.Dot(vector3, vector2) < 0f)
+		if (Vector4.Dot(vh, va) + Vector4.Dot(vh, vb) < 0f)
 		{
-			vector3 = -vector3;
+			vh = -vh;
 		}
-		Vector4 vector4 = vector2 - num * vector;
-		float num2 = vector4.Length();
-		if (num2 < 1E-05f || num > 0.9999999f)
+		// Unit vector orthogonal to a in the a-b plane: the arc from a to b is cos(t) a + sin(t) ortho.
+		Vector4 perp = vb - cos * va;
+		float perpLength = perp.Length();
+		if (perpLength < 1E-05f || cos > 0.9999999f)
 		{
-			return (Deg: AngleDeg(Q(vector), Q(vector3)), Point: Q(vector), U: 0f);
+			return (Deg: AngleDeg(Q(va), Q(vh)), Point: Q(va), U: 0f);
 		}
-		Vector4 vector5 = vector4 / num2;
-		float num3 = MathF.Atan2(Vector4.Dot(vector2, vector5), num);
-		if (!(num3 > 0f))
+		Vector4 ortho = perp / perpLength;
+		float arc = MathF.Atan2(Vector4.Dot(vb, ortho), cos);
+		if (!(arc > 0f))
 		{
-			return (Deg: AngleDeg(Q(vector), Q(vector3)), Point: Q(vector), U: 0f);
+			return (Deg: AngleDeg(Q(va), Q(vh)), Point: Q(va), U: 0f);
 		}
-		float num4 = Math.Clamp(MathF.Atan2(Vector4.Dot(vector3, vector5), Vector4.Dot(vector3, vector)), 0f, num3);
-		Quaternion quaternion = Q(MathF.Cos(num4) * vector + MathF.Sin(num4) * vector5);
-		return (Deg: AngleDeg(quaternion, Q(vector3)), Point: quaternion, U: (num3 > 0f) ? (num4 / num3) : 0f);
-		static Quaternion Q(Vector4 v)
-		{
-			return new Quaternion(v.X, v.Y, v.Z, v.W);
-		}
-		static Vector4 V(Quaternion q)
-		{
-			return new Vector4(q.X, q.Y, q.Z, q.W);
-		}
+		float along = Math.Clamp(MathF.Atan2(Vector4.Dot(vh, ortho), Vector4.Dot(vh, va)), 0f, arc);
+		Quaternion point = Q(MathF.Cos(along) * va + MathF.Sin(along) * ortho);
+		return (Deg: AngleDeg(point, Q(vh)), Point: point, U: arc > 0f ? along / arc : 0f);
+
+		static Quaternion Q(Vector4 v) => new Quaternion(v.X, v.Y, v.Z, v.W);
+		static Vector4 V(Quaternion q) => new Vector4(q.X, q.Y, q.Z, q.W);
 	}
 
 	public static Quaternion Canonical(Quaternion q)
@@ -117,31 +113,20 @@ public static class LookMath
 
 	public static (double X, double Y, double Z, Quaternion O) ReadTransform(ReadOnlySpan<byte> b)
 	{
-		double item = BinaryPrimitives.ReadDoubleLittleEndian(b);
-		ref ReadOnlySpan<byte> reference = ref b;
-		double item2 = BinaryPrimitives.ReadDoubleLittleEndian(reference.Slice(8, reference.Length - 8));
-		reference = ref b;
-		double item3 = BinaryPrimitives.ReadDoubleLittleEndian(reference.Slice(16, reference.Length - 16));
-		reference = ref b;
-		float x = BinaryPrimitives.ReadSingleLittleEndian(reference.Slice(24, reference.Length - 24));
-		reference = ref b;
-		float y = BinaryPrimitives.ReadSingleLittleEndian(reference.Slice(28, reference.Length - 28));
-		reference = ref b;
-		float z = BinaryPrimitives.ReadSingleLittleEndian(reference.Slice(32, reference.Length - 32));
-		reference = ref b;
-		return (X: item, Y: item2, Z: item3, O: new Quaternion(x, y, z, BinaryPrimitives.ReadSingleLittleEndian(reference.Slice(36, reference.Length - 36))));
+		return (BinaryPrimitives.ReadDoubleLittleEndian(b), BinaryPrimitives.ReadDoubleLittleEndian(b[8..]), BinaryPrimitives.ReadDoubleLittleEndian(b[16..]),
+			new Quaternion(BinaryPrimitives.ReadSingleLittleEndian(b[24..]), BinaryPrimitives.ReadSingleLittleEndian(b[28..]), BinaryPrimitives.ReadSingleLittleEndian(b[32..]), BinaryPrimitives.ReadSingleLittleEndian(b[36..])));
 	}
 
 	public static byte[] WriteTransform(double x, double y, double z, Quaternion o)
 	{
-		byte[] array = new byte[40];
-		BinaryPrimitives.WriteDoubleLittleEndian(array, x);
-		BinaryPrimitives.WriteDoubleLittleEndian(array.AsSpan(8), y);
-		BinaryPrimitives.WriteDoubleLittleEndian(array.AsSpan(16), z);
-		BinaryPrimitives.WriteSingleLittleEndian(array.AsSpan(24), o.X);
-		BinaryPrimitives.WriteSingleLittleEndian(array.AsSpan(28), o.Y);
-		BinaryPrimitives.WriteSingleLittleEndian(array.AsSpan(32), o.Z);
-		BinaryPrimitives.WriteSingleLittleEndian(array.AsSpan(36), o.W);
-		return array;
+		byte[] buffer = new byte[40];
+		BinaryPrimitives.WriteDoubleLittleEndian(buffer, x);
+		BinaryPrimitives.WriteDoubleLittleEndian(buffer.AsSpan(8), y);
+		BinaryPrimitives.WriteDoubleLittleEndian(buffer.AsSpan(16), z);
+		BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(24), o.X);
+		BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(28), o.Y);
+		BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(32), o.Z);
+		BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(36), o.W);
+		return buffer;
 	}
 }

@@ -29,9 +29,9 @@ public sealed class TransformSmoother
 
 	private readonly object _sync = new object();
 
-	private readonly Dictionary<uint, Track> _tracks = new Dictionary<uint, Track>();
+	private readonly Dictionary<uint, Track> _tracks = new();
 
-	private readonly HashSet<uint> _raw = new HashSet<uint>();
+	private readonly HashSet<uint> _raw = new();
 
 	private long _hostHigh = -1L;
 
@@ -81,29 +81,9 @@ public sealed class TransformSmoother
 
 	public int MarginMs { get; set; } = 12;
 
-	public double CurrentDelayMs
-	{
-		get
-		{
-			if (!(_curDelay < 0.0))
-			{
-				return _curDelay;
-			}
-			return DelayMs;
-		}
-	}
+	public double CurrentDelayMs => _curDelay < 0.0 ? DelayMs : _curDelay;
 
-	public double TargetDelayMs
-	{
-		get
-		{
-			if (!(_targetDelay < 0.0))
-			{
-				return _targetDelay;
-			}
-			return DelayMs;
-		}
-	}
+	public double TargetDelayMs => _targetDelay < 0.0 ? DelayMs : _targetDelay;
 
 	// Covers late packets only. A longer gap is a server stall: the host's simulation paused and resumes where it
 	// stopped, so coasting through it put bodies ahead and they were pulled back; holding matches what happened.
@@ -119,12 +99,12 @@ public sealed class TransformSmoother
 		{
 			lock (_sync)
 			{
-				int num = 0;
-				foreach (Track value in _tracks.Values)
+				int count = 0;
+				foreach (Track track in _tracks.Values)
 				{
-					num += (value.Active ? 1 : 0);
+					count += track.Active ? 1 : 0;
 				}
-				return num;
+				return count;
 			}
 		}
 	}
@@ -149,28 +129,24 @@ public sealed class TransformSmoother
 	{
 		lock (_sync)
 		{
-			if (!_tracks.TryGetValue(netId, out Track value) || !value.Active || value.Samples.Count < 2)
+			if (!_tracks.TryGetValue(netId, out Track track) || !track.Active || track.Samples.Count < 2)
 			{
 				return 0.0;
 			}
-			List<(long T, byte[] V)> samples = value.Samples;
-			(long T, byte[] V) tuple = samples[samples.Count - 1];
-			long item = tuple.T;
-			byte[] item2 = tuple.V;
-			List<(long T, byte[] V)> samples2 = value.Samples;
-			var (num, array) = samples2[samples2.Count - 2];
-			if (item <= num || item - num > 1000)
+			var (t1, b) = track.Samples[^1];
+			var (t0, a) = track.Samples[^2];
+			if (t1 <= t0 || t1 - t0 > 1000)
 			{
 				return 0.0;
 			}
-			double num2 = 0.0;
+			double distSq = 0.0;
 			for (int i = 0; i < 3; i++)
 			{
-				double num3 = BinaryPrimitives.ReadDoubleLittleEndian(array.AsSpan(i * 8));
-				double num4 = BinaryPrimitives.ReadDoubleLittleEndian(item2.AsSpan(i * 8));
-				num2 += (num4 - num3) * (num4 - num3);
+				double from = BinaryPrimitives.ReadDoubleLittleEndian(a.AsSpan(i * 8));
+				double to = BinaryPrimitives.ReadDoubleLittleEndian(b.AsSpan(i * 8));
+				distSq += (to - from) * (to - from);
 			}
-			return Math.Sqrt(num2) * 1000.0 / (double)(item - num);
+			return Math.Sqrt(distSq) * 1000.0 / (t1 - t0);
 		}
 	}
 
@@ -178,17 +154,17 @@ public sealed class TransformSmoother
 	{
 		lock (_sync)
 		{
-			if (!_tracks.TryGetValue(netId, out Track value) || !value.Active || value.Samples.Count < 2)
+			if (!_tracks.TryGetValue(netId, out Track track) || !track.Active || track.Samples.Count < 2)
 			{
 				return 0.0;
 			}
-			var (t1, b) = value.Samples[value.Samples.Count - 1];
-			var (t0, a) = value.Samples[value.Samples.Count - 2];
+			var (t1, b) = track.Samples[track.Samples.Count - 1];
+			var (t0, a) = track.Samples[track.Samples.Count - 2];
 			if (t1 <= t0 || t1 - t0 > 1000)
 			{
 				return 0.0;
 			}
-			return (double)LookMath.AngleDeg(LookMath.ReadTransform(a).O, LookMath.ReadTransform(b).O) * 1000.0 / (double)(t1 - t0);
+			return (double)LookMath.AngleDeg(LookMath.ReadTransform(a).O, LookMath.ReadTransform(b).O) * 1000.0 / (t1 - t0);
 		}
 	}
 
@@ -213,11 +189,11 @@ public sealed class TransformSmoother
 				return false;
 			}
 			long t = Unwrap(hostMs);
-			long num = NoteClockLocked(t, localNowMs);
+			long arrivalOffset = NoteClockLocked(t, localNowMs);
 			if (localNowMs != _lastLateArrivalMs)
 			{
 				_lastLateArrivalMs = localNowMs;
-				_late[_lateHead] = (int)Math.Clamp(num - _offset, 0L, 5000L);
+				_late[_lateHead] = (int)Math.Clamp(arrivalOffset - _offset, 0L, 5000L);
 				_lateHead = (_lateHead + 1) % _late.Length;
 				if (_lateCount < _late.Length)
 				{
@@ -225,31 +201,31 @@ public sealed class TransformSmoother
 				}
 			}
 			Samples++;
-			if (!_tracks.TryGetValue(netId, out Track value2))
+			if (!_tracks.TryGetValue(netId, out Track track))
 			{
-				value2 = (_tracks[netId] = new Track());
+				track = _tracks[netId] = new Track();
 			}
-			value2.LastArrivalMs = localNowMs;
-			value2.Active = true;
-			value2.FinalApplied = false;
-			List<(long, byte[])> samples = value2.Samples;
+			track.LastArrivalMs = localNowMs;
+			track.Active = true;
+			track.FinalApplied = false;
+			var samples = track.Samples;
 			if (samples.Count > 0)
 			{
-				if (t <= samples[samples.Count - 1].Item1)
+				if (t <= samples[samples.Count - 1].T)
 				{
-					if (t == samples[samples.Count - 1].Item1)
+					if (t == samples[samples.Count - 1].T)
 					{
 						samples[samples.Count - 1] = (t, value);
 						return true;
 					}
-					if (t < samples[0].Item1)
+					if (t < samples[0].T)
 					{
 						Dropped++;
 						return false;
 					}
 					Late++;
-					int index = samples.FindIndex(((long T, byte[] V) s) => s.T >= t);
-					if (samples[index].Item1 == t)
+					int index = samples.FindIndex(s => s.T >= t);
+					if (samples[index].T == t)
 					{
 						samples[index] = (t, value);
 					}
@@ -290,9 +266,9 @@ public sealed class TransformSmoother
 
 	private long NoteClockLocked(long t, long localNowMs)
 	{
-		long num = localNowMs - t;
-		_offset = _offsetWindow.Add(localNowMs, num);
-		return num;
+		long arrivalOffset = localNowMs - t;
+		_offset = _offsetWindow.Add(localNowMs, arrivalOffset);
+		return arrivalOffset;
 	}
 
 	private long Unwrap(uint hostMs)
@@ -302,13 +278,13 @@ public sealed class TransformSmoother
 			_hostHigh = hostMs;
 			return _hostHigh;
 		}
-		int num = (int)hostMs - (int)_hostHigh;
-		long num2 = _hostHigh + num;
-		if (num2 > _hostHigh)
+		int delta = (int)hostMs - (int)_hostHigh;
+		long unwrapped = _hostHigh + delta;
+		if (unwrapped > _hostHigh)
 		{
-			_hostHigh = num2;
+			_hostHigh = unwrapped;
 		}
-		return num2;
+		return unwrapped;
 	}
 
 	public void Remove(uint netId)
@@ -329,56 +305,54 @@ public sealed class TransformSmoother
 			}
 			UpdateDelay(localNowMs);
 			// Fractional: rounding the playout time to whole milliseconds jittered fast bodies by speed x 0.5 ms.
-			double num = localNowMs - (_playOffset + CurrentDelayMs);
-			foreach (var (item, track2) in _tracks)
+			double playTime = localNowMs - (_playOffset + CurrentDelayMs);
+			foreach (var (netId, track) in _tracks)
 			{
-				if (!track2.Active || track2.Samples.Count == 0)
+				if (!track.Active || track.Samples.Count == 0)
 				{
 					continue;
 				}
-				List<(long, byte[])> samples = track2.Samples;
-				(long, byte[]) tuple = samples[samples.Count - 1];
-				if ((double)(num - tuple.Item1) > CurrentDelayMs + (double)MaxExtrapolateMs + (double)IdleMs)
+				var samples = track.Samples;
+				var newest = samples[samples.Count - 1];
+				if ((double)(playTime - newest.T) > CurrentDelayMs + MaxExtrapolateMs + IdleMs)
 				{
-					if (!track2.FinalApplied)
+					if (!track.FinalApplied)
 					{
-						output.Add((item, tuple.Item2));
-						track2.FinalApplied = true;
+						output.Add((netId, newest.V));
+						track.FinalApplied = true;
 					}
-					track2.Active = false;
+					track.Active = false;
 				}
-				else if (num <= samples[0].Item1)
+				else if (playTime <= samples[0].T)
 				{
-					output.Add((item, samples[0].Item2));
+					output.Add((netId, samples[0].V));
 					Held++;
 				}
-				else if (num >= tuple.Item1)
+				else if (playTime >= newest.T)
 				{
-					double num3 = num - tuple.Item1;
-					if (samples.Count >= 2 && num3 <= MaxExtrapolateMs)
+					double ahead = playTime - newest.T;
+					if (samples.Count >= 2 && ahead <= MaxExtrapolateMs)
 					{
-						(long, byte[]) tuple2 = samples[samples.Count - 2];
-						double num4 = tuple.Item1 - tuple2.Item1;
-						if (num4 > 0.0 && num4 <= 250.0)
+						var previous = samples[samples.Count - 2];
+						double interval = newest.T - previous.T;
+						if (interval > 0.0 && interval <= 250.0)
 						{
-							output.Add((item, Settle(track2, localNowMs, Lerp(tuple2.Item2, tuple.Item2, 1.0 + (double)num3 / num4, 1.0 + (double)MaxExtrapolateMs / num4), extrapolated: true)));
+							output.Add((netId, Settle(track, localNowMs, Lerp(previous.V, newest.V, 1.0 + (double)ahead / interval, 1.0 + (double)MaxExtrapolateMs / interval), extrapolated: true)));
 							Extrapolated++;
 							continue;
 						}
 					}
-					output.Add((item, Settle(track2, localNowMs, tuple.Item2, extrapolated: false)));
+					output.Add((netId, Settle(track, localNowMs, newest.V, extrapolated: false)));
 					Held++;
 				}
 				else
 				{
-					int i;
-					for (i = 1; i < samples.Count && samples[i].Item1 < num; i++)
-					{
-					}
-					(long, byte[]) tuple3 = samples[i - 1];
-					(long, byte[]) tuple4 = samples[i];
-					double t = ((tuple4.Item1 == tuple3.Item1) ? 1.0 : ((double)(num - tuple3.Item1) / (double)(tuple4.Item1 - tuple3.Item1)));
-					output.Add((item, Settle(track2, localNowMs, Lerp(tuple3.Item2, tuple4.Item2, t), extrapolated: false)));
+					int i = 1;
+					while (i < samples.Count && samples[i].T < playTime) i++;
+					var from = samples[i - 1];
+					var to = samples[i];
+					double t = to.T == from.T ? 1.0 : (double)(playTime - from.T) / (double)(to.T - from.T);
+					output.Add((netId, Settle(track, localNowMs, Lerp(from.V, to.V, t), extrapolated: false)));
 					Interpolated++;
 					if (i - 1 > 0)
 					{
@@ -391,14 +365,14 @@ public sealed class TransformSmoother
 
 	private void UpdateDelay(long now)
 	{
-		double num = ((_lastSampleMs == long.MinValue) ? 0 : Math.Clamp(now - _lastSampleMs, 0L, 100L));
+		double elapsed = _lastSampleMs == long.MinValue ? 0 : Math.Clamp(now - _lastSampleMs, 0L, 100L);
 		_lastSampleMs = now;
 		// Offset estimate steps +-2 ms; stepping playout with it jerks every remote body by speed x step, so slew instead.
 		double drift = _offset - _playOffset;
-		_playOffset = (double.IsNaN(_playOffset) || Math.Abs(drift) > 250.0) ? _offset : (_playOffset + Math.Clamp(drift, -0.02 * num, 0.02 * num));
+		_playOffset = (double.IsNaN(_playOffset) || Math.Abs(drift) > 250.0) ? _offset : (_playOffset + Math.Clamp(drift, -0.02 * elapsed, 0.02 * elapsed));
 		if (!Adaptive)
 		{
-			_curDelay = (_targetDelay = DelayMs);
+			_curDelay = _targetDelay = DelayMs;
 			return;
 		}
 		if (_curDelay < 0.0)
@@ -410,19 +384,19 @@ public sealed class TransformSmoother
 			_lastTargetMs = now;
 			if (_lateCount >= 30)
 			{
-				int[] array = new int[_lateCount];
-				Array.Copy(_late, array, _lateCount);
-				Array.Sort(array);
-				int num2 = array[Math.Min(array.Length - 1, (int)((double)array.Length * 0.97))];
-				_targetDelay = Math.Clamp(num2 + MarginMs, DelayMs, Math.Max(DelayMs, MaxDelayMs));
+				int[] sorted = new int[_lateCount];
+				Array.Copy(_late, sorted, _lateCount);
+				Array.Sort(sorted);
+				int p97 = sorted[Math.Min(sorted.Length - 1, (int)(sorted.Length * 0.97))];
+				_targetDelay = Math.Clamp(p97 + MarginMs, DelayMs, Math.Max(DelayMs, MaxDelayMs));
 			}
 			else
 			{
 				_targetDelay = DelayMs;
 			}
 		}
-		double num3 = _targetDelay - _curDelay;
-		_curDelay += ((num3 > 0.0) ? Math.Min(num3, 0.06 * num) : Math.Max(num3, -0.03 * num));
+		double step = _targetDelay - _curDelay;
+		_curDelay += step > 0.0 ? Math.Min(step, 0.06 * elapsed) : Math.Max(step, -0.03 * elapsed);
 		if (_curDelay > MaxDelaySeenMs)
 		{
 			MaxDelaySeenMs = _curDelay;
@@ -465,49 +439,47 @@ public sealed class TransformSmoother
 		return shown;
 	}
 
-	public static byte[] Lerp(byte[] a, byte[] b, double t)
-	{
-		return Lerp(a, b, t, 2.0);
-	}
+	public static byte[] Lerp(byte[] a, byte[] b, double t) => Lerp(a, b, t, 2.0);
 
 	public static byte[] Lerp(byte[] a, byte[] b, double t, double maxT)
 	{
 		t = Math.Clamp(t, 0.0, Math.Max(1.0, maxT));
-		byte[] array = new byte[40];
+		byte[] result = new byte[40];
 		for (int i = 0; i < 3; i++)
 		{
-			double num = BinaryPrimitives.ReadDoubleLittleEndian(a.AsSpan(i * 8));
-			double num2 = BinaryPrimitives.ReadDoubleLittleEndian(b.AsSpan(i * 8));
-			BinaryPrimitives.WriteDoubleLittleEndian(array.AsSpan(i * 8), num + (num2 - num) * t);
+			double from = BinaryPrimitives.ReadDoubleLittleEndian(a.AsSpan(i * 8));
+			double to = BinaryPrimitives.ReadDoubleLittleEndian(b.AsSpan(i * 8));
+			BinaryPrimitives.WriteDoubleLittleEndian(result.AsSpan(i * 8), from + (to - from) * t);
 		}
-		Span<float> span = stackalloc float[4];
-		Span<float> span2 = stackalloc float[4];
-		Span<float> span3 = stackalloc float[4];
-		float num3 = 0f;
-		for (int j = 0; j < 4; j++)
+		Span<float> qa = stackalloc float[4];
+		Span<float> qb = stackalloc float[4];
+		Span<float> q = stackalloc float[4];
+		float dot = 0f;
+		for (int i = 0; i < 4; i++)
 		{
-			span[j] = BinaryPrimitives.ReadSingleLittleEndian(a.AsSpan(24 + j * 4));
-			span2[j] = BinaryPrimitives.ReadSingleLittleEndian(b.AsSpan(24 + j * 4));
-			num3 += span[j] * span2[j];
+			qa[i] = BinaryPrimitives.ReadSingleLittleEndian(a.AsSpan(24 + i * 4));
+			qb[i] = BinaryPrimitives.ReadSingleLittleEndian(b.AsSpan(24 + i * 4));
+			dot += qa[i] * qb[i];
 		}
-		float num4 = ((!(num3 < 0f)) ? 1 : (-1));
-		float num5 = (float)Math.Min(t, 1.5);
-		double num6 = 0.0;
-		for (int k = 0; k < 4; k++)
+		// q and -q are the same rotation; flip b so the blend takes the short way round.
+		float sign = !(dot < 0f) ? 1 : -1;
+		float qt = (float)Math.Min(t, 1.5);
+		double length = 0.0;
+		for (int i = 0; i < 4; i++)
 		{
-			span3[k] = span[k] + (num4 * span2[k] - span[k]) * num5;
-			num6 += (double)span3[k] * (double)span3[k];
+			q[i] = qa[i] + (sign * qb[i] - qa[i]) * qt;
+			length += (double)q[i] * q[i];
 		}
-		num6 = Math.Sqrt(num6);
-		for (int l = 0; l < 4; l++)
+		length = Math.Sqrt(length);
+		for (int i = 0; i < 4; i++)
 		{
-			BinaryPrimitives.WriteSingleLittleEndian(array.AsSpan(24 + l * 4), (num6 > 1E-09) ? ((float)((double)span3[l] / num6)) : span2[l]);
+			BinaryPrimitives.WriteSingleLittleEndian(result.AsSpan(24 + i * 4), length > 1E-09 ? (float)(q[i] / length) : qb[i]);
 		}
-		return array;
+		return result;
 	}
 
 	public string Describe()
 	{
-		return $"smoothing {((!Enabled) ? "off" : (Adaptive ? $"{CurrentDelayMs:0} ms (adaptive {DelayMs}-{MaxDelayMs}, target {TargetDelayMs:0}, max {MaxDelaySeenMs:0})" : $"{DelayMs} ms"))}: {ActiveCount} moving, samples {Samples}, interpolated {Interpolated}, extrapolated {Extrapolated}, held {Held}, late {Late}, too old (dropped) {Dropped}";
+		return $"smoothing {(!Enabled ? "off" : Adaptive ? $"{CurrentDelayMs:0} ms (adaptive {DelayMs}-{MaxDelayMs}, target {TargetDelayMs:0}, max {MaxDelaySeenMs:0})" : $"{DelayMs} ms")}: {ActiveCount} moving, samples {Samples}, interpolated {Interpolated}, extrapolated {Extrapolated}, held {Held}, late {Late}, too old (dropped) {Dropped}";
 	}
 }

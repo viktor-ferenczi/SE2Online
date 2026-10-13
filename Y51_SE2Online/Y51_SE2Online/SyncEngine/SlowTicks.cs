@@ -26,7 +26,7 @@ internal static class SlowTicks
 
 	private static int[] _count = new int[1024];
 
-	private static readonly List<int> Touched = new List<int>();
+	private static readonly List<int> Touched = new();
 
 	private static long _start;
 
@@ -46,10 +46,10 @@ internal static class SlowTicks
 		{
 			return;
 		}
-		foreach (int item in Touched)
+		foreach (int stub in Touched)
 		{
-			_time[item] = 0L;
-			_count[item] = 0;
+			_time[stub] = 0L;
+			_count[stub] = 0;
 		}
 		Touched.Clear();
 		_commands = 0;
@@ -85,61 +85,56 @@ internal static class SlowTicks
 		}
 		_inTick = false;
 		Ticks++;
-		double num = Ms(Stopwatch.GetTimestamp() - _start);
-		if (!(num < 50.0))
+		double tickMs = Ms(Stopwatch.GetTimestamp() - _start);
+		if (tickMs < ThresholdMs)
 		{
-			if (Note != null)
-			{
-				LoadingTicks++;
-			}
-			else
-			{
-				Slow++;
-				WorstMs = Math.Max(WorstMs, num);
-			}
-			long num2 = MpClock.NowMs();
-			if (Logged < 20 || num2 - _lastLogMs >= 1000)
-			{
-				_lastLogMs = num2;
-				Logged++;
-				Log?.Info(Describe(num));
-			}
+			return;
+		}
+		if (Note != null)
+		{
+			LoadingTicks++;
+		}
+		else
+		{
+			Slow++;
+			WorstMs = Math.Max(WorstMs, tickMs);
+		}
+		long nowMs = MpClock.NowMs();
+		if (Logged < 20 || nowMs - _lastLogMs >= 1000)
+		{
+			_lastLogMs = nowMs;
+			Logged++;
+			Log?.Info(Describe(tickMs));
 		}
 	}
 
 	internal static string Describe(double tickMs)
 	{
-		long num = 0L;
-		foreach (int item in Touched)
+		long replayTicks = 0L;
+		foreach (int stub in Touched)
 		{
-			num += _time[item];
+			replayTicks += _time[stub];
 		}
-		IEnumerable<string> values = from s in Touched.OrderByDescending((int s) => _time[s]).Take(5)
+		IEnumerable<string> slowest = from s in Touched.OrderByDescending(s => _time[s]).Take(5)
 			select $"{Name(s)} x{_count[s]} {Ms(_time[s]):0.0} ms";
 		if (Note != null)
 		{
-			return $"client: long tick {tickMs:0} ms: {Note} (before the player has control; replay {Ms(num):0} ms in {_commands} commands)";
+			return $"client: long tick {tickMs:0} ms: {Note} (before the player has control; replay {Ms(replayTicks):0} ms in {_commands} commands)";
 		}
-		return $"client: SLOW TICK {tickMs:0} ms (replay {Ms(num):0} ms in {_commands} commands; the rest is the game's own tick): {string.Join(", ", values)}";
+		return $"client: SLOW TICK {tickMs:0} ms (replay {Ms(replayTicks):0} ms in {_commands} commands; the rest is the game's own tick): {string.Join(", ", slowest)}";
 	}
 
 	private static string Name(int stub)
 	{
-		CommandLayout commandLayout = CommandLayouts.ByStub(stub);
-		if (commandLayout == null)
+		CommandLayout layout = CommandLayouts.ByStub(stub);
+		if (layout == null)
 		{
 			return $"stub {stub}";
 		}
-		return ClientUpstream.Short(commandLayout.Name);
+		return ClientUpstream.Short(layout.Name);
 	}
 
-	private static double Ms(long ticks)
-	{
-		return (double)ticks * 1000.0 / (double)Stopwatch.Frequency;
-	}
+	private static double Ms(long ticks) => (double)ticks * 1000.0 / Stopwatch.Frequency;
 
-	public static string Describe()
-	{
-		return $"slow client ticks (>{50.0:0} ms) {Slow} of {Ticks}, worst {WorstMs:0} ms (+{LoadingTicks} long world-part builds while joining)";
-	}
+	public static string Describe() => $"slow client ticks (>{ThresholdMs:0} ms) {Slow} of {Ticks}, worst {WorstMs:0} ms (+{LoadingTicks} long world-part builds while joining)";
 }

@@ -22,7 +22,7 @@ public sealed class LookPredictor
 
 	private int _histCount;
 
-	private readonly Queue<long> _snaps = new Queue<long>();
+	private readonly Queue<long> _snaps = new();
 
 	private Quaternion _p = Quaternion.Identity;
 
@@ -127,47 +127,20 @@ public sealed class LookPredictor
 
 	public string? LastEvent { get; set; }
 
-	public bool Intercepts
-	{
-		get
-		{
-			if (NetId != 0)
-			{
-				if (_mode == LookMode.Off || Disabled)
-				{
-					return _flushHost;
-				}
-				return true;
-			}
-			return false;
-		}
-	}
+	public bool Intercepts => NetId != 0 && (_mode != LookMode.Off && !Disabled || _flushHost);
 
 	public Quaternion Predicted => _p;
 
-	public Quaternion Shown
-	{
-		get
-		{
-			if (!_hasP)
-			{
-				return _ho;
-			}
-			return _p;
-		}
-	}
+	public Quaternion Shown => _hasP ? _p : _ho;
 
-	public LookPredictor(IMpLog log)
-	{
-		_log = log;
-	}
+	public LookPredictor(IMpLog log) => _log = log;
 
 	public void Begin(uint netId, long now)
 	{
 		NetId = netId;
 		Epoch++;
-		TotalX = (TotalY = (TotalZ = 0.0));
-		_hasP = (_hasHost = (_flushHost = false));
+		TotalX = TotalY = TotalZ = 0.0;
+		_hasP = _hasHost = _flushHost = false;
 		_histCount = 0;
 		_snaps.Clear();
 		_mode = LookMode.Off;
@@ -182,7 +155,7 @@ public sealed class LookPredictor
 		{
 			_log.Info($"client: look prediction ended for NetworkId {NetId} ({why}); {Describe()}");
 			NetId = 0u;
-			_hasP = (_hasHost = (_flushHost = false));
+			_hasP = _hasHost = _flushHost = false;
 			_histCount = 0;
 			_mode = LookMode.Off;
 		}
@@ -192,7 +165,7 @@ public sealed class LookPredictor
 	{
 		if (mode != _mode && NetId != 0)
 		{
-			LookMode mode2 = _mode;
+			LookMode previous = _mode;
 			_mode = mode;
 			ModeChanges++;
 			_settleUntil = now + SettleMs;
@@ -202,7 +175,7 @@ public sealed class LookPredictor
 				_hasP = false;
 				_histCount = 0;
 			}
-			else if (mode2 == LookMode.Off)
+			else if (previous == LookMode.Off)
 			{
 				_hasP = false;
 				_histCount = 0;
@@ -214,15 +187,12 @@ public sealed class LookPredictor
 		}
 	}
 
-	private static string ModeText(LookMode m)
+	private static string ModeText(LookMode m) => m switch
 	{
-		return m switch
-		{
-			LookMode.Ground => "walking: body yaw predicted (head pitch is the game's own client-side LookOffsetData)", 
-			LookMode.Jetpack => "jetpack: pitch, yaw and roll predicted about the centre of mass", 
-			_ => "not on foot (seated / no character): the host's orientation is applied as is", 
-		};
-	}
+		LookMode.Ground => "walking: body yaw predicted (head pitch is the game's own client-side LookOffsetData)",
+		LookMode.Jetpack => "jetpack: pitch, yaw and roll predicted about the centre of mass",
+		_ => "not on foot (seated / no character): the host's orientation is applied as is",
+	};
 
 	public bool Step(long now, Vector3 rotation, float maxTorque, Vector3 centerOfMass)
 	{
@@ -246,13 +216,13 @@ public sealed class LookPredictor
 		{
 			return false;
 		}
-		Quaternion quaternion = LookMath.Step(_mode, rotation, maxTorque);
-		if (quaternion == Quaternion.Identity)
+		Quaternion step = LookMath.Step(_mode, rotation, maxTorque);
+		if (step == Quaternion.Identity)
 		{
 			return false;
 		}
-		_p = Quaternion.Normalize(_p * quaternion);
-		LastStep = quaternion;
+		_p = Quaternion.Normalize(_p * step);
+		LastStep = step;
 		Push(now, _p);
 		return true;
 	}
@@ -283,69 +253,74 @@ public sealed class LookPredictor
 			}
 			return true;
 		}
-		bool flag = ExtraLagMs > 0.0;
-		int num = (flag ? ((int)Math.Clamp((LagMs + ExtraLagMs) * 1.25 + 50.0, MinWindowMs, Math.Min(HistoryMs, 700))) : ((int)Math.Clamp(LagMs * 1.5 + 50.0, MinWindowMs, HistoryMs)));
-		float num2 = LookMath.AngleDeg(_ho, _p);
-		Quaternion value = _p;
-		long num3 = now;
-		float num4 = 0f;
-		(long, Quaternion) tuple = (now, _p);
+		bool hasExtraLag = ExtraLagMs > 0.0;
+		int windowMs = hasExtraLag
+			? (int)Math.Clamp((LagMs + ExtraLagMs) * 1.25 + 50.0, MinWindowMs, Math.Min(HistoryMs, 700))
+			: (int)Math.Clamp(LagMs * 1.5 + 50.0, MinWindowMs, HistoryMs);
+		// Find where in the recent prediction history the host's orientation fits best: that is the moment it reflects.
+		float errDeg = LookMath.AngleDeg(_ho, _p);
+		Quaternion matched = _p;
+		long matchedAt = now;
+		float turnRate = 0f;
+		(long T, Quaternion Q) newer = (now, _p);
 		for (int i = 0; i < _histCount; i++)
 		{
-			var (num5, quaternion) = _hist[(_histHead - 1 - i + _hist.Length) % _hist.Length];
-			if (now - tuple.Item1 > num)
+			var (t, q) = _hist[(_histHead - 1 - i + _hist.Length) % _hist.Length];
+			if (now - newer.T > windowMs)
 			{
 				break;
 			}
-			var (num6, quaternion2, num7) = LookMath.ClosestOnArc(quaternion, tuple.Item2, _ho);
-			if (num6 < num2)
+			var (arcErr, onArc, fraction) = LookMath.ClosestOnArc(q, newer.Q, _ho);
+			if (arcErr < errDeg)
 			{
-				num2 = num6;
-				value = quaternion2;
-				num3 = num5 + (long)Math.Round((float)(tuple.Item1 - num5) * num7);
-				long num8 = Math.Max(1L, tuple.Item1 - num5);
-				num4 = LookMath.AngleDeg(quaternion, tuple.Item2) / (float)num8;
+				errDeg = arcErr;
+				matched = onArc;
+				matchedAt = t + (long)Math.Round((float)(newer.T - t) * fraction);
+				long spanMs = Math.Max(1L, newer.T - t);
+				turnRate = LookMath.AngleDeg(q, newer.Q) / (float)spanMs;
 			}
-			tuple = (num5, quaternion);
+			newer = (t, q);
 		}
-		if (num2 < 0.5f && num4 >= 0.03f)
+		if (errDeg < 0.5f && turnRate >= 0.03f)
 		{
-			LagMs = (flag ? Math.Clamp(LagMs + 0.1 * ((double)(now - num3) - ExtraLagMs - LagMs), 30.0, 350.0) : (LagMs + 0.1 * ((double)(now - num3) - LagMs)));
+			LagMs = hasExtraLag
+				? Math.Clamp(LagMs + 0.1 * ((double)(now - matchedAt) - ExtraLagMs - LagMs), 30.0, 350.0)
+				: LagMs + 0.1 * ((double)(now - matchedAt) - LagMs);
 			LagSamples++;
 		}
-		LastErrDeg = num2;
-		bool flag2 = now < _settleUntil;
-		if (num2 <= AgreeDeg)
+		LastErrDeg = errDeg;
+		bool settling = now < _settleUntil;
+		if (errDeg <= AgreeDeg)
 		{
 			Agreed++;
 			return true;
 		}
-		if (num2 >= (flag2 ? SettleSnapDeg : SnapDeg))
+		if (errDeg >= (settling ? SettleSnapDeg : SnapDeg))
 		{
-			Snap(now, num2, flag2 ? "while the movement state settles" : "the host turned the character by itself (teleport, collision, seat)");
-			LastEvent = "snapped " + num2.ToString("0.0", CultureInfo.InvariantCulture) + " deg";
+			Snap(now, errDeg, settling ? "while the movement state settles" : "the host turned the character by itself (teleport, collision, seat)");
+			LastEvent = "snapped " + errDeg.ToString("0.0", CultureInfo.InvariantCulture) + " deg";
 			return true;
 		}
-		float num9 = Math.Clamp((num2 - DeadbandDeg) / ((flag2 ? SettleSnapDeg : SnapDeg) - DeadbandDeg), 0f, 1f);
-		float amount = (flag2 ? BlendMax : (BlendMin + (BlendMax - BlendMin) * num9));
-		Quaternion quaternion3 = LookMath.Canonical(Quaternion.Normalize(_ho * Quaternion.Conjugate(value)));
-		Quaternion quaternion4 = Quaternion.Normalize(Quaternion.Slerp(Quaternion.Identity, quaternion3, amount));
-		_p = Quaternion.Normalize(quaternion4 * _p);
-		for (int j = 0; j < _histCount; j++)
+		float severity = Math.Clamp((errDeg - DeadbandDeg) / ((settling ? SettleSnapDeg : SnapDeg) - DeadbandDeg), 0f, 1f);
+		float amount = settling ? BlendMax : BlendMin + (BlendMax - BlendMin) * severity;
+		Quaternion correction = LookMath.Canonical(Quaternion.Normalize(_ho * Quaternion.Conjugate(matched)));
+		Quaternion partial = Quaternion.Normalize(Quaternion.Slerp(Quaternion.Identity, correction, amount));
+		_p = Quaternion.Normalize(partial * _p);
+		for (int i = 0; i < _histCount; i++)
 		{
-			int num10 = (_histHead - 1 - j + _hist.Length) % _hist.Length;
-			_hist[num10].Q = Quaternion.Normalize(quaternion4 * _hist[num10].Q);
+			int index = (_histHead - 1 - i + _hist.Length) % _hist.Length;
+			_hist[index].Q = Quaternion.Normalize(partial * _hist[index].Q);
 		}
-		if (num2 <= DeadbandDeg)
+		if (errDeg <= DeadbandDeg)
 		{
 			Agreed++;
 			return true;
 		}
 		Blended++;
-		LastEvent = "corrected " + num2.ToString("0.0", CultureInfo.InvariantCulture) + " deg x" + amount.ToString("0.00", CultureInfo.InvariantCulture);
-		if (num2 > MaxBlendDeg)
+		LastEvent = "corrected " + errDeg.ToString("0.0", CultureInfo.InvariantCulture) + " deg x" + amount.ToString("0.00", CultureInfo.InvariantCulture);
+		if (errDeg > MaxBlendDeg)
 		{
-			MaxBlendDeg = num2;
+			MaxBlendDeg = errDeg;
 		}
 		return true;
 	}
@@ -357,15 +332,12 @@ public sealed class LookPredictor
 		_ho = Quaternion.Normalize(delta * _ho);
 		for (int i = 0; i < _histCount; i++)
 		{
-			int num = (_histHead - 1 - i + _hist.Length) % _hist.Length;
-			_hist[num].Q = Quaternion.Normalize(delta * _hist[num].Q);
+			int index = (_histHead - 1 - i + _hist.Length) % _hist.Length;
+			_hist[index].Q = Quaternion.Normalize(delta * _hist[index].Q);
 		}
 	}
 
-	public void SeedLag(double pingMs)
-	{
-		LagMs = Math.Clamp(pingMs + 67.0, 30.0, 350.0);
-	}
+	public void SeedLag(double pingMs) => LagMs = Math.Clamp(pingMs + 67.0, 30.0, 350.0);
 
 	private void Adopt(long now, Quaternion o)
 	{
@@ -428,8 +400,8 @@ public sealed class LookPredictor
 		{
 			return LookMath.WriteTransform(_hx, _hy, _hz, _ho);
 		}
-		Vector3 vector = ((_mode == LookMode.Jetpack) ? LookMath.PivotShift(_ho, _p, _com) : Vector3.Zero);
-		return LookMath.WriteTransform(_hx + (double)vector.X, _hy + (double)vector.Y, _hz + (double)vector.Z, _p);
+		Vector3 shift = _mode == LookMode.Jetpack ? LookMath.PivotShift(_ho, _p, _com) : Vector3.Zero;
+		return LookMath.WriteTransform(_hx + shift.X, _hy + shift.Y, _hz + shift.Z, _p);
 	}
 
 	public string Describe()

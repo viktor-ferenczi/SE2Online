@@ -20,9 +20,9 @@ namespace Y51_SE2Online.SyncEngine;
 
 internal sealed class PermissionGate
 {
-	private readonly ConcurrentDictionary<Type, string?> _storyValidator = new ConcurrentDictionary<Type, string>();
+	private readonly ConcurrentDictionary<Type, string?> _storyValidator = new();
 
-	private readonly ConcurrentDictionary<string, string?> _signalValidator = new ConcurrentDictionary<string, string>(StringComparer.Ordinal);
+	private readonly ConcurrentDictionary<string, string?> _signalValidator = new(StringComparer.Ordinal);
 
 	public long Refused;
 
@@ -38,30 +38,16 @@ internal sealed class PermissionGate
 	{
 		if (buildIndex)
 		{
-			Task.Run(() =>
-			{
-				BuildIndex(typeof(PermissionsSessionComponent).Assembly);
-			});
+			Task.Run(() => BuildIndex(typeof(PermissionsSessionComponent).Assembly));
 		}
 	}
 
-	internal static bool Checks(string? validator)
-	{
-		if (validator != null)
-		{
-			if (!(validator == "ValidateEntityOwnership"))
-			{
-				return validator.StartsWith("ValidateUse", StringComparison.Ordinal);
-			}
-			return true;
-		}
-		return false;
-	}
+	internal static bool Checks(string? validator) => validator != null && (validator == "ValidateEntityOwnership" || validator.StartsWith("ValidateUse", StringComparison.Ordinal));
 
 	internal void BuildIndex(Assembly asm)
 	{
-		Dictionary<Type, string> dictionary = new Dictionary<Type, string>();
-		int num = 0;
+		var validators = new Dictionary<Type, string>();
+		int methodCount = 0;
 		try
 		{
 			Type[] types;
@@ -73,112 +59,112 @@ internal sealed class PermissionGate
 			{
 				types = ex.Types;
 			}
-			Type[] array = types;
-			foreach (Type type in array)
+			// Types that failed to load come back as null entries.
+			foreach (Type type in types)
 			{
 				if (type == null)
 				{
 					continue;
 				}
-				MethodInfo[] methods = type.GetMethods(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-				foreach (MethodInfo methodInfo in methods)
+				foreach (MethodInfo method in type.GetMethods(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
 				{
-					num++;
-					string text = null;
-					foreach (CustomAttributeData customAttribute in methodInfo.CustomAttributes)
+					methodCount++;
+					string validator = null;
+					foreach (CustomAttributeData attr in method.CustomAttributes)
 					{
-						if (customAttribute.AttributeType == ServerAttr && customAttribute.ConstructorArguments.Count == 1 && customAttribute.ConstructorArguments[0].Value is string text2 && Checks(text2))
+						if (attr.AttributeType == ServerAttr && attr.ConstructorArguments.Count == 1 && attr.ConstructorArguments[0].Value is string name && Checks(name))
 						{
-							text = text2;
+							validator = name;
 						}
 					}
-					if (text == null)
+					if (validator == null)
 					{
 						continue;
 					}
-					foreach (CustomAttributeData customAttribute2 in methodInfo.CustomAttributes)
+					foreach (CustomAttributeData attr in method.CustomAttributes)
 					{
-						if (typeof(SignalAttribute).IsAssignableFrom(customAttribute2.AttributeType))
+						if (typeof(SignalAttribute).IsAssignableFrom(attr.AttributeType))
 						{
-							dictionary[customAttribute2.AttributeType] = text;
+							validators[attr.AttributeType] = validator;
 						}
 					}
 				}
 			}
-			_index = dictionary;
-			IndexState = $"{dictionary.Count} guarded signals in {num} methods";
+			_index = validators;
+			IndexState = $"{validators.Count} guarded signals in {methodCount} methods";
 		}
-		catch (Exception ex2)
+		catch (Exception ex)
 		{
-			IndexState = $"index failed ({ex2.GetType().Name}: {ex2.Message}); declaring components only";
+			IndexState = $"index failed ({ex.GetType().Name}: {ex.Message}); declaring components only";
 		}
 	}
 
 	public string? StoryValidator(Type stateMachine)
 	{
+		// A story's state machine is the compiler's "<Method>d__N" nested in the component that declares the story method.
 		return _storyValidator.GetOrAdd(stateMachine, (Type t) =>
 		{
-			Type declaringType = t.DeclaringType;
-			int num = t.Name.IndexOf('<');
-			int num2 = t.Name.IndexOf('>');
-			if (declaringType == null || num != 0 || num2 < 2)
+			Type owner = t.DeclaringType;
+			int open = t.Name.IndexOf('<');
+			int close = t.Name.IndexOf('>');
+			if (owner == null || open != 0 || close < 2)
 			{
-				return (string?)null;
+				return null;
 			}
-			string text = t.Name.Substring(1, num2 - 1);
-			MethodInfo[] methods = declaringType.GetMethods(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-			foreach (MethodInfo methodInfo in methods)
+			string methodName = t.Name.Substring(1, close - 1);
+			foreach (MethodInfo method in owner.GetMethods(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
 			{
-				if (!(methodInfo.Name != text))
+				if (method.Name != methodName)
 				{
-					AsyncStateMachineAttribute customAttribute = methodInfo.GetCustomAttribute<AsyncStateMachineAttribute>();
-					if ((customAttribute == null || !(customAttribute.StateMachineType != t)) && methodInfo.GetCustomAttribute(ServerAttr) is Server server && Checks(server.ValidatorName))
-					{
-						return server.ValidatorName;
-					}
+					continue;
+				}
+				// Overloads share the name; the one compiled into this state machine says so.
+				AsyncStateMachineAttribute async = method.GetCustomAttribute<AsyncStateMachineAttribute>();
+				if (async != null && async.StateMachineType != t)
+				{
+					continue;
+				}
+				if (method.GetCustomAttribute(ServerAttr) is Server server && Checks(server.ValidatorName))
+				{
+					return server.ValidatorName;
 				}
 			}
-			return (string?)null;
+			return null;
 		});
 	}
 
 	public string? SignalValidator(string signalFullName)
 	{
-		Type type = CommandLayouts.ByName(signalFullName)?.SignalType;
-		if (type == null)
+		Type signal = CommandLayouts.ByName(signalFullName)?.SignalType;
+		if (signal == null)
 		{
 			return null;
 		}
 		Dictionary<Type, string> index = _index;
 		if (index != null)
 		{
-			if (!index.TryGetValue(type, out var value))
-			{
-				return null;
-			}
-			return value;
+			return index.TryGetValue(signal, out string validator) ? validator : null;
 		}
-		return DeclaredValidator(type);
+		return DeclaredValidator(signal);
 	}
 
 	private string? DeclaredValidator(Type sig)
 	{
 		return _signalValidator.GetOrAdd(sig.FullName ?? sig.Name, (string _) =>
 		{
-			Type declaringType = sig.DeclaringType;
-			if (declaringType == null)
+			Type owner = sig.DeclaringType;
+			if (owner == null)
 			{
-				return (string?)null;
+				return null;
 			}
-			MethodInfo[] methods = declaringType.GetMethods(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-			foreach (MethodInfo methodInfo in methods)
+			foreach (MethodInfo method in owner.GetMethods(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
 			{
-				if (methodInfo.GetCustomAttributes(sig, inherit: false).Length != 0 && methodInfo.GetCustomAttribute(ServerAttr) is Server server && Checks(server.ValidatorName))
+				if (method.GetCustomAttributes(sig, inherit: false).Length != 0 && method.GetCustomAttribute(ServerAttr) is Server server && Checks(server.ValidatorName))
 				{
 					return server.ValidatorName;
 				}
 			}
-			return (string?)null;
+			return null;
 		});
 	}
 
@@ -189,11 +175,7 @@ internal sealed class PermissionGate
 		{
 			return DeclaredValidator(sig);
 		}
-		if (!index.TryGetValue(sig, out var value))
-		{
-			return null;
-		}
-		return value;
+		return index.TryGetValue(sig, out string validator) ? validator : null;
 	}
 
 	public string? Check(string? validator, Entity? target, long asker, PermissionsSessionComponent? permissions)
@@ -203,62 +185,56 @@ internal sealed class PermissionGate
 		{
 			return null;
 		}
-		bool flag = validator == "ValidateEntityOwnership";
-		bool flag2 = validator.StartsWith("ValidateUse", StringComparison.Ordinal);
-		if (!flag && !flag2)
+		bool ownership = validator == "ValidateEntityOwnership";
+		bool use = validator.StartsWith("ValidateUse", StringComparison.Ordinal);
+		if (!ownership && !use)
 		{
 			return null;
 		}
-		Entity entity = target;
+		// Ownership is decided by the top of the hierarchy (the grid), unless a team override answers per entity.
+		Entity root = target;
 		if (TeamPermissions.OwnerOverride == null)
 		{
 			for (int i = 0; i < 32; i++)
 			{
-				Entity entity2 = entity.TryGet<HierarchyComponent>()?.Parent;
-				if (entity2 == null)
+				Entity parent = root.TryGet<HierarchyComponent>()?.Parent;
+				if (parent == null)
 				{
 					break;
 				}
-				entity = entity2;
+				root = parent;
 			}
 		}
-		long num = TeamPermissions.OwnerOf(entity);
-		if (!PlayerIdentities.IsHuman(num) || num == asker)
+		long owner = TeamPermissions.OwnerOf(root);
+		if (!PlayerIdentities.IsHuman(owner) || owner == asker)
 		{
 			return null;
 		}
 		Interlocked.Increment(ref Checked);
-		IdentityId identityId = new IdentityId(asker);
-		bool flag3;
-		if (flag)
+		var askerId = new IdentityId(asker);
+		bool allowed;
+		if (ownership)
 		{
-			flag3 = permissions.IsOwner(entity, identityId);
+			allowed = permissions.IsOwner(root, askerId);
 		}
 		else
 		{
-			CubeBlockComponent cubeBlockComponent = target.TryGet<CubeBlockComponent>();
-			if (cubeBlockComponent == null || target.TryGet<BlockPermissionsComponent>() == null)
+			CubeBlockComponent block = target.TryGet<CubeBlockComponent>();
+			if (block == null || target.TryGet<BlockPermissionsComponent>() == null)
 			{
 				return null;
 			}
 			PermissionsConfiguration configuration = Singleton<DefinitionManager>.Instance.GetConfiguration<PermissionsConfiguration>();
-			StringId stringId;
-			if (validator == "ValidateUseAdvanced")
-			{
-				stringId = configuration.AdvancedUse;
-			}
-			else
-			{
-				stringId = ((!(validator == "ValidateUseUnrestricted")) ? configuration.BasicUse : configuration.UnrestrictedUse);
-			}
-			StringId useType = stringId;
-			flag3 = permissions.CanUseBlockAction(target, cubeBlockComponent.Grid.Entity, identityId, useType);
+			StringId useType = validator == "ValidateUseAdvanced" ? configuration.AdvancedUse
+				: validator == "ValidateUseUnrestricted" ? configuration.UnrestrictedUse
+				: configuration.BasicUse;
+			allowed = permissions.CanUseBlockAction(target, block.Grid.Entity, askerId, useType);
 		}
-		if (flag3)
+		if (allowed)
 		{
 			return null;
 		}
 		Interlocked.Increment(ref Refused);
-		return $"{validator}: owned by player {num} (strict grids)";
+		return $"{validator}: owned by player {owner} (strict grids)";
 	}
 }

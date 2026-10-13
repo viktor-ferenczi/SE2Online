@@ -39,9 +39,9 @@ internal sealed class HostIdentities
 
 	public readonly HostSettings Settings;
 
-	private readonly ConcurrentDictionary<long, string?> _known = new ConcurrentDictionary<long, string>();
+	private readonly ConcurrentDictionary<long, string?> _known = new();
 
-	private readonly ConcurrentDictionary<string, long> _skippedStories = new ConcurrentDictionary<string, long>();
+	private readonly ConcurrentDictionary<string, long> _skippedStories = new();
 
 	public long StoriesSkipped;
 
@@ -51,7 +51,7 @@ internal sealed class HostIdentities
 
 	public long RestoredAtLoad;
 
-	internal static readonly Type[] ResearchTypes = new Type[4]
+	internal static readonly Type[] ResearchTypes = new Type[]
 	{
 		typeof(PlayerProgressionData),
 		typeof(ColonizationProgressData),
@@ -85,114 +85,100 @@ internal sealed class HostIdentities
 		if (!DedicatedRuntime.Headless) Current = null;
 	}
 
-	public static HostIdentities Install(IMpLog log, HostSettings settings)
-	{
-		return Current ?? (Current = new HostIdentities(log, settings));
-	}
+	public static HostIdentities Install(IMpLog log, HostSettings settings) => Current ??= new HostIdentities(log, settings);
 
-	public bool IsJoiner(long identity)
-	{
-		return _known.ContainsKey(identity);
-	}
+	public bool IsJoiner(long identity) => _known.ContainsKey(identity);
 
 	public Result Register(Session server, ushort clientId, string key, string name)
 	{
-		//IL_0163: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0168: Unknown result type (might be due to invalid IL or missing references)
-		//IL_016b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0235: Unknown result type (might be due to invalid IL or missing references)
-		//IL_023a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0254: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0256: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03c4: Unknown result type (might be due to invalid IL or missing references)
 		Entity sessionComponents = server.SessionComponents;
-		PlayersSessionComponent val = sessionComponents.TryGet<PlayersSessionComponent>(default(StringId)) ?? throw new InvalidOperationException("the server session has no PlayersSessionComponent");
-		InProcessPerPlayerDataSessionComponent inProcessPerPlayerDataSessionComponent = sessionComponents.TryGet<InProcessPerPlayerDataSessionComponent>() ?? throw new InvalidOperationException("the server session has no InProcessPerPlayerDataSessionComponent");
-		OwnershipSessionComponent ownershipSessionComponent = sessionComponents.TryGet<OwnershipSessionComponent>();
-		long num = PlayerIdentities.Derive(key, (long id) => _known.TryGetValue(id, out string value3) && value3 != null && value3 != key);
-		IdentityId identityId = new IdentityId(num);
-		bool num2 = _known.TryGetValue(num, out string value) && value == null;
-		_known[num] = key;
-		if (ownershipSessionComponent != null)
+		PlayersSessionComponent players = sessionComponents.TryGet<PlayersSessionComponent>(default(StringId)) ?? throw new InvalidOperationException("the server session has no PlayersSessionComponent");
+		InProcessPerPlayerDataSessionComponent ppd = sessionComponents.TryGet<InProcessPerPlayerDataSessionComponent>() ?? throw new InvalidOperationException("the server session has no InProcessPerPlayerDataSessionComponent");
+		OwnershipSessionComponent ownership = sessionComponents.TryGet<OwnershipSessionComponent>();
+		long identity = PlayerIdentities.Derive(key, id => _known.TryGetValue(id, out string owner) && owner != null && owner != key);
+		var identityId = new IdentityId(identity);
+		// A null key marks an identity restored from the save at load that nobody has claimed yet.
+		bool fromSave = _known.TryGetValue(identity, out string previous) && previous == null;
+		_known[identity] = key;
+		if (ownership != null)
 		{
-			ownershipSessionComponent._identities.Add(Hotfix);
-			ownershipSessionComponent._identities.Add(identityId);
+			ownership._identities.Add(Hotfix);
+			ownership._identities.Add(identityId);
 		}
-		EnsureWrapper(inProcessPerPlayerDataSessionComponent);
-		List<string> list = new List<string>();
-		if (num2)
+		EnsureWrapper(ppd);
+		var notes = new List<string>();
+		if (fromSave)
 		{
-			list.Add("per-player data from the save");
+			notes.Add("per-player data from the save");
 		}
 		if (Settings.Research == ResearchMode.Shared)
 		{
-			list.Add($"research shared with the host ({ShareResearch(inProcessPerPlayerDataSessionComponent, identityId)} records)");
+			notes.Add($"research shared with the host ({ShareResearch(ppd, identityId)} records)");
 		}
-		int value2 = PrecreateData(inProcessPerPlayerDataSessionComponent, identityId);
-		PlayerIdentity val2;
+		int created = PrecreateData(ppd, identityId);
+		PlayerIdentity player;
 		bool newPlayer;
-		if (val.IsPlayerIdentity(identityId))
+		if (players.IsPlayerIdentity(identityId))
 		{
-			val2 = val.GetPlayerIdentity(identityId);
-			PlayerData playerData = val.GetPlayerData(val2);
+			player = players.GetPlayerIdentity(identityId);
+			PlayerData playerData = players.GetPlayerData(player);
 			if (playerData.ClientId.Id != clientId)
 			{
-				throw new InvalidOperationException($"identity {num} is registered for ClientId {playerData.ClientId.Id}, not {clientId}");
+				throw new InvalidOperationException($"identity {identity} is registered for ClientId {playerData.ClientId.Id}, not {clientId}");
 			}
 			newPlayer = false;
 		}
 		else
 		{
-			if (val._clientIds.ContainsKey(new ClientId(clientId)))
+			if (players._clientIds.ContainsKey(new ClientId(clientId)))
 			{
 				throw new InvalidOperationException($"ClientId {clientId} already belongs to another player in this world session");
 			}
-			val2 = val.AllocatePlayer();
-			val.PropagateCreatedPlayer(new PlayerData
+			player = players.AllocatePlayer();
+			players.PropagateCreatedPlayer(new PlayerData
 			{
 				ClientId = new ClientId(clientId),
-				Player = val2,
+				Player = player,
 				Identity = identityId
 			});
 			newPlayer = true;
 		}
-		ToolbarPerPlayerData perPlayerData = inProcessPerPlayerDataSessionComponent.GetPerPlayerData<ToolbarPerPlayerData>(identityId);
-		if (StartingToolbar.IsBlank(perPlayerData))
+		ToolbarPerPlayerData toolbar = ppd.GetPerPlayerData<ToolbarPerPlayerData>(identityId);
+		if (StartingToolbar.IsBlank(toolbar))
 		{
-			var (defaultToolbarDefinition, text) = StartingToolbar.For(server, identityId, sessionComponents.TryGet<PlayerToolbarServerSessionComponent>()?._config?.DefaultToolbar);
-			if (defaultToolbarDefinition != null)
+			var (startingToolbar, source) = StartingToolbar.For(server, identityId, sessionComponents.TryGet<PlayerToolbarServerSessionComponent>()?._config?.DefaultToolbar);
+			if (startingToolbar != null)
 			{
-				defaultToolbarDefinition.ResetToolbar(perPlayerData);
-				list.Add("starting toolbar (" + text + ")");
+				startingToolbar.ResetToolbar(toolbar);
+				notes.Add("starting toolbar (" + source + ")");
 			}
 		}
-		PlayerCharacterData perPlayerData2 = inProcessPerPlayerDataSessionComponent.GetPerPlayerData<PlayerCharacterData>(identityId);
+		PlayerCharacterData character = ppd.GetPerPlayerData<PlayerCharacterData>(identityId);
 		if (!string.IsNullOrWhiteSpace(name))
 		{
-			perPlayerData2.PlayerName = name;
+			character.PlayerName = name;
 		}
 		if (Settings.Grids == GridPermissionMode.Team)
 		{
-			RespawnPerPlayerData perPlayerData3 = inProcessPerPlayerDataSessionComponent.GetPerPlayerData<RespawnPerPlayerData>(identityId);
-			if (perPlayerData3.KnownPoints.Count == 0)
+			RespawnPerPlayerData respawn = ppd.GetPerPlayerData<RespawnPerPlayerData>(identityId);
+			if (respawn.KnownPoints.Count == 0)
 			{
-				List<Entity> knownPoints = inProcessPerPlayerDataSessionComponent.GetPerPlayerData<RespawnPerPlayerData>(Hotfix).KnownPoints;
-				perPlayerData3.KnownPoints.AddRange(knownPoints);
-				if (knownPoints.Count > 0)
+				List<Entity> hostPoints = ppd.GetPerPlayerData<RespawnPerPlayerData>(Hotfix).KnownPoints;
+				respawn.KnownPoints.AddRange(hostPoints);
+				if (hostPoints.Count > 0)
 				{
-					list.Add($"{knownPoints.Count} respawn point(s) of the host known");
+					notes.Add($"{hostPoints.Count} respawn point(s) of the host known");
 				}
 			}
 		}
-		list.Add($"{value2} per-player record(s) created");
+		notes.Add($"{created} per-player record(s) created");
 		Registered++;
-		return new Result(num, val2._id, newPlayer, string.Join(", ", list));
+		return new Result(identity, player._id, newPlayer, string.Join(", ", notes));
 	}
 
 	internal static int PrecreateData(InProcessPerPlayerDataSessionComponent ppd, IdentityId identity)
 	{
-		List<object> source = default;
-		int count = (((CollectionDictionary<IdentityId, List<object>, object>)(object)ppd._perPlayerData).TryGet(identity, out source) ? source.Select((object o) => o.GetType()).ToHashSet() : new HashSet<Type>()).Count;
+		int count = (((CollectionDictionary<IdentityId, List<object>, object>)(object)ppd._perPlayerData).TryGet(identity, out List<object> source) ? source.Select(o => o.GetType()).ToHashSet() : new HashSet<Type>()).Count;
 		ppd.GetPerPlayerData<PaintToolPerPlayerData>(identity);
 		ppd.GetPerPlayerData<ToolbarPerPlayerData>(identity);
 		ppd.GetPerPlayerData<GPSMarkersData>(identity);
@@ -206,48 +192,45 @@ internal sealed class HostIdentities
 		ppd.GetPerPlayerData<BlockPlacerPerPlayerData>(identity);
 		ppd.GetPerPlayerData<VoxelHandData>(identity);
 		ppd.GetPerPlayerData<PlayerCreditsData>(identity);
-		List<object> source2 = default;
-		if (((CollectionDictionary<IdentityId, List<object>, object>)(object)ppd._perPlayerData).TryGet(Hotfix, out source2))
+		// Anything else the host has (mod or DLC data) is created for the joiner too, through the generic getter.
+		if (((CollectionDictionary<IdentityId, List<object>, object>)(object)ppd._perPlayerData).TryGet(Hotfix, out List<object> hostData))
 		{
-			MethodInfo method = typeof(InProcessPerPlayerDataSessionComponent).GetMethod("GetPerPlayerData");
-			List<object> source3 = default;
-			foreach (Type item in source2.Select((object o) => o.GetType()).Distinct().ToList())
+			MethodInfo getPerPlayerData = typeof(InProcessPerPlayerDataSessionComponent).GetMethod("GetPerPlayerData");
+			foreach (Type type in hostData.Select(o => o.GetType()).Distinct().ToList())
 			{
-				if (typeof(PerPlayerData).IsAssignableFrom(item) && (!((CollectionDictionary<IdentityId, List<object>, object>)(object)ppd._perPlayerData).TryGet(identity, out source3) || !source3.Any(item.IsInstanceOfType)))
+				if (typeof(PerPlayerData).IsAssignableFrom(type) && (!((CollectionDictionary<IdentityId, List<object>, object>)(object)ppd._perPlayerData).TryGet(identity, out List<object> joinerData) || !joinerData.Any(type.IsInstanceOfType)))
 				{
-					method.MakeGenericMethod(item).Invoke(ppd, new object[1] { identity });
+					getPerPlayerData.MakeGenericMethod(type).Invoke(ppd, new object[] { identity });
 				}
 			}
 		}
-		List<object> list = default;
-		return (((CollectionDictionary<IdentityId, List<object>, object>)(object)ppd._perPlayerData).TryGet(identity, out list) ? list.Count : 0) - count;
+		return (((CollectionDictionary<IdentityId, List<object>, object>)(object)ppd._perPlayerData).TryGet(identity, out List<object> after) ? after.Count : 0) - count;
 	}
 
 	internal static int ShareResearch(InProcessPerPlayerDataSessionComponent ppd, IdentityId identity)
 	{
-		return 0 + Share<PlayerProgressionData>(ppd, identity) + Share<ColonizationProgressData>(ppd, identity) + Share<ContractPerPlayerData>(ppd, identity) + Share<PlayerCreditsData>(ppd, identity);
+		return Share<PlayerProgressionData>(ppd, identity) + Share<ColonizationProgressData>(ppd, identity) + Share<ContractPerPlayerData>(ppd, identity) + Share<PlayerCreditsData>(ppd, identity);
 	}
 
 	private static int Share<T>(InProcessPerPlayerDataSessionComponent ppd, IdentityId identity) where T : PerPlayerData
 	{
-		//IL_006c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0073: Expected Obj, but got Unknown
-		T perPlayerData = ppd.GetPerPlayerData<T>(Hotfix);
-		List<object> orCreateCollectionForIdentity = ppd.GetOrCreateCollectionForIdentity(identity);
-		int num = orCreateCollectionForIdentity.FindIndex((object o) => o is T);
-		if (num >= 0 && orCreateCollectionForIdentity[num] == (object)perPlayerData)
+		// The joiner's collection holds the host's own record object, so both read and write the same progress.
+		T shared = ppd.GetPerPlayerData<T>(Hotfix);
+		List<object> records = ppd.GetOrCreateCollectionForIdentity(identity);
+		int index = records.FindIndex(o => o is T);
+		if (index >= 0 && records[index] == (object)shared)
 		{
 			return 0;
 		}
-		if (num >= 0)
+		if (index >= 0)
 		{
-			PerPlayerData item = (PerPlayerData)orCreateCollectionForIdentity[num];
-			orCreateCollectionForIdentity[num] = perPlayerData;
-			ppd._clientVisibleData.Data.FirstOrDefault((InProcessPerPlayerDataBaseSessionComponent.ClientVisiblePerPlayerData d) => (long)d.IdentityId == (long)identity)?.Data.Remove(item);
+			PerPlayerData replaced = (PerPlayerData)records[index];
+			records[index] = shared;
+			ppd._clientVisibleData.Data.FirstOrDefault(d => (long)d.IdentityId == (long)identity)?.Data.Remove(replaced);
 		}
 		else
 		{
-			orCreateCollectionForIdentity.Add(perPlayerData);
+			records.Add(shared);
 		}
 		return 1;
 	}
@@ -270,12 +253,12 @@ internal sealed class HostIdentities
 
 	public static (int Pcu, int Max)? ReadPcu(Session server, long identity)
 	{
-		PCUSessionComponent pCUSessionComponent = server.SessionComponents.TryGet<PCUSessionComponent>();
-		if (pCUSessionComponent == null)
+		PCUSessionComponent pcu = server.SessionComponents.TryGet<PCUSessionComponent>();
+		if (pcu == null)
 		{
 			return null;
 		}
-		return (pCUSessionComponent.GetPCU(new IdentityId(identity)), pCUSessionComponent.MaxPerPlayerPCU);
+		return (pcu.GetPCU(new IdentityId(identity)), pcu.MaxPerPlayerPCU);
 	}
 
 	public static void InitPrefix(PerPlayerDataSessionComponentObjectBuilder ob, out List<(IdentityId Id, List<object> Items)>? __state)
@@ -288,22 +271,23 @@ internal sealed class HostIdentities
 		}
 		try
 		{
-			foreach (KeyValuePair<IdentityId, List<object>> item2 in (CollectionDictionary<IdentityId, List<object>, object>)(object)ob.PerPlayerData)
+			// Take the joiners' records out of the builder, or the game folds every identity's data into the host's.
+			foreach (KeyValuePair<IdentityId, List<object>> entry in (CollectionDictionary<IdentityId, List<object>, object>)(object)ob.PerPlayerData)
 			{
-				long num = item2.Key;
-				if (num != -1559595548 && !PlayerIdentities.IsNpc(num))
+				long id = entry.Key;
+				if (id != PlayerIdentities.HotfixIdentity && !PlayerIdentities.IsNpc(id))
 				{
-					(__state ?? (__state = new List<(IdentityId, List<object>)>())).Add((item2.Key, new List<object>(item2.Value)));
+					(__state ??= new List<(IdentityId, List<object>)>()).Add((entry.Key, new List<object>(entry.Value)));
 				}
 			}
 			if (__state == null)
 			{
 				return;
 			}
-			foreach (var item3 in __state)
+			foreach (var kept in __state)
 			{
-				IdentityId item = item3.Id;
-				((CollectionDictionary<IdentityId, List<object>, object>)(object)ob.PerPlayerData).Remove(item);
+				IdentityId id = kept.Id;
+				((CollectionDictionary<IdentityId, List<object>, object>)(object)ob.PerPlayerData).Remove(id);
 			}
 		}
 		catch (Exception ex)
@@ -322,23 +306,23 @@ internal sealed class HostIdentities
 		}
 		try
 		{
-			List<string> list = new List<string>();
-			foreach (var item in __state)
+			var restored = new List<string>();
+			foreach (var entry in __state)
 			{
-				var (id, list2) = item;
+				var (id, items) = entry;
 				current._known.TryAdd(id, null);
-				List<object> orCreateCollectionForIdentity = __instance.GetOrCreateCollectionForIdentity(id);
-				InProcessPerPlayerDataBaseSessionComponent.ClientVisiblePerPlayerData perPlayerData = __instance._clientVisibleData.Data.First((InProcessPerPlayerDataBaseSessionComponent.ClientVisiblePerPlayerData d) => (long)d.IdentityId == (long)id);
-				foreach (object item2 in list2)
+				List<object> records = __instance.GetOrCreateCollectionForIdentity(id);
+				InProcessPerPlayerDataBaseSessionComponent.ClientVisiblePerPlayerData visible = __instance._clientVisibleData.Data.First(d => (long)d.IdentityId == (long)id);
+				foreach (object record in items)
 				{
-					orCreateCollectionForIdentity.Add(item2);
-					__instance.ObserveAndReplicateData(item2, perPlayerData);
+					records.Add(record);
+					__instance.ObserveAndReplicateData(record, visible);
 				}
-				list.Add($"{id} ({list2.Count} records)");
+				restored.Add($"{id} ({items.Count} records)");
 			}
 			current.RestoredAtLoad += __state.Count;
-			bool flag = current.EnsureWrapper(__instance);
-			current._log.Info($"host identities: per-player data of {__state.Count} joiner identit{((__state.Count == 1) ? "y" : "ies")} kept at world load: {string.Join(", ", list)}" + (flag ? "" : " (NPC provider not injected yet; wrapped at the first registration)"));
+			bool wrapped = current.EnsureWrapper(__instance);
+			current._log.Info($"host identities: per-player data of {__state.Count} joiner identit{(__state.Count == 1 ? "y" : "ies")} kept at world load: {string.Join(", ", restored)}" + (wrapped ? "" : " (NPC provider not injected yet; wrapped at the first registration)"));
 		}
 		catch (Exception ex)
 		{
@@ -358,10 +342,10 @@ internal sealed class HostIdentities
 		{
 			return true;
 		}
-		string text = "?";
+		string story = "?";
 		try
 		{
-			text = StoryState.Name(ObjectCodec.TypeName(stateMachine.GetType()));
+			story = StoryState.Name(ObjectCodec.TypeName(stateMachine.GetType()));
 			if (ForwardedStoryOwners.Contains(stateMachine.GetType().DeclaringType?.Name ?? "") && HostWorld.Current?.ForwardServerStory((ushort)id, stateMachine) == true)
 			{
 				current.StoriesForwarded++;
@@ -369,9 +353,9 @@ internal sealed class HostIdentities
 			else
 			{
 				current.StoriesSkipped++;
-				if (current._skippedStories.AddOrUpdate(text, 1L, (string _, long c) => c + 1) == 1)
+				if (current._skippedStories.AddOrUpdate(story, 1L, (string _, long c) => c + 1) == 1)
 				{
-					current._log.Info($"host identities: server story {text} addressed to ClientId {id} skipped (stories the server starts for a joiner cannot run on its PC yet; Keen would have run it on the host's own client)");
+					current._log.Info($"host identities: server story {story} addressed to ClientId {id} skipped (stories the server starts for a joiner cannot run on its PC yet; Keen would have run it on the host's own client)");
 				}
 			}
 			if (!context.Skipped)
@@ -381,14 +365,13 @@ internal sealed class HostIdentities
 		}
 		catch (Exception ex)
 		{
-			current._log.WarnOnce("host-skip-" + text, $"host identities: skipping server story {text} for ClientId {id} threw {ex.GetType().Name}: {ex.Message}");
+			current._log.WarnOnce("host-skip-" + story, $"host identities: skipping server story {story} for ClientId {id} threw {ex.GetType().Name}: {ex.Message}");
 		}
 		return false;
 	}
 
 	public string Describe()
 	{
-		return $"identities: {Settings}; registered {Registered}, joiner identities {_known.Count} ({RestoredAtLoad} restored at load), server stories for joiners forwarded {StoriesForwarded}, skipped {StoriesSkipped}" + (_skippedStories.IsEmpty ? "" : (" (" + string.Join(", ", from kv in _skippedStories.OrderByDescending((KeyValuePair<string, long> kv) => kv.Value).Take(6)
-			select $"{kv.Key} x{kv.Value}") + ")"));
+		return $"identities: {Settings}; registered {Registered}, joiner identities {_known.Count} ({RestoredAtLoad} restored at load), server stories for joiners forwarded {StoriesForwarded}, skipped {StoriesSkipped}" + (_skippedStories.IsEmpty ? "" : " (" + string.Join(", ", from kv in _skippedStories.OrderByDescending(kv => kv.Value).Take(6) select $"{kv.Key} x{kv.Value}") + ")");
 	}
 }

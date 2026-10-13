@@ -17,32 +17,11 @@ public static class PlayerIdentities
 
 	public const long MinDerived = 1048576L;
 
-	public static bool IsNpc(long id)
-	{
-		if (id != 1)
-		{
-			return id == 2;
-		}
-		return true;
-	}
+	public static bool IsNpc(long id) => id == NpcIdentity || id == HostileNpcIdentity;
 
-	public static bool IsHuman(long id)
-	{
-		if (id != 0L)
-		{
-			return !IsNpc(id);
-		}
-		return false;
-	}
+	public static bool IsHuman(long id) => id != 0L && !IsNpc(id);
 
-	public static bool SameTeam(long a, long b)
-	{
-		if (IsHuman(a))
-		{
-			return IsHuman(b);
-		}
-		return false;
-	}
+	public static bool SameTeam(long a, long b) => IsHuman(a) && IsHuman(b);
 
 	public static string KeyFor(PeerId peer, string recordKey)
 	{
@@ -55,31 +34,32 @@ public static class PlayerIdentities
 
 	public static long Derive(string key, Func<long, bool>? takenByOther = null)
 	{
-		int num = 0;
-		long num3;
+		int attempt = 0;
+		long id;
 		while (true)
 		{
-			ulong num2 = 14695981039346656037uL;
-			byte[] bytes = Encoding.UTF8.GetBytes((num == 0) ? key : $"{key}\u0001{num}");
+			// 64-bit FNV-1a, folded to a positive id.
+			ulong hash = 14695981039346656037uL;
+			byte[] bytes = Encoding.UTF8.GetBytes(attempt == 0 ? key : $"{key}\u0001{attempt}");
 			foreach (byte b in bytes)
 			{
-				num2 ^= b;
-				num2 *= 1099511628211L;
+				hash ^= b;
+				hash *= 1099511628211L;
 			}
-			num3 = (long)(num2 & 0x7FFFFFFFFFFFFFFFL);
-			if (num3 >= 1048576 && num3 != -1559595548 && !IsNpc(num3))
+			id = (long)(hash & 0x7FFFFFFFFFFFFFFFL);
+			if (id >= MinDerived && id != HotfixIdentity && !IsNpc(id))
 			{
-				if (takenByOther == null || !takenByOther(num3))
+				if (takenByOther == null || !takenByOther(id))
 				{
 					break;
 				}
-				if (num > 64)
+				if (attempt > 64)
 				{
-					throw new InvalidOperationException($"no free identity for '{key}' after {num} attempts");
+					throw new InvalidOperationException($"no free identity for '{key}' after {attempt} attempts");
 				}
 			}
-			num++;
+			attempt++;
 		}
-		return num3;
+		return id;
 	}
 }

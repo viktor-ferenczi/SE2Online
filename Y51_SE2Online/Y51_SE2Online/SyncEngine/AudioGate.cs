@@ -37,15 +37,9 @@ internal static class AudioGate
 
 	public static bool IsMuted => t_muted > 0;
 
-	public static void Enter()
-	{
-		t_muted++;
-	}
+	public static void Enter() => t_muted++;
 
-	public static void Exit()
-	{
-		t_muted--;
-	}
+	public static void Exit() => t_muted--;
 
 	public static bool Play2DPrefix()
 	{
@@ -97,26 +91,26 @@ internal static class AudioGate
 
 	private static byte Kind(int stub)
 	{
-		byte[] array = _kinds;
-		if ((uint)stub < (uint)array.Length && array[stub] != 0)
+		byte[] kinds = _kinds;
+		if ((uint)stub < (uint)kinds.Length && kinds[stub] != KindUnknown)
 		{
-			return array[stub];
+			return kinds[stub];
 		}
-		byte b = 1;
-		CommandLayout commandLayout = CommandLayouts.ByStub(stub);
-		if (commandLayout != null)
+		byte kind = KindNone;
+		CommandLayout layout = CommandLayouts.ByStub(stub);
+		if (layout != null)
 		{
-			string shortName = ClientUpstream.Short(commandLayout.Name);
-			b = (byte)(AudioRouting.IsBuildSound(shortName) ? 2 : ((!AudioRouting.IsCharacterSound(shortName)) ? 1 : 3));
+			string shortName = ClientUpstream.Short(layout.Name);
+			kind = AudioRouting.IsBuildSound(shortName) ? KindBuild : AudioRouting.IsCharacterSound(shortName) ? KindCharacter : KindNone;
 		}
-		if ((uint)stub >= (uint)array.Length)
+		if ((uint)stub >= (uint)kinds.Length)
 		{
-			byte[] array2 = new byte[Math.Max(stub + 1, Math.Max(1024, array.Length * 2))];
-			array.CopyTo(array2, 0);
-			array = (_kinds = array2);
+			byte[] grown = new byte[Math.Max(stub + 1, Math.Max(1024, kinds.Length * 2))];
+			kinds.CopyTo(grown, 0);
+			kinds = _kinds = grown;
 		}
-		array[stub] = b;
-		return b;
+		kinds[stub] = kind;
+		return kind;
 	}
 
 	public unsafe static bool Mute(int stub, ReplicationCommandBuffer cb, byte* payload, nint available, bool injected, bool s2c)
@@ -127,20 +121,20 @@ internal static class AudioGate
 		}
 		try
 		{
-			byte b = Kind(stub);
-			if (b == 1)
+			byte kind = Kind(stub);
+			if (kind == KindNone)
 			{
 				return false;
 			}
 			long nowMs = MpClock.NowMs();
 			if (injected)
 			{
-				ClientWorld current = ClientWorld.Current;
-				if (current == null)
+				ClientWorld client = ClientWorld.Current;
+				if (client == null)
 				{
 					return false;
 				}
-				if (b == 2)
+				if (kind == KindBuild)
 				{
 					return !AudioRouting.Instance.TakeOwnBuild(nowMs);
 				}
@@ -148,19 +142,19 @@ internal static class AudioGate
 				{
 					return false;
 				}
-				bool flag = current.IsOwnCharacterProxy(cb.ReadObject(Unsafe.ReadUnaligned<int>(payload)));
-				if (!flag)
+				bool own = client.IsOwnCharacterProxy(cb.ReadObject(Unsafe.ReadUnaligned<int>(payload)));
+				if (!own)
 				{
 					Interlocked.Increment(ref AudioRouting.Instance.CharacterMuted);
 				}
-				return !flag;
+				return !own;
 			}
-			HostWorld current2 = HostWorld.Current;
-			if (!s2c || current2 == null)
+			HostWorld host = HostWorld.Current;
+			if (!s2c || host == null)
 			{
 				return false;
 			}
-			if (b == 2)
+			if (kind == KindBuild)
 			{
 				return AudioRouting.Instance.TakeJoinerBuild(nowMs) != 0;
 			}
@@ -168,12 +162,12 @@ internal static class AudioGate
 			{
 				return false;
 			}
-			bool flag2 = current2.IsJoinerCharacter(cb.ReadObject(Unsafe.ReadUnaligned<int>(payload)) as Entity);
-			if (flag2)
+			bool joiners = host.IsJoinerCharacter(cb.ReadObject(Unsafe.ReadUnaligned<int>(payload)) as Entity);
+			if (joiners)
 			{
 				Interlocked.Increment(ref AudioRouting.Instance.CharacterMuted);
 			}
-			return flag2;
+			return joiners;
 		}
 		catch (Exception ex)
 		{
@@ -186,8 +180,5 @@ internal static class AudioGate
 		}
 	}
 
-	public static string Describe()
-	{
-		return $"{AudioRouting.Instance.Describe()}; 2D plays muted {Interlocked.Read(in Muted2D)}";
-	}
+	public static string Describe() => $"{AudioRouting.Instance.Describe()}; 2D plays muted {Interlocked.Read(in Muted2D)}";
 }
