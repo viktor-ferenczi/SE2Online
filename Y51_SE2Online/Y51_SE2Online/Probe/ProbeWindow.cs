@@ -66,18 +66,9 @@ public sealed class ProbeWindow
 		}
 		string Row(string text, string cat, string key, long count, long bytes)
 		{
-			_003C_003Ey__InlineArray10<string> buffer = default;
-			buffer[0] = utc;
-			buffer[1] = w;
-			buffer[2] = ServerTicks.ToString(CultureInfo.InvariantCulture);
-			buffer[3] = text;
-			buffer[4] = cat;
-			buffer[5] = Csv(key);
-			buffer[6] = count.ToString(CultureInfo.InvariantCulture);
-			buffer[7] = bytes.ToString(CultureInfo.InvariantCulture);
-			buffer[8] = ((double)count / (double)ticks).ToString("0.###", CultureInfo.InvariantCulture);
-			buffer[9] = ((double)bytes / (double)ticks).ToString("0.#", CultureInfo.InvariantCulture);
-			return string.Join(",", (ReadOnlySpan<string?>)buffer);
+			return string.Join(",", utc, w, ServerTicks.ToString(CultureInfo.InvariantCulture), text, cat, Csv(key),
+				count.ToString(CultureInfo.InvariantCulture), bytes.ToString(CultureInfo.InvariantCulture),
+				((double)count / ticks).ToString("0.###", CultureInfo.InvariantCulture), ((double)bytes / ticks).ToString("0.#", CultureInfo.InvariantCulture));
 		}
 	}
 
@@ -181,13 +172,8 @@ public sealed class ProbeWindow
 			}
 			else
 			{
-				CultureInfo invariantCulture2 = CultureInfo.InvariantCulture;
-				_003C_003Ey__InlineArray4<object> buffer = default;
-				buffer[0] = (double)bundles.SerializedBytes / 1024.0;
-				buffer[1] = (double)bundles.MaxBundleBytes / 1024.0;
-				buffer[2] = bundles.MaxBundleEntities;
-				buffer[3] = bundles.SerializeMs;
-				text = string.Format((IFormatProvider?)invariantCulture2, "serialized {0:0.0} KiB, largest {1:0.0} KiB / {2} entities, {3:0} ms spent sizing", (ReadOnlySpan<object?>)buffer);
+				text = string.Format(CultureInfo.InvariantCulture, "serialized {0:0.0} KiB, largest {1:0.0} KiB / {2} entities, {3:0} ms spent sizing",
+					bundles.SerializedBytes / 1024.0, bundles.MaxBundleBytes / 1024.0, bundles.MaxBundleEntities, bundles.SerializeMs);
 			}
 			string value5 = text;
 			stringBuilder2 = stringBuilder;

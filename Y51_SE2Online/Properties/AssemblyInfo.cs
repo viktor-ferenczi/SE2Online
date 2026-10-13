@@ -30,6 +30,6 @@ using Y51_SE2Online.SyncEngine;
 })]
 [assembly: Bundle("Y51_SE2Online", "0.13.4.0")]
 [assembly: AssemblyVersion("0.13.4.0")]
-[module: ModuleIndexedAttributes(typeof(WithLifetimeAdapterAttribute), new Type[] { typeof(NametagMarkerProvider) }, new string[] { "Y51_SE2Online.SyncEngine.HarnessRejoin+HarnessNotifications" })]
+[module: ModuleIndexedAttributes(typeof(WithLifetimeAdapterAttribute), new Type[] { typeof(NametagMarkerProvider) }, new string[] { })]
 [module: ModuleIndexedAttributes(typeof(IndexedComponentAttribute), new Type[] { typeof(NametagMarkerProvider), typeof(Y51_SE2Online.Dedicated.HeadlessEngine.HeadlessParallelInitComponent), typeof(Y51_SE2Online.Dedicated.HeadlessEngine.ServerParallelInitComponent), typeof(WorldSocial.WorldSocialSaveComponent) }, new string[] { })]
 
