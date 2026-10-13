@@ -428,7 +428,7 @@ internal static class EngineCodec
 
 	public static (int TypeId, int Size)? ResolveType(string name)
 	{
-		Type? type = Type.GetType(name, throwOnError: false);
+		Type? type = Core.WireTypes.FindLoaded(name);
 		if (type == null || !type.IsValueType)
 		{
 			return null;
