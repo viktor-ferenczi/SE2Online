@@ -27,11 +27,11 @@ public sealed class StateCoalescer
 		public int IntervalMs;
 	}
 
-	private readonly Dictionary<(uint, ushort), Entry> _entries = new Dictionary<(uint, ushort), Entry>();
+	private readonly Dictionary<(uint, ushort), Entry> _entries = new();
 
-	public readonly Dictionary<ushort, long> SentByKey = new Dictionary<ushort, long>();
+	public readonly Dictionary<ushort, long> SentByKey = new();
 
-	private readonly List<Entry> _dirty = new List<Entry>();
+	private readonly List<Entry> _dirty = new();
 
 	private readonly Func<ushort, int> _intervalForKey;
 
@@ -41,7 +41,7 @@ public sealed class StateCoalescer
 
 	private long _lastEmitMs = -1L;
 
-	private readonly List<StateEntry> _scratch = new List<StateEntry>();
+	private readonly List<StateEntry> _scratch = new();
 
 	public long Puts;
 
@@ -62,7 +62,7 @@ public sealed class StateCoalescer
 	// Test diagnostics: put/send times of one NetId's state.
 	public static volatile uint WatchNetId;
 
-	public static readonly System.Collections.Concurrent.ConcurrentQueue<string> WatchLog = new System.Collections.Concurrent.ConcurrentQueue<string>();
+	public static readonly System.Collections.Concurrent.ConcurrentQueue<string> WatchLog = new();
 
 	public int DirtyCount => _dirty.Count;
 
@@ -81,24 +81,24 @@ public sealed class StateCoalescer
 		{
 			WatchLog.Enqueue($"put,{nowMs},{e.Key},{e.HostMs}");
 		}
-		if (!_entries.TryGetValue((e.NetId, e.Key), out Entry value))
+		if (!_entries.TryGetValue((e.NetId, e.Key), out Entry entry))
 		{
-			value = new Entry
+			entry = new Entry
 			{
 				NetId = e.NetId,
 				Key = e.Key,
 				IntervalMs = _intervalForKey(e.Key)
 			};
-			_entries[(e.NetId, e.Key)] = value;
+			_entries[(e.NetId, e.Key)] = entry;
 		}
-		if (value.IntervalMs < 0)
+		if (entry.IntervalMs < 0)
 		{
 			DroppedByCap++;
 			return;
 		}
-		if (value.Dirty)
+		if (entry.Dirty)
 		{
-			if (Seq.Newer(value.Version, e.Version))
+			if (Seq.Newer(entry.Version, e.Version))
 			{
 				return;
 			}
@@ -106,80 +106,81 @@ public sealed class StateCoalescer
 		}
 		else
 		{
-			value.Dirty = true;
-			value.DirtySinceMs = nowMs;
-			_dirty.Add(value);
+			entry.Dirty = true;
+			entry.DirtySinceMs = nowMs;
+			_dirty.Add(entry);
 		}
-		value.Bytes = e.Bytes;
-		value.Version = e.Version;
-		value.HostMs = e.HostMs;
+		entry.Bytes = e.Bytes;
+		entry.Version = e.Version;
+		entry.HostMs = e.HostMs;
 	}
 
 	public void Remove(uint netId)
 	{
-		List<(uint, ushort)> list = new List<(uint, ushort)>();
+		var doomed = new List<(uint, ushort)>();
 		foreach (var key in _entries.Keys)
 		{
 			if (key.Item1 == netId)
 			{
-				list.Add(key);
+				doomed.Add(key);
 			}
 		}
-		foreach (var item in list)
+		foreach (var key in doomed)
 		{
-			if (_entries.Remove(item, out Entry value) && value.Dirty)
+			if (_entries.Remove(key, out Entry entry) && entry.Dirty)
 			{
-				value.Dirty = false;
-				_dirty.Remove(value);
+				entry.Dirty = false;
+				_dirty.Remove(entry);
 			}
 		}
 	}
 
 	public void Emit(long nowMs, int maxMessageBytes, List<byte[]> output)
 	{
-		double num = ((_lastEmitMs < 0) ? 0.05 : Math.Max(0.0, (double)(nowMs - _lastEmitMs) / 1000.0));
+		double elapsedSec = _lastEmitMs < 0 ? 0.05 : Math.Max(0.0, (nowMs - _lastEmitMs) / 1000.0);
 		_lastEmitMs = nowMs;
-		_tokens = Math.Min(_tokens + num * (double)_budgetBytesPerSec, (double)_budgetBytesPerSec / 4.0 + (double)maxMessageBytes);
+		_tokens = Math.Min(_tokens + elapsedSec * _budgetBytesPerSec, _budgetBytesPerSec / 4.0 + maxMessageBytes);
 		if (_dirty.Count == 0)
 		{
 			return;
 		}
-		_dirty.Sort((Entry a, Entry b) => a.DirtySinceMs.CompareTo(b.DirtySinceMs));
+		_dirty.Sort((a, b) => a.DirtySinceMs.CompareTo(b.DirtySinceMs));
 		_scratch.Clear();
-		int num2 = 0;
-		bool flag = false;
-		for (int num3 = 0; num3 < _dirty.Count; num3++)
+		int kept = 0;
+		// Once one entry is out of budget, hold every later one too so the oldest goes first next time.
+		bool outOfBudget = false;
+		for (int i = 0; i < _dirty.Count; i++)
 		{
-			Entry entry = _dirty[num3];
-			bool flag2 = nowMs - entry.LastSentMs >= entry.IntervalMs;
-			int num4 = 16 + entry.Bytes.Length;
-			if (flag2 && !flag && _tokens >= (double)num4)
+			Entry entry = _dirty[i];
+			bool intervalElapsed = nowMs - entry.LastSentMs >= entry.IntervalMs;
+			int cost = 16 + entry.Bytes.Length;
+			if (intervalElapsed && !outOfBudget && _tokens >= cost)
 			{
-				_tokens -= num4;
+				_tokens -= cost;
 				entry.Dirty = false;
 				entry.LastSentMs = nowMs;
 				_scratch.Add(new StateEntry(entry.NetId, entry.Key, entry.Version, entry.Bytes, entry.HostMs));
 				Sent++;
-				SentBytes += num4;
-				SentByKey[entry.Key] = (SentByKey.TryGetValue(entry.Key, out var value) ? (value + 1) : 1);
+				SentBytes += cost;
+				SentByKey[entry.Key] = SentByKey.TryGetValue(entry.Key, out var sent) ? sent + 1 : 1;
 			}
 			else
 			{
-				if (!flag2)
+				if (!intervalElapsed)
 				{
 					DeferredByCap++;
 				}
 				else
 				{
 					DeferredByBudget++;
-					flag = true;
+					outOfBudget = true;
 				}
-				_dirty[num2++] = entry;
+				_dirty[kept++] = entry;
 			}
 		}
-		_dirty.RemoveRange(num2, _dirty.Count - num2);
-		int count = output.Count;
+		_dirty.RemoveRange(kept, _dirty.Count - kept);
+		int messagesBefore = output.Count;
 		StateBatchMessage.Pack(_scratch, maxMessageBytes, output);
-		Messages += output.Count - count;
+		Messages += output.Count - messagesBefore;
 	}
 }
