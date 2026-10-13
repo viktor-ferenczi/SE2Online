@@ -35,16 +35,13 @@ internal static class DataTypeRegistry
 	{
 		if (_task == null)
 		{
-			_task = Task.Run(() =>
-			{
-				Run(log);
-			});
+			_task = Task.Run(() => Run(log));
 		}
 	}
 
 	public static void EnsureDone(IMpLog log)
 	{
-		Task task = _task;
+		Task? task = _task;
 		if (task == null)
 		{
 			Run(log);
@@ -57,7 +54,7 @@ internal static class DataTypeRegistry
 
 	internal static void Run(IMpLog log)
 	{
-		Stopwatch stopwatch = Stopwatch.StartNew();
+		var stopwatch = Stopwatch.StartNew();
 		try
 		{
 			BeforeAsymmetric = TypeId<AsymmetricDestructionData>.Value;
@@ -65,16 +62,15 @@ internal static class DataTypeRegistry
 			RuntimeDataInfo.Of(typeof(DEntity));
 			RuntimeDataInfo.Of(typeof(ConcurrentInit));
 			RuntimeDataInfo.Of(typeof(StagingTag));
-			HashSet<Type> hashSet = new HashSet<Type>();
-			Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
-			foreach (Assembly assembly in assemblies)
+			var found = new HashSet<Type>();
+			foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
 			{
-				string text = assembly.GetName().Name ?? "";
-				if (!text.StartsWith("VRage", StringComparison.Ordinal) && !text.StartsWith("Game2", StringComparison.Ordinal) && !text.StartsWith("SpaceEngineers2", StringComparison.Ordinal))
+				string name = assembly.GetName().Name ?? "";
+				if (!name.StartsWith("VRage", StringComparison.Ordinal) && !name.StartsWith("Game2", StringComparison.Ordinal) && !name.StartsWith("SpaceEngineers2", StringComparison.Ordinal))
 				{
 					continue;
 				}
-				Type[] types;
+				Type?[] types;
 				try
 				{
 					types = assembly.GetTypes();
@@ -83,42 +79,41 @@ internal static class DataTypeRegistry
 				{
 					types = ex.Types;
 				}
-				Type[] array = types;
-				foreach (Type type in array)
+				foreach (Type? type in types)
 				{
-					if (!(type == null))
+					if (type == null)
 					{
-						Collect(type, hashSet);
-						MemberInfo[] members = type.GetMembers(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-						for (int k = 0; k < members.Length; k++)
-						{
-							Collect(members[k], hashSet);
-						}
+						continue;
+					}
+					Collect(type, found);
+					foreach (MemberInfo member in type.GetMembers(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+					{
+						Collect(member, found);
 					}
 				}
 			}
-			MethodInfo method = typeof(RuntimeHelpers).GetMethod("IsReferenceOrContainsReferences");
-			foreach (Type item in hashSet)
+			MethodInfo isReferenceOrContainsReferences = typeof(RuntimeHelpers).GetMethod("IsReferenceOrContainsReferences");
+			foreach (Type type in found)
 			{
 				try
 				{
-					if (!item.IsValueType || item.IsEnum || item.IsPrimitive || item.ContainsGenericParameters || item.IsByRefLike || item == typeof(DEntity))
+					if (!type.IsValueType || type.IsEnum || type.IsPrimitive || type.ContainsGenericParameters || type.IsByRefLike || type == typeof(DEntity))
 					{
 						Skipped++;
 						continue;
 					}
-					if ((bool)method.MakeGenericMethod(item).Invoke(null, null))
+					if ((bool)isReferenceOrContainsReferences.MakeGenericMethod(type).Invoke(null, null))
 					{
 						Skipped++;
 						continue;
 					}
-					object obj = typeof(TypeId<>).MakeGenericType(item).GetField("InternalValue", BindingFlags.Static | BindingFlags.NonPublic)?.GetValue(null);
-					if (obj is int && (int)obj != 0)
+					object? typeId = typeof(TypeId<>).MakeGenericType(type).GetField("InternalValue", BindingFlags.Static | BindingFlags.NonPublic)?.GetValue(null);
+					if (typeId is int && (int)typeId != 0)
 					{
 						AlreadyKnown++;
 						continue;
 					}
-					RuntimeDataInfo.Of(item);
+					RuntimeDataInfo.Of(type);
 					Registered++;
 				}
 				catch (Exception)
@@ -129,33 +124,33 @@ internal static class DataTypeRegistry
 			State = $"{Registered} data types registered up front ({AlreadyKnown} already known, {Skipped} not data, {Failed} failed) in {stopwatch.ElapsedMilliseconds} ms";
 			log.Info($"client: {State}; flora sector data: AsymmetricDestructionData type id {BeforeAsymmetric} -> {TypeId<AsymmetricDestructionData>.Value}, BreakableBodyMinVelocityOverride {BeforeVelocityOverride} -> {TypeId<BreakableBodyMinVelocityOverride>.Value} (0 = unregistered: written over the entity's own id)");
 		}
-		catch (Exception ex3)
+		catch (Exception ex)
 		{
-			State = $"scan failed ({ex3.GetType().Name}: {ex3.Message})";
-			log.Warn($"client: registering the game's data types failed ({ex3.GetType().Name}: {ex3.Message}); planet worlds may be unstable");
+			State = $"scan failed ({ex.GetType().Name}: {ex.Message})";
+			log.Warn($"client: registering the game's data types failed ({ex.GetType().Name}: {ex.Message}); planet worlds may be unstable");
 		}
 	}
 
 	private static void Collect(MemberInfo m, HashSet<Type> found)
 	{
-		IList<CustomAttributeData> customAttributesData;
+		IList<CustomAttributeData> attributes;
 		try
 		{
-			customAttributesData = m.GetCustomAttributesData();
+			attributes = m.GetCustomAttributesData();
 		}
 		catch (Exception)
 		{
 			return;
 		}
-		foreach (CustomAttributeData item in customAttributesData)
+		foreach (CustomAttributeData attribute in attributes)
 		{
 			try
 			{
-				foreach (CustomAttributeTypedArgument constructorArgument in item.ConstructorArguments)
+				foreach (CustomAttributeTypedArgument argument in attribute.ConstructorArguments)
 				{
-					Add(constructorArgument, found);
+					Add(argument, found);
 				}
-				foreach (CustomAttributeNamedArgument namedArgument in item.NamedArguments)
+				foreach (CustomAttributeNamedArgument namedArgument in attribute.NamedArguments)
 				{
 					Add(namedArgument.TypedValue, found);
 				}
@@ -168,22 +163,20 @@ internal static class DataTypeRegistry
 
 	private static void Add(CustomAttributeTypedArgument arg, HashSet<Type> found)
 	{
-		if (arg.Value is Type item)
+		if (arg.Value is Type type)
 		{
-			found.Add(item);
+			found.Add(type);
+			return;
 		}
-		else
+		if (arg.Value is not IReadOnlyCollection<CustomAttributeTypedArgument> elements)
 		{
-			if (!(arg.Value is IReadOnlyCollection<CustomAttributeTypedArgument> readOnlyCollection))
+			return;
+		}
+		foreach (CustomAttributeTypedArgument element in elements)
+		{
+			if (element.Value is Type elementType)
 			{
-				return;
-			}
-			foreach (CustomAttributeTypedArgument item3 in readOnlyCollection)
-			{
-				if (item3.Value is Type item2)
-				{
-					found.Add(item2);
-				}
+				found.Add(elementType);
 			}
 		}
 	}

@@ -19,55 +19,37 @@ internal static class ObservableRules
 
 	public const string Prefix = "Keen.VRage.Multiplayer.Replications.ObservableObjectReplicationSessionComponent+";
 
-	private static readonly ConcurrentDictionary<IMemberAccessor, bool> NoReplicate = new ConcurrentDictionary<IMemberAccessor, bool>(ReferenceEqualityComparer.Instance);
+	private static readonly ConcurrentDictionary<IMemberAccessor, bool> NoReplicate = new(ReferenceEqualityComparer.Instance);
 
-	private static readonly ConcurrentDictionary<IMemberAccessor, bool> FromClients = new ConcurrentDictionary<IMemberAccessor, bool>(ReferenceEqualityComparer.Instance);
+	private static readonly ConcurrentDictionary<IMemberAccessor, bool> FromClients = new(ReferenceEqualityComparer.Instance);
 
-	public static bool IsNoReplicate(AccessibleTypeInfo.MemberInfo m)
-	{
-		return NoReplicate.GetOrAdd(m.Accessor, (IMemberAccessor a) => a.Member.HasAttribute<NoReplicateAttribute>());
-	}
+	public static bool IsNoReplicate(AccessibleTypeInfo.MemberInfo m) =>
+		NoReplicate.GetOrAdd(m.Accessor, (IMemberAccessor a) => a.Member.HasAttribute<NoReplicateAttribute>());
 
-	public static bool IsSyncFromClients(AccessibleTypeInfo.MemberInfo m)
-	{
-		return FromClients.GetOrAdd(m.Accessor, (IMemberAccessor a) => a.Member.HasAttribute<SyncFromClients>());
-	}
+	public static bool IsSyncFromClients(AccessibleTypeInfo.MemberInfo m) =>
+		FromClients.GetOrAdd(m.Accessor, (IMemberAccessor a) => a.Member.HasAttribute<SyncFromClients>());
 
-	public static bool TryReplicating(AccessibleTypeInfo info, string name, out AccessibleTypeInfo.MemberInfo member)
-	{
-		if (info.Members.TryGetValue(name, out member) && member.CanWrite)
-		{
-			return !IsNoReplicate(member);
-		}
-		return false;
-	}
+	public static bool TryReplicating(AccessibleTypeInfo info, string name, out AccessibleTypeInfo.MemberInfo member) =>
+		info.Members.TryGetValue(name, out member) && member.CanWrite && !IsNoReplicate(member);
 
-	public static bool IsObservedList(object? value)
-	{
-		if (value is IList list)
-		{
-			return list is INotifyCollectionChanged;
-		}
-		return false;
-	}
+	public static bool IsObservedList(object? value) => value is IList list && list is INotifyCollectionChanged;
 
 	public static Type ElementType(Type listType)
 	{
-		Type type = listType;
-		while (type != null && type != typeof(object))
+		Type? current = listType;
+		while (current != null && current != typeof(object))
 		{
-			if (type.IsGenericType && type.GetGenericArguments().Length == 1)
+			if (current.IsGenericType && current.GetGenericArguments().Length == 1)
 			{
-				return type.GetGenericArguments()[0];
+				return current.GetGenericArguments()[0];
 			}
-			type = type.BaseType;
+			current = current.BaseType;
 		}
-		Type[] interfaces = listType.GetInterfaces();
-		foreach (Type type2 in interfaces)
+		foreach (Type iface in listType.GetInterfaces())
 		{
-			if (type2.IsGenericType && type2.GetGenericTypeDefinition() == typeof(IList<>))
+			if (iface.IsGenericType && iface.GetGenericTypeDefinition() == typeof(IList<>))
 			{
-				return type2.GetGenericArguments()[0];
+				return iface.GetGenericArguments()[0];
 			}
 		}
 		return typeof(object);

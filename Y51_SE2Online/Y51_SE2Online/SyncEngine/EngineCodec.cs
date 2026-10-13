@@ -37,19 +37,9 @@ internal static class EngineCodec
 
 	private static readonly FieldInfo? CloseField = typeof(Session).GetField("EntitiesForClose", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
-	private static readonly FieldInfo?[] CloseFields = new FieldInfo[2] { PendingCloseField, CloseField };
+	private static readonly FieldInfo?[] CloseFields = new[] { PendingCloseField, CloseField };
 
-	public static bool CloseQueuesReachable
-	{
-		get
-		{
-			if (PendingCloseField != null)
-			{
-				return CloseField != null;
-			}
-			return false;
-		}
-	}
+	public static bool CloseQueuesReachable => PendingCloseField != null && CloseField != null;
 
 	private static SerializationContext Context(Stream s, string name, NetIdProxyContext proxies, HashSet<Blob>? blobs = null)
 	{
@@ -60,13 +50,14 @@ internal static class EngineCodec
 		return new SerializationContext(s, name, proxies, new DefinitionManagerDefinitionSerializationContext(Singleton<DefinitionManager>.Instance));
 	}
 
+	// The engine serializers allocate from the bump allocator; set it up for the call unless the caller already did.
 	private static T WithBump<T>(Func<T> f)
 	{
-		BumpAllocator instance = BumpAllocator.Instance;
-		bool flag = !instance.Initialized;
-		if (flag)
+		BumpAllocator allocator = BumpAllocator.Instance;
+		bool ownsAllocator = !allocator.Initialized;
+		if (ownsAllocator)
 		{
-			instance.Initialize();
+			allocator.Initialize();
 		}
 		try
 		{
@@ -74,9 +65,9 @@ internal static class EngineCodec
 		}
 		finally
 		{
-			if (flag)
+			if (ownsAllocator)
 			{
-				instance.Dispose();
+				allocator.Dispose();
 			}
 		}
 	}
@@ -85,12 +76,12 @@ internal static class EngineCodec
 	{
 		return WithBump(() =>
 		{
-			using MemoryStream memoryStream = new MemoryStream();
-			using (SerializationContext context = Context(memoryStream, "y51online-bundle.vrb", proxies, blobs))
+			using var stream = new MemoryStream();
+			using (SerializationContext context = Context(stream, "y51online-bundle.vrb", proxies, blobs))
 			{
 				SerializationHelper.Serialize(context, in bundle, SerializerFormat.Binary);
 			}
-			return memoryStream.ToArray();
+			return stream.ToArray();
 		});
 	}
 
@@ -98,7 +89,7 @@ internal static class EngineCodec
 	{
 		return WithBump(() =>
 		{
-			using MemoryStream s = new MemoryStream(bytes);
+			using var s = new MemoryStream(bytes);
 			using SerializationContext context = Context(s, "y51online-bundle.vrb", proxies, blobs);
 			return SerializationHelper.Deserialize<EntityBundle>(context, SerializerFormat.Binary) ?? throw new InvalidDataException("bundle deserialized to null");
 		});
@@ -108,12 +99,12 @@ internal static class EngineCodec
 	{
 		return WithBump(() =>
 		{
-			using MemoryStream memoryStream = new MemoryStream();
-			using (SerializationContext context = Context(memoryStream, "y51online-snapshot.vrb", proxies, blobs))
+			using var stream = new MemoryStream();
+			using (SerializationContext context = Context(stream, "y51online-snapshot.vrb", proxies, blobs))
 			{
 				SerializationHelper.Serialize(context, in snapshot, SerializerFormat.Binary);
 			}
-			return memoryStream.ToArray();
+			return stream.ToArray();
 		});
 	}
 
@@ -121,7 +112,7 @@ internal static class EngineCodec
 	{
 		return WithBump(() =>
 		{
-			using MemoryStream s = new MemoryStream(bytes);
+			using var s = new MemoryStream(bytes);
 			using SerializationContext context = Context(s, "y51online-snapshot.vrb", proxies, blobs);
 			return SerializationHelper.Deserialize<SessionComponentsSnapshot>(context, SerializerFormat.Binary);
 		});
@@ -131,17 +122,12 @@ internal static class EngineCodec
 	{
 		return WithBump(() =>
 		{
-			using MemoryStream memoryStream = new MemoryStream();
-			using (SerializationContext serializationContext = Context(memoryStream, "y51online-object.vrb", proxies))
+			using var stream = new MemoryStream();
+			using (SerializationContext context = Context(stream, "y51online-object.vrb", proxies))
 			{
-				serializeGeneric.MakeGenericMethod(t).Invoke(null, new object[3]
-				{
-					serializationContext,
-					o,
-					SerializerFormat.Binary
-				});
+				serializeGeneric.MakeGenericMethod(t).Invoke(null, new object[] { context, o, SerializerFormat.Binary });
 			}
-			return memoryStream.ToArray();
+			return stream.ToArray();
 		});
 	}
 
@@ -149,101 +135,94 @@ internal static class EngineCodec
 	{
 		return WithBump(() =>
 		{
-			using MemoryStream s = new MemoryStream(b);
-			using SerializationContext serializationContext = Context(s, "y51online-object.vrb", proxies);
-			return deserializeGeneric.MakeGenericMethod(t).Invoke(null, new object[2]
-			{
-				serializationContext,
-				SerializerFormat.Binary
-			});
+			using var s = new MemoryStream(b);
+			using SerializationContext context = Context(s, "y51online-object.vrb", proxies);
+			return deserializeGeneric.MakeGenericMethod(t).Invoke(null, new object[] { context, SerializerFormat.Binary });
 		});
 	}
 
-	public static Guid Id(Blob b)
-	{
-		return Guid.Parse(b.ToString());
-	}
+	public static Guid Id(Blob b) => Guid.Parse(b.ToString());
 
 	public static List<Guid> Ids(IEnumerable<Blob> blobs)
 	{
-		List<Guid> list = new List<Guid>();
+		var ids = new List<Guid>();
 		foreach (Blob blob in blobs)
 		{
-			list.Add(Id(blob));
+			ids.Add(Id(blob));
 		}
-		return list;
+		return ids;
 	}
 
+	// Serializes each session component on its own to find which blobs it references, keeping only the
+	// blobs of components the client also runs.
 	public static HashSet<Blob> SnapshotBlobs(SessionComponentsSnapshot snapshot, Func<Type, bool> clientUses, out int serverOnly, out List<string> owners)
 	{
-		HashSet<Blob> hashSet = new HashSet<Blob>();
+		var needed = new HashSet<Blob>();
 		serverOnly = 0;
 		owners = new List<string>();
-		NetIdProxyContext proxies = new NetIdProxyContext((Entity _) => 0, null);
-		SessionComponentsSnapshot.ComponentInfo[] array = snapshot.Components ?? Array.Empty<SessionComponentsSnapshot.ComponentInfo>();
-		for (int num = 0; num < array.Length; num++)
+		var proxies = new NetIdProxyContext((Entity _) => 0, null);
+		foreach (SessionComponentsSnapshot.ComponentInfo component in snapshot.Components ?? Array.Empty<SessionComponentsSnapshot.ComponentInfo>())
 		{
-			SessionComponentsSnapshot.ComponentInfo componentInfo = array[num];
-			if (componentInfo.ObjectBuilder == null)
+			if (component.ObjectBuilder == null)
 			{
 				continue;
 			}
-			HashSet<Blob> hashSet2 = new HashSet<Blob>();
-			SessionComponentsSnapshot sessionComponentsSnapshot = new SessionComponentsSnapshot();
-			sessionComponentsSnapshot.Components = new SessionComponentsSnapshot.ComponentInfo[1] { componentInfo };
-			SerializeSnapshot(sessionComponentsSnapshot, proxies, hashSet2);
-			if (hashSet2.Count != 0)
+			var referenced = new HashSet<Blob>();
+			var single = new SessionComponentsSnapshot();
+			single.Components = new[] { component };
+			SerializeSnapshot(single, proxies, referenced);
+			if (referenced.Count != 0)
 			{
-				if (clientUses(componentInfo.ObjectBuilder.GetType()))
+				if (clientUses(component.ObjectBuilder.GetType()))
 				{
-					hashSet.UnionWith(hashSet2);
-					owners.Add($"{componentInfo.Type?.Name ?? "?"} {hashSet2.Count}");
+					needed.UnionWith(referenced);
+					owners.Add($"{component.Type?.Name ?? "?"} {referenced.Count}");
 				}
 				else
 				{
-					serverOnly += hashSet2.Count;
-					owners.Add($"{componentInfo.Type?.Name ?? "?"} {hashSet2.Count} (server-only, not sent)");
+					serverOnly += referenced.Count;
+					owners.Add($"{component.Type?.Name ?? "?"} {referenced.Count} (server-only, not sent)");
 				}
 			}
 		}
-		return hashSet;
+		return needed;
 	}
 
 	public static HashSet<Type> SessionObjectBuilderTypes(Session session)
 	{
-		HashSet<Type> hashSet = new HashSet<Type>();
+		var types = new HashSet<Type>();
 		foreach (Component component in session.SessionComponents.Components)
 		{
 			Type objectBuilder = RuntimeComponentInfo.For(component.GetType()).ObjectBuilder;
 			if (objectBuilder != null)
 			{
-				hashSet.Add(objectBuilder);
+				types.Add(objectBuilder);
 			}
 		}
-		return hashSet;
+		return types;
 	}
 
 	public static Dictionary<Guid, byte[]?> LoadBlobs(IReadOnlyDataOffloading offloading, IEnumerable<Blob> blobs, TimeSpan timeout, out int failed, out string? firstError)
 	{
-		Dictionary<Guid, byte[]> dictionary = new Dictionary<Guid, byte[]>();
+		var loaded = new Dictionary<Guid, byte[]?>();
 		failed = 0;
 		firstError = null;
 		foreach (Blob blob in blobs)
 		{
-			Guid guid = Id(blob);
-			if (dictionary.ContainsKey(guid))
+			Guid id = Id(blob);
+			if (loaded.ContainsKey(id))
 			{
 				continue;
 			}
-			byte[] result = null;
+			byte[]? data = null;
 			try
 			{
 				Task<byte[]> task = offloading.LoadData(blob);
 				if (task.IsCompleted)
 				{
-					result = task.GetAwaiter().GetResult();
+					data = task.GetAwaiter().GetResult();
 				}
-				else if (!task.WaitBlocking(timeout, out result))
+				else if (!task.WaitBlocking(timeout, out data))
 				{
 					throw new TimeoutException($"LoadData did not finish in {timeout.TotalSeconds:0} s");
 				}
@@ -251,15 +230,12 @@ internal static class EngineCodec
 			catch (Exception ex)
 			{
 				failed++;
-				if (firstError == null)
-				{
-					firstError = $"{guid}: {ex.GetType().Name}: {ex.Message}";
-				}
-				result = null;
+				firstError ??= $"{id}: {ex.GetType().Name}: {ex.Message}";
+				data = null;
 			}
-			dictionary[guid] = result;
+			loaded[id] = data;
 		}
-		return dictionary;
+		return loaded;
 	}
 
 	public static void Register(IStreamedOutBlobs target, Guid id, byte[] data)
@@ -286,8 +262,8 @@ internal static class EngineCodec
 
 	public static bool IsClosing(Session session, Entity e)
 	{
-		HashSet<Entity> obj = PendingCloseField?.GetValue(session) as HashSet<Entity>;
-		if (obj == null || !obj.Contains(e))
+		var pending = PendingCloseField?.GetValue(session) as HashSet<Entity>;
+		if (pending == null || !pending.Contains(e))
 		{
 			return (CloseField?.GetValue(session) as HashSet<Entity>)?.Contains(e) ?? false;
 		}
@@ -297,60 +273,56 @@ internal static class EngineCodec
 	public static int PurgeDeadFromCloseQueues(Session session, out string? sample)
 	{
 		sample = null;
-		int num = 0;
-		FieldInfo[] closeFields = CloseFields;
-		for (int i = 0; i < closeFields.Length; i++)
+		int purged = 0;
+		foreach (FieldInfo? field in CloseFields)
 		{
-			if (!(closeFields[i]?.GetValue(session) is HashSet<Entity> { Count: not 0 } hashSet))
+			if (field?.GetValue(session) is not HashSet<Entity> { Count: not 0 } queue)
 			{
 				continue;
 			}
-			List<Entity> list = null;
-			foreach (Entity item in hashSet)
+			List<Entity>? dead = null;
+			foreach (Entity entity in queue)
 			{
-				if (IsDead(item))
+				if (IsDead(entity))
 				{
-					(list ?? (list = new List<Entity>())).Add(item);
+					(dead ??= new List<Entity>()).Add(entity);
 				}
 			}
-			if (list == null)
+			if (dead == null)
 			{
 				continue;
 			}
-			foreach (Entity item2 in list)
+			foreach (Entity entity in dead)
 			{
-				hashSet.Remove(item2);
-				num++;
-				if (sample == null)
-				{
-					sample = Describe(item2);
-				}
+				queue.Remove(entity);
+				purged++;
+				sample ??= Describe(entity);
 			}
 		}
-		return num;
+		return purged;
 	}
 
 	public static int RemoveFromCloseQueues(Session session, IEnumerable<Entity> entities)
 	{
-		HashSet<Entity> hashSet = PendingCloseField?.GetValue(session) as HashSet<Entity>;
-		HashSet<Entity> hashSet2 = CloseField?.GetValue(session) as HashSet<Entity>;
-		if ((hashSet == null || hashSet.Count == 0) && (hashSet2 == null || hashSet2.Count == 0))
+		var pending = PendingCloseField?.GetValue(session) as HashSet<Entity>;
+		var closing = CloseField?.GetValue(session) as HashSet<Entity>;
+		if ((pending == null || pending.Count == 0) && (closing == null || closing.Count == 0))
 		{
 			return 0;
 		}
-		int num = 0;
+		int removed = 0;
 		foreach (Entity entity in entities)
 		{
-			if (hashSet != null && hashSet.Remove(entity))
+			if (pending != null && pending.Remove(entity))
 			{
-				num++;
+				removed++;
 			}
-			if (hashSet2 != null && hashSet2.Remove(entity))
+			if (closing != null && closing.Remove(entity))
 			{
-				num++;
+				removed++;
 			}
 		}
-		return num;
+		return removed;
 	}
 
 	public static string Describe(Entity e)
@@ -361,7 +333,7 @@ internal static class EngineCodec
 			{
 				return "a never-built entity stub";
 			}
-			return $"a destroyed entity (composition {((e.CompositionData != null) ? "set" : "none")}, DEntity {e.DEntity})";
+			return $"a destroyed entity (composition {(e.CompositionData != null ? "set" : "none")}, DEntity {e.DEntity})";
 		}
 		catch (Exception ex)
 		{
@@ -381,41 +353,43 @@ internal static class EngineCodec
 
 	public static List<EntityLocator> Locate(EntityBundle bundle, IReadOnlyDictionary<Entity, EntityObjectBuilder> eobs, Func<Entity, uint> netId, out int unlocated)
 	{
-		Dictionary<EntityObjectBuilder, Entity> eobToEntity = new Dictionary<EntityObjectBuilder, Entity>(ReferenceEqualityComparer.Instance);
+		var eobToEntity = new Dictionary<EntityObjectBuilder, Entity>(ReferenceEqualityComparer.Instance);
 		foreach (KeyValuePair<Entity, EntityObjectBuilder> eob in eobs)
 		{
 			eobToEntity[eob.Value] = eob.Key;
 		}
-		List<EntityLocator> result = new List<EntityLocator>(eobs.Count);
-		HashSet<Entity> seen = new HashSet<Entity>(ReferenceEqualityComparer.Instance);
-		List<int> path = new List<int>();
+		var result = new List<EntityLocator>(eobs.Count);
+		var seen = new HashSet<Entity>(ReferenceEqualityComparer.Instance);
+		var path = new List<int>();
 		for (int i = 0; i < bundle.Builders.Count; i++)
 		{
 			Walk(bundle.Builders[i], i, 0);
 		}
-		for (int j = 0; j < bundle.Entities.Count; j++)
+		// Entities not reachable through a builder hierarchy are located by their bundle index alone.
+		for (int i = 0; i < bundle.Entities.Count; i++)
 		{
-			Entity entity = bundle.Entities[j];
+			Entity entity = bundle.Entities[i];
 			if (entity != null && eobs.ContainsKey(entity) && seen.Add(entity))
 			{
-				result.Add(new EntityLocator(netId(entity), j, Array.Empty<int>()));
+				result.Add(new EntityLocator(netId(entity), i, Array.Empty<int>()));
 			}
 		}
 		unlocated = eobs.Count - seen.Count;
 		return result;
+
 		void Walk(EntityObjectBuilder? eob, int root, int depth)
 		{
 			if (eob != null && depth <= 64)
 			{
-				if (eobToEntity.TryGetValue(eob, out Entity value) && seen.Add(value))
+				if (eobToEntity.TryGetValue(eob, out Entity entity) && seen.Add(entity))
 				{
-					result.Add(new EntityLocator(netId(value), root, path.ToArray()));
+					result.Add(new EntityLocator(netId(entity), root, path.ToArray()));
 				}
-				KeyedListChildren keyedListChildren = Children(eob);
-				for (int k = 0; k < keyedListChildren.Count; k++)
+				KeyedListChildren children = Children(eob);
+				for (int child = 0; child < children.Count; child++)
 				{
-					path.Add(k);
-					Walk(keyedListChildren[k], root, depth + 1);
+					path.Add(child);
+					Walk(children[child], root, depth + 1);
 					path.RemoveAt(path.Count - 1);
 				}
 			}
@@ -428,34 +402,33 @@ internal static class EngineCodec
 		{
 			return null;
 		}
-		EntityObjectBuilder entityObjectBuilder = bundle.Builders[loc.Root];
-		int[] path = loc.Path;
-		foreach (int num in path)
+		EntityObjectBuilder? eob = bundle.Builders[loc.Root];
+		foreach (int index in loc.Path)
 		{
-			KeyedListChildren keyedListChildren = Children(entityObjectBuilder);
-			if (num < 0 || num >= keyedListChildren.Count)
+			KeyedListChildren children = Children(eob);
+			if (index < 0 || index >= children.Count)
 			{
 				return null;
 			}
-			entityObjectBuilder = keyedListChildren[num];
-			if (entityObjectBuilder == null)
+			eob = children[index];
+			if (eob == null)
 			{
 				return null;
 			}
 		}
-		return entityObjectBuilder;
+		return eob;
 	}
 
 	public static (string Name, int Size) DescribeType(int typeId)
 	{
 		RuntimeDataInfo.Info info = RuntimeDataInfo.Of(typeId);
 		Type runtimeType = info.RuntimeType;
-		return (Name: (runtimeType == null) ? $"typeId#{typeId}" : (runtimeType.FullName + ", " + runtimeType.Assembly.GetName().Name), Size: info.Size);
+		return (runtimeType == null ? $"typeId#{typeId}" : runtimeType.FullName + ", " + runtimeType.Assembly.GetName().Name, info.Size);
 	}
 
 	public static (int TypeId, int Size)? ResolveType(string name)
 	{
-		Type type = Type.GetType(name, throwOnError: false);
+		Type? type = Type.GetType(name, throwOnError: false);
 		if (type == null || !type.IsValueType)
 		{
 			return null;
@@ -466,16 +439,15 @@ internal static class EngineCodec
 
 	public static List<DataBlob> Blobs(ref DEntityBuilder builder, TypeKeyTable keys)
 	{
-		List<DataBlob> list = new List<DataBlob>();
-		foreach (KeyValuePair<int, Memory<byte>?> datum in builder.Data)
+		var blobs = new List<DataBlob>();
+		foreach (KeyValuePair<int, Memory<byte>?> entry in builder.Data)
 		{
-			Memory<byte>? value = datum.Value;
-			if (value.HasValue)
+			Memory<byte>? value = entry.Value;
+			if (value is Memory<byte> data)
 			{
-				Memory<byte> valueOrDefault = value.GetValueOrDefault();
-				list.Add(new DataBlob(keys.GetOrAdd(datum.Key, DescribeType).Key, valueOrDefault.ToArray()));
+				blobs.Add(new DataBlob(keys.GetOrAdd(entry.Key, DescribeType).Key, data.ToArray()));
 			}
 		}
-		return list;
+		return blobs;
 	}
 }

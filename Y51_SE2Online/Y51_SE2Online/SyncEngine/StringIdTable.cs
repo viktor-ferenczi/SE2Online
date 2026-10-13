@@ -10,17 +10,17 @@ internal sealed class StringIdTable
 {
 	public const string Prefix = "\u0001sid\u0001";
 
-	private readonly HashSet<int> _announced = new HashSet<int>();
+	private readonly HashSet<int> _announced = new();
 
-	private readonly List<string> _pending = new List<string>();
+	private readonly List<string> _pending = new();
 
-	private readonly object _sync = new object();
+	private readonly object _sync = new();
 
 	public long Announced;
 
-	private readonly Dictionary<int, int> _toLocal = new Dictionary<int, int>();
+	private readonly Dictionary<int, int> _toLocal = new();
 
-	private readonly Dictionary<int, int> _toHost = new Dictionary<int, int>();
+	private readonly Dictionary<int, int> _toHost = new();
 
 	public long Registered;
 
@@ -30,38 +30,36 @@ internal sealed class StringIdTable
 
 	public static StringIdTable? Client;
 
-	public static string Entry(int hostIndex, string text)
-	{
-		return "\u0001sid\u0001" + hostIndex.ToString(CultureInfo.InvariantCulture) + "\u0001" + text;
-	}
+	public static string Entry(int hostIndex, string text) =>
+		Prefix + hostIndex.ToString(CultureInfo.InvariantCulture) + "\u0001" + text;
 
 	public void NoteHost(ReadOnlySpan<byte> payload, int[] offsets)
 	{
-		foreach (int num in offsets)
+		foreach (int offset in offsets)
 		{
-			if (num < 0 || num + 4 > payload.Length)
+			if (offset < 0 || offset + 4 > payload.Length)
 			{
 				continue;
 			}
-			int num2 = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(num));
-			if (num2 == 0)
+			int id = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(offset));
+			if (id == 0)
 			{
 				continue;
 			}
 			lock (_sync)
 			{
-				if (_announced.Add(num2))
+				if (_announced.Add(id))
 				{
 					string text;
 					try
 					{
-						text = StringId.FromId(num2).String ?? "";
+						text = StringId.FromId(id).String ?? "";
 					}
 					catch (Exception)
 					{
 						text = "";
 					}
-					_pending.Add(Entry(num2, text));
+					_pending.Add(Entry(id, text));
 					Announced++;
 				}
 			}
@@ -76,7 +74,7 @@ internal sealed class StringIdTable
 			{
 				return null;
 			}
-			List<string> result = new List<string>(_pending);
+			var result = new List<string>(_pending);
 			_pending.Clear();
 			return result;
 		}
@@ -84,20 +82,20 @@ internal sealed class StringIdTable
 
 	public bool TryRegister(string entry)
 	{
-		if (!entry.StartsWith("\u0001sid\u0001", StringComparison.Ordinal))
+		if (!entry.StartsWith(Prefix, StringComparison.Ordinal))
 		{
 			return false;
 		}
-		int num = entry.IndexOf('\u0001', "\u0001sid\u0001".Length);
-		if (num < 0 || !int.TryParse(entry.AsSpan("\u0001sid\u0001".Length, num - "\u0001sid\u0001".Length), NumberStyles.Integer, CultureInfo.InvariantCulture, out var result))
+		int separator = entry.IndexOf('\u0001', Prefix.Length);
+		if (separator < 0 || !int.TryParse(entry.AsSpan(Prefix.Length, separator - Prefix.Length), NumberStyles.Integer, CultureInfo.InvariantCulture, out int hostId))
 		{
 			return true;
 		}
-		int id = StringId.Get(entry.Substring(num + 1)).Id;
+		int localId = StringId.Get(entry.Substring(separator + 1)).Id;
 		lock (_toLocal)
 		{
-			_toLocal[result] = id;
-			_toHost[id] = result;
+			_toLocal[hostId] = localId;
+			_toHost[localId] = hostId;
 		}
 		Registered++;
 		return true;
@@ -105,34 +103,32 @@ internal sealed class StringIdTable
 
 	public byte[]? Map(byte[] payload, int[] offsets, bool toLocal)
 	{
-		byte[] array = (byte[])payload.Clone();
+		byte[] mapped = (byte[])payload.Clone();
 		lock (_toLocal)
 		{
-			Dictionary<int, int> dictionary = (toLocal ? _toLocal : _toHost);
-			foreach (int num in offsets)
+			Dictionary<int, int> map = toLocal ? _toLocal : _toHost;
+			foreach (int offset in offsets)
 			{
-				if (num < 0 || num + 4 > array.Length)
+				if (offset < 0 || offset + 4 > mapped.Length)
 				{
 					return null;
 				}
-				int num2 = BinaryPrimitives.ReadInt32LittleEndian(array.AsSpan(num));
-				if (num2 != 0)
+				int id = BinaryPrimitives.ReadInt32LittleEndian(mapped.AsSpan(offset));
+				if (id != 0)
 				{
-					if (!dictionary.TryGetValue(num2, out var value))
+					if (!map.TryGetValue(id, out int other))
 					{
 						Unknown++;
 						return null;
 					}
-					BinaryPrimitives.WriteInt32LittleEndian(array.AsSpan(num), value);
+					BinaryPrimitives.WriteInt32LittleEndian(mapped.AsSpan(offset), other);
 				}
 			}
 		}
 		Translated++;
-		return array;
+		return mapped;
 	}
 
-	public string Describe()
-	{
-		return $"StringIds: {Registered} from the host, {Translated} translated, {Unknown} unknown (dropped)";
-	}
+	public string Describe() =>
+		$"StringIds: {Registered} from the host, {Translated} translated, {Unknown} unknown (dropped)";
 }
