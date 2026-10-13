@@ -54,6 +54,8 @@ public sealed class MpTransport : ITransport, IDisposable
 
 		public List<byte[]>? Early;
 
+		public int EarlyBytes;
+
 		public bool StateAckDirty;
 
 		public long LastStateSentMs;
@@ -143,6 +145,8 @@ public sealed class MpTransport : ITransport, IDisposable
 	public event Action<PeerId, IReadOnlyList<ulong>>? StateAcked;
 
 	public event Action<PeerId, IReadOnlyList<ulong>>? StateLost;
+
+	public Func<PeerId, bool>? BulkGate { get; set; }
 
 	public MpTransport(IPacketLink link, TransportOptions options, IMpLog log, Func<long>? clock = null)
 	{
@@ -467,11 +471,13 @@ public sealed class MpTransport : ITransport, IDisposable
 		}
 		else if (!p.Ready && header.Kind != FrameKind.Hello && header.Kind != FrameKind.Bye)
 		{
-			// Frames can overtake the Hello across lanes; hold them until the handshake completes.
+			// Frames can overtake the Hello across lanes; hold a few until the handshake completes.
 			p.Early ??= new List<byte[]>();
-			if (p.Early.Count >= _o.MaxEarlyFrames)
+			p.EarlyBytes += m.Data.Length;
+			if (p.Early.Count >= _o.MaxEarlyFrames || p.EarlyBytes > _o.MaxEarlyBytes)
 			{
-				ProtocolError(p, $"more than {_o.MaxEarlyFrames} frames before Hello");
+				_log.Warn($"peer {p.Id}: protocol error: more than {_o.MaxEarlyFrames} frames or {_o.MaxEarlyBytes} B before Hello; disconnecting");
+				Close(p, DisconnectCodes.ProtocolError, "too much data before Hello", byPeer: false, "local", notifyPeer: true);
 			}
 			else
 			{
@@ -480,7 +486,22 @@ public sealed class MpTransport : ITransport, IDisposable
 		}
 		else
 		{
-			HandleFrame(p, in header, payload, m.Data.Length, now);
+			HandleFrameSafe(p, in header, payload, m.Data.Length, now);
+		}
+	}
+
+	// One peer's malformed frame must not reach Poll's caller: that would stop networking for everyone.
+	private void HandleFrameSafe(PeerState p, in FrameHeader h, ReadOnlySpan<byte> payload, int frameBytes, long now)
+	{
+		try
+		{
+			HandleFrame(p, in h, payload, frameBytes, now);
+		}
+		catch (Exception ex)
+		{
+			p.Stats.ProtocolErrors++;
+			_log.Warn($"peer {p.Id}: protocol error: malformed {h.Channel}/{h.Kind} frame ({frameBytes} B): {ex.GetType().Name}: {ex.Message}; disconnecting");
+			Close(p, DisconnectCodes.ProtocolError, $"malformed {h.Kind} frame", byPeer: false, "local", notifyPeer: true);
 		}
 	}
 
@@ -552,7 +573,7 @@ public sealed class MpTransport : ITransport, IDisposable
 		}
 		case FrameKind.Data:
 			channelStats.MessagesReceived++;
-			Raise(p.Id, h.Channel, payload.ToArray());
+			Raise(p, h.Channel, payload.ToArray());
 			break;
 		case FrameKind.Fragment:
 		{
@@ -561,15 +582,23 @@ public sealed class MpTransport : ITransport, IDisposable
 				ProtocolError(p, "malformed fragment");
 				break;
 			}
+			if (fragment.TotalLength > _o.MaxBulkBytesBeforeAdmit && BulkGate is { } gate && !gate(p.Id))
+			{
+				_log.Warn($"peer {p.Id}: protocol error: {fragment.TotalLength} B bulk transfer before the join was accepted; disconnecting");
+				Close(p, DisconnectCodes.ProtocolError, "bulk data before the join was accepted", byPeer: false, "local", notifyPeer: true);
+				break;
+			}
 			byte[] complete;
 			switch (p.Reassembler.Add(in fragment, chunk, now, out complete))
 			{
 			case ReassemblyResult.Rejected:
-				ProtocolError(p, "fragment rejected: " + p.Reassembler.LastError);
+				// A lost fragment breaks the reliable stream for good, and honest peers never send one.
+				_log.Warn($"peer {p.Id}: protocol error: fragment rejected: {p.Reassembler.LastError}; disconnecting");
+				Close(p, DisconnectCodes.ProtocolError, "fragment rejected", byPeer: false, "local", notifyPeer: true);
 				break;
 			case ReassemblyResult.Complete:
 				channelStats.MessagesReceived++;
-				Raise(p.Id, Channel.Bulk, complete);
+				Raise(p, Channel.Bulk, complete);
 				break;
 			}
 			break;
@@ -616,7 +645,7 @@ public sealed class MpTransport : ITransport, IDisposable
 		{
 			p.StateAckDirty = true;
 			p.Stats.Channels[(int)Channel.State].MessagesReceived++;
-			Raise(p.Id, Channel.State, rest.ToArray());
+			Raise(p, Channel.State, rest.ToArray());
 		}
 	}
 
@@ -645,9 +674,10 @@ public sealed class MpTransport : ITransport, IDisposable
 			// Older builds end the Hello here.
 			p.InstanceId = reader.Remaining >= 8 ? reader.U64() : 0;
 		}
-		catch (ArgumentOutOfRangeException)
+		catch (Exception ex) when (ex is ArgumentOutOfRangeException or IndexOutOfRangeException)
 		{
-			ProtocolError(p, "malformed Hello");
+			_log.Warn($"peer {p.Id}: protocol error: malformed Hello ({payload.Length} B); disconnecting");
+			Close(p, DisconnectCodes.ProtocolError, "malformed Hello", byPeer: false, "local", notifyPeer: true);
 			return;
 		}
 		if (protocol != Frame.ProtocolVersion)
@@ -715,7 +745,7 @@ public sealed class MpTransport : ITransport, IDisposable
 			}
 			if (Frame.TryRead(frame, out var header, out var framePayload, out string _))
 			{
-				HandleFrame(p, in header, framePayload, frame.Length, now);
+				HandleFrameSafe(p, in header, framePayload, frame.Length, now);
 			}
 		}
 	}
@@ -811,15 +841,17 @@ public sealed class MpTransport : ITransport, IDisposable
 		return false;
 	}
 
-	private void Raise(PeerId peer, Channel ch, byte[] data)
+	private void Raise(PeerState p, Channel ch, byte[] data)
 	{
 		try
 		{
-			MessageReceived?.Invoke(peer, ch, data);
+			MessageReceived?.Invoke(p.Id, ch, data);
 		}
 		catch (Exception ex)
 		{
-			_log.Error($"MessageReceived handler threw: {ex}");
+			p.Stats.ProtocolErrors++;
+			_log.Error($"peer {p.Id}: MessageReceived handler threw on a {data.Length} B {ch} message, disconnecting: {ex}");
+			Close(p, DisconnectCodes.ProtocolError, "message could not be handled", byPeer: false, "local", notifyPeer: true);
 		}
 	}
 

@@ -17,6 +17,9 @@ public interface ITransport : IDisposable
 
 	event Action<PeerId, IReadOnlyList<ulong>>? StateLost;
 
+	/// <summary>When set, peers it returns false for may only send small bulk messages; larger ones disconnect them.</summary>
+	Func<PeerId, bool>? BulkGate { get; set; }
+
 	ulong Send(PeerId peer, Channel channel, ReadOnlyMemory<byte> payload);
 
 	void Disconnect(PeerId peer, int code, string reason);

@@ -236,7 +236,11 @@ public sealed class ClientSession
 	{
 		if (Host == peer)
 		{
-			_phase = Phase.Disconnected;
+			// NetSession tells a refused join from a lost connection by this phase.
+			if (_phase != Phase.Rejected)
+			{
+				_phase = Phase.Disconnected;
+			}
 			_log.Warn($"sync(client): disconnected from host ({info})");
 		}
 	}
@@ -258,7 +262,8 @@ public sealed class ClientSession
 		}
 		catch (Exception ex) when (ex is ArgumentOutOfRangeException or IndexOutOfRangeException or ArgumentException)
 		{
-			_log.Warn($"sync(client): malformed {(SyncMsg)data[0]} ({data.Length} B on {ch}): {ex.Message}");
+			_log.Warn($"sync(client): malformed {(SyncMsg)data[0]} ({data.Length} B on {ch}): {ex.Message}; disconnecting");
+			_t.Disconnect(peer, DisconnectCodes.ProtocolError, $"malformed {(SyncMsg)data[0]}");
 		}
 	}
 
