@@ -114,7 +114,7 @@ internal sealed class ClientWorld
 
 	private InProcessReplication? _replication;
 
-	private Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent? _comp;
+	private InProcessReplicationSessionComponent? _comp;
 
 	private Entity? _sessionProxy;
 
@@ -314,7 +314,7 @@ internal sealed class ClientWorld
 
 	private long _namesBad;
 
-	private static readonly FieldInfo EntityBackingField = EngineMembers.Field(HookTargets.Reflected.Single((EngineMember m) => m.Id == "component-entity"));
+	private static readonly FieldInfo EntityBackingField = EngineMembers.Field(HookTargets.Reflected.Single(m => m.Id == "component-entity"));
 
 	private readonly StringIdTable _sids = new StringIdTable();
 
@@ -328,7 +328,7 @@ internal sealed class ClientWorld
 
 	private long _gameTimeSyncs;
 
-	private readonly List<(Delegate Move, Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent Comp)> _earlyStories = new List<(Delegate, Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent)>();
+	private readonly List<(Delegate Move, InProcessReplicationSessionComponent Comp)> _earlyStories = new List<(Delegate, InProcessReplicationSessionComponent)>();
 
 	private bool _earlyStoriesSent;
 
@@ -515,7 +515,7 @@ internal sealed class ClientWorld
 	// Test diagnostics: the last smoothed transform written per NetId, while set.
 	internal Dictionary<uint, byte[]>? WatchWritten;
 
-	public System.Collections.Generic.IReadOnlyList<PlayerInfo> SessionPlayers => _session?.Players ?? System.Array.Empty<PlayerInfo>();
+	public IReadOnlyList<PlayerInfo> SessionPlayers => _session?.Players ?? Array.Empty<PlayerInfo>();
 
 	public static JoinProgress Progress { get; } = new JoinProgress();
 
@@ -525,22 +525,7 @@ internal sealed class ClientWorld
 
 	public bool IdleAfterJoin
 	{
-		get
-		{
-			bool flag = !_retired;
-			if (flag)
-			{
-				bool flag2 = _left || _startFailed || _lostReason != null;
-				if (!flag2)
-				{
-					JoinStage stage = Progress.Stage;
-					bool flag3 = ((stage - 12 <= JoinStage.WaitingForSteam) ? true : false);
-					flag2 = flag3;
-				}
-				flag = flag2;
-			}
-			return flag;
-		}
+		get => !_retired && (_left || _startFailed || _lostReason != null || Progress.Stage is JoinStage.Rejected or JoinStage.GaveUp);
 	}
 
 	public static event Action<string>? RejoinRequested;
@@ -589,7 +574,7 @@ internal sealed class ClientWorld
 
 	private void CloseSpectator(string why)
 	{
-		Entity spectator = _spectator;
+		var spectator = _spectator;
 		if (spectator == null)
 		{
 			return;
@@ -616,8 +601,8 @@ internal sealed class ClientWorld
 		{
 			return false;
 		}
-		Entity entity = AssignedEntity(_assignedNetId) ?? _ownCharacter;
-		return e != entity;
+		var own = AssignedEntity(_assignedNetId) ?? _ownCharacter;
+		return e != own;
 	}
 
 	internal bool IsOwnCharacterProxy(object? o)
@@ -631,7 +616,7 @@ internal sealed class ClientWorld
 
 	public static void GetNextCharacterPostfix(PlayerControllerComponent controller, ref IControllable? __result)
 	{
-		ClientWorld current = Current;
+		var current = Current;
 		if (current?._comp == null || __result == null || AdminAccess.LocalIsAdmin)
 		{
 			return;
@@ -661,40 +646,40 @@ internal sealed class ClientWorld
 
 	public static bool NextCharacterFocusPrefix(SpectatingModesSessionComponent __instance)
 	{
-		ClientWorld current = Current;
+		var current = Current;
 		if (current?._comp == null || AdminAccess.LocalIsAdmin)
 		{
 			return true;
 		}
 		try
 		{
-			CharacterControllableComponent characterControllableComponent = (current.AssignedEntity(current._assignedNetId) ?? current._ownCharacter)?.TryGet<CharacterControllableComponent>();
-			PlayerControllerComponent localPlayerController = __instance.LocalPlayerController;
-			if (characterControllableComponent == null || localPlayerController == null)
+			var ownControllable = (current.AssignedEntity(current._assignedNetId) ?? current._ownCharacter)?.TryGet<CharacterControllableComponent>();
+			var localPlayerController = __instance.LocalPlayerController;
+			if (ownControllable == null || localPlayerController == null)
 			{
 				// The game's F6 would pick a foreign character or ask for a debug-character spawn.
 				return false;
 			}
-			IControllable topControllable = localPlayerController.GetTopControllable();
-			if (topControllable != null && !(topControllable is SpectatorComponent) && ((IControllable)characterControllableComponent).Controller == localPlayerController)
+			var topControllable = localPlayerController.GetTopControllable();
+			if (topControllable != null && topControllable is not SpectatorComponent && ((IControllable)ownControllable).Controller == localPlayerController)
 			{
 				// Already on the own character; the game's F6 would RequestUnpossessionAll and drop a cockpit.
 				return false;
 			}
-			IControllable controllable = characterControllableComponent;
+			IControllable controllable = ownControllable;
 			while (true)
 			{
-				IControllable controllable2 = controllable.Entity.AsInterface<ISeatable>()?.CurrentSeat?.Entity.AsInterface<IControllable>();
-				if (controllable2 == null)
+				var seat = controllable.Entity.AsInterface<ISeatable>()?.CurrentSeat?.Entity.AsInterface<IControllable>();
+				if (seat == null)
 				{
 					break;
 				}
 				localPlayerController.CameraSystem.ResetCameraModeForEntity(controllable.Entity);
-				controllable = controllable2;
+				controllable = seat;
 			}
 			localPlayerController.CameraSystem.ResetCameraModeForEntity(controllable.Entity);
 			localPlayerController.RequestUnpossessionAll();
-			localPlayerController.RequestPossession(characterControllableComponent);
+			localPlayerController.RequestPossession(ownControllable);
 			current._possessRetryAtMs = 0L;
 			if (current._f6Logged++ < 3)
 			{
@@ -711,7 +696,7 @@ internal sealed class ClientWorld
 
 	public static bool SetEntityTypeToPossessPrefix(InitialEntityOptions toPossess)
 	{
-		ClientWorld current = Current;
+		var current = Current;
 		if (current?._comp == null || toPossess != InitialEntityOptions.Character)
 		{
 			return true;
@@ -728,10 +713,7 @@ internal sealed class ClientWorld
 		}
 	}
 
-	public static bool SpectatorKeyPrefix()
-	{
-		return Current?._comp == null || AdminAccess.LocalIsAdmin;
-	}
+	public static bool SpectatorKeyPrefix() => Current?._comp == null || AdminAccess.LocalIsAdmin;
 
 	private ClientWorld(IMpLog log, MpOptions o)
 	{
@@ -761,7 +743,7 @@ internal sealed class ClientWorld
 			{
 				DataTypeRegistry.Start(log);
 			}
-			ControlGuard.IsForeignCharacterHere = (Entity e) => Current?.IsForeignCharacter(e) ?? false;
+			ControlGuard.IsForeignCharacterHere = e => Current?.IsForeignCharacter(e) ?? false;
 		}
 		return Current;
 	}
@@ -801,7 +783,7 @@ internal sealed class ClientWorld
 
 	public static void GameUpdatePrefix(Keen.Game2.GameAppComponent __instance)
 	{
-		ClientWorld current = Current;
+		var current = Current;
 		if (current == null)
 		{
 			return;
@@ -810,9 +792,9 @@ internal sealed class ClientWorld
 		{
 			current.OnMainThread(__instance);
 		}
-		catch (Exception value)
+		catch (Exception ex)
 		{
-			current._log.WarnOnce("client-main-thread", $"client: main-thread hook failed: {value}");
+			current._log.WarnOnce("client-main-thread", $"client: main-thread hook failed: {ex}");
 		}
 	}
 
@@ -820,7 +802,7 @@ internal sealed class ClientWorld
 	{
 		try
 		{
-			return s_isTransitioning?.GetValue(app) is AtomicFlag atomicFlag && atomicFlag.IsSet;
+			return s_isTransitioning?.GetValue(app) is AtomicFlag flag && flag.IsSet;
 		}
 		catch (Exception ex)
 		{
@@ -833,10 +815,10 @@ internal sealed class ClientWorld
 	{
 		if (_mainQueue == null)
 		{
-			ContinuationQueue continuationQueue = Keen.VRage.Library.Threading.SynchronizationContext.Current?.Queue;
-			if (continuationQueue != null)
+			var queue = Keen.VRage.Library.Threading.SynchronizationContext.Current?.Queue;
+			if (queue != null)
 			{
-				_mainQueue = continuationQueue;
+				_mainQueue = queue;
 				_log.Info("client: main-thread continuation queue captured (" + where + ")");
 			}
 		}
@@ -844,32 +826,29 @@ internal sealed class ClientWorld
 
 	private void OnMainThread(Keen.Game2.GameAppComponent app)
 	{
-		bool flag = Environment.CurrentManagedThreadId == MpPlugin.MainThreadId;
-		if (flag && _mainQueue == null)
+		bool onMainThread = Environment.CurrentManagedThreadId == MpPlugin.MainThreadId;
+		if (onMainThread && _mainQueue == null)
 		{
 			_mainQueue = Keen.VRage.Library.Threading.SynchronizationContext.Current?.Queue;
 		}
 		if (!_mainThreadSeen)
 		{
 			_mainThreadSeen = true;
-			_log.Info($"client: frame hook active (GameAppComponent.GameUpdate) on thread '{Thread.CurrentThread.Name}' #{Environment.CurrentManagedThreadId} ({(flag ? "the main thread" : $"NOT the main thread #{MpPlugin.MainThreadId}")}); Keen sync context {((Keen.VRage.Library.Threading.SynchronizationContext.Current != null) ? "present" : "MISSING")}, main queue {((_mainQueue != null) ? "known" : "unknown")}");
+			_log.Info($"client: frame hook active (GameAppComponent.GameUpdate) on thread '{Thread.CurrentThread.Name}' #{Environment.CurrentManagedThreadId} ({(onMainThread ? "the main thread" : $"NOT the main thread #{MpPlugin.MainThreadId}")}); Keen sync context {((Keen.VRage.Library.Threading.SynchronizationContext.Current != null) ? "present" : "MISSING")}, main queue {((_mainQueue != null) ? "known" : "unknown")}");
 		}
-		long num = MpClock.NowMs();
-		bool flag2 = app.MainMenu != null;
-		bool flag3 = IsTransitioning(app);
+		long now = MpClock.NowMs();
+		bool atMenu = app.MainMenu != null;
+		bool transitioning = IsTransitioning(app);
 		bool clientUp = app.Client != null;
-		bool flag4 = MenuStep(flag2, flag3, clientUp, num, () =>
-		{
-			ReturnToMenu(app);
-		});
-		ShowProgress(app, num);
-		if (flag4 || !_startRequested || _startFailed)
+		bool menuHandled = MenuStep(atMenu, transitioning, clientUp, now, () => ReturnToMenu(app));
+		ShowProgress(app, now);
+		if (menuHandled || !_startRequested || _startFailed)
 		{
 			return;
 		}
 		if (_startIssued)
 		{
-			if (_configured || app.MainMenu == null || IsTransitioning(app) || num - _startAttemptMs < 3000)
+			if (_configured || app.MainMenu == null || IsTransitioning(app) || now - _startAttemptMs < 3000)
 			{
 				return;
 			}
@@ -882,10 +861,10 @@ internal sealed class ClientWorld
 				}
 				return;
 			}
-			_log.Warn($"client: still at the main menu {num - _startAttemptMs} ms after starting the client game; retrying");
+			_log.Warn($"client: still at the main menu {now - _startAttemptMs} ms after starting the client game; retrying");
 			_startIssued = false;
 		}
-		if (!flag2)
+		if (!atMenu)
 		{
 			if (!_waitingForMenuLogged)
 			{
@@ -896,7 +875,7 @@ internal sealed class ClientWorld
 			_menuSettledSinceMs = 0L;
 			return;
 		}
-		if (flag3)
+		if (transitioning)
 		{
 			if (!_waitingForTransitionLogged)
 			{
@@ -908,17 +887,17 @@ internal sealed class ClientWorld
 		}
 		if (_menuSettledSinceMs == 0L)
 		{
-			_menuSettledSinceMs = num;
+			_menuSettledSinceMs = now;
 		}
-		if (num - _menuSettledSinceMs >= 1000)
+		if (now - _menuSettledSinceMs >= 1000)
 		{
 			_startIssued = true;
 			_startAttempts++;
-			_startAttemptMs = num;
-			ContinuationQueue continuationQueue = _mainQueue ?? ((!flag) ? null : Keen.VRage.Library.Threading.SynchronizationContext.Current?.Queue);
-			if (continuationQueue != null)
+			_startAttemptMs = now;
+			var queue = _mainQueue ?? (!onMainThread ? null : Keen.VRage.Library.Threading.SynchronizationContext.Current?.Queue);
+			if (queue != null)
 			{
-				continuationQueue.Enqueue(Start);
+				queue.Enqueue(Start);
 				return;
 			}
 			_log.Warn($"client: no main-thread continuation queue known; starting the client game directly on thread #{Environment.CurrentManagedThreadId}");
@@ -928,18 +907,18 @@ internal sealed class ClientWorld
 		{
 			try
 			{
-				bool flag5 = _o.ClientMissions ?? (_session?.Accept?.HostMissions == true);
-				_log.Info($"client: starting the client game (attempt {_startAttempts}/{5}; single player's client recipe, host missions {(flag5 ? "on" : "off")})");
-				Report(ClientPhase.ClientGameStarting, $"attempt {_startAttempts}, missions {(flag5 ? "on" : "off")}");
+				bool missions = _o.ClientMissions ?? (_session?.Accept?.HostMissions == true);
+				_log.Info($"client: starting the client game (attempt {_startAttempts}/{5}; single player's client recipe, host missions {(missions ? "on" : "off")})");
+				Report(ClientPhase.ClientGameStarting, $"attempt {_startAttempts}, missions {(missions ? "on" : "off")}");
 				Progress.SetInGame(inGame: false);
 				Progress.Set(JoinStage.Loading, MpClock.NowMs());
-				RemoteClientGame.LoadAsync(app, flag5, _log, Report, (bool ok) =>
+				RemoteClientGame.LoadAsync(app, missions, _log, Report, ok =>
 				{
 					if (!ok)
 					{
 						_startAttemptMs = MpClock.NowMs() - 2000;
 					}
-				}, (Exception e) =>
+				}, e =>
 				{
 					_startFailed = true;
 					Progress.Set(JoinStage.Failed, MpClock.NowMs(), RemoteClientGame.Describe(e));
@@ -955,7 +934,7 @@ internal sealed class ClientWorld
 
 	public static bool ConfigurePrefix(NetworkGameClientCoreComponent __instance, SessionBuilder sessionBuilder)
 	{
-		ClientWorld current = Current;
+		var current = Current;
 		if (current == null || !current._startIssued)
 		{
 			return true;
@@ -974,11 +953,7 @@ internal sealed class ClientWorld
 
 	private bool Configure(NetworkGameClientCoreComponent core, SessionBuilder sb)
 	{
-		//IL_004c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0052: Expected Obj, but got Unknown
-		//IL_007c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0086: Expected Obj, but got Unknown
-		NetworkGameClientComponent client = core._client;
+		var client = core._client;
 		if (client == null || sb.IsServer)
 		{
 			return false;
@@ -989,30 +964,30 @@ internal sealed class ClientWorld
 			return true;
 		}
 		_configuredBuilder = sb;
-		ImmutableArray<PrefabBindingDefinition> immutableArray = Singleton<DefinitionManager>.Instance.GetDefinitionsOfType<PrefabBindingDefinition>().ToImmutableArray();
-		InProcessReplication val = new InProcessReplication(immutableArray);
+		var bindings = Singleton<DefinitionManager>.Instance.GetDefinitionsOfType<PrefabBindingDefinition>().ToImmutableArray();
+		var replication = new InProcessReplication(bindings);
 		sb.ExternalServices.Add((IGameClient)client);
-		((ISessionConfigurator)val.Client).ConfigureSession(sb);
-		sb.ExternalServices.Add<IReplicationPairingProvider>((IReplicationPairingProvider)new Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationComponent.SimpleReplicationPairingProvider(val.Server.ReplayContext));
-		Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent inProcessReplicationSessionComponent = (Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent)RuntimeHelpers.GetUninitializedObject(typeof(Keen.VRage.Multiplayer.Replications.InProcess.ServerSceneContext.ServerSessionComponent));
-		EntityBackingField.SetValue(inProcessReplicationSessionComponent, _proxies.GetOrCreate(1u));
-		val.Server.SessionComponent = inProcessReplicationSessionComponent;
+		((ISessionConfigurator)replication.Client).ConfigureSession(sb);
+		sb.ExternalServices.Add<IReplicationPairingProvider>(new InProcessReplicationComponent.SimpleReplicationPairingProvider(replication.Server.ReplayContext));
+		var serverComponent = (InProcessReplicationSessionComponent)RuntimeHelpers.GetUninitializedObject(typeof(ServerSceneContext.ServerSessionComponent));
+		EntityBackingField.SetValue(serverComponent, _proxies.GetOrCreate(1u));
+		replication.Server.SessionComponent = serverComponent;
 		sb.SessionComponents.WithComponent((ComponentType: typeof(SimpleReplicationMappingSessionComponent), ObjectBuilder: new SimpleReplicationMappingSessionComponentObjectBuilder
 		{
-			InProcessReplication = val
+			InProcessReplication = replication
 		}));
-		_replication = val;
+		_replication = replication;
 		_comp = null;
-		_worldApplied = (_spectatorQueued = (_failed = false));
-		_worldPartsApplied = (_worldEntitiesBuilt = 0);
+		_worldApplied = _spectatorQueued = _failed = false;
+		_worldPartsApplied = _worldEntitiesBuilt = 0;
 		_configured = true;
-		_log.Info($"client: client session configured with Keen's in-process client replication ({immutableArray.Length} prefab bindings, replay table {val.ReplayTable.Stubs?.Length ?? 0} commands) instead of the Empty* services");
+		_log.Info($"client: client session configured with Keen's in-process client replication ({bindings.Length} prefab bindings, replay table {replication.ReplayTable.Stubs?.Length ?? 0} commands) instead of the Empty* services");
 		return true;
 	}
 
 	public static bool PullPrefix(NetworkGameClientComponent __instance, SessionBuilder clientSession, ref Task __result)
 	{
-		ClientWorld current = Current;
+		var current = Current;
 		if (current == null || !current._configured)
 		{
 			return true;
@@ -1036,75 +1011,71 @@ internal sealed class ClientWorld
 		{
 			return _snapshot;
 		}
-		byte[] array = _snapshotRaw ?? (_snapshotRaw = _session?.TryTakeSnapshot() ?? throw new InvalidOperationException("no snapshot received"));
-		NetIdProxyContext netIdProxyContext = new NetIdProxyContext(null, (int id) => _proxies.GetOrCreate((uint)id));
-		_snapshot = EngineCodec.DeserializeSnapshot(array, netIdProxyContext);
-		_snapshotBytes = array.Length;
-		_snapshotRefs = netIdProxyContext.Read;
+		byte[] raw = _snapshotRaw ??= _session?.TryTakeSnapshot() ?? throw new InvalidOperationException("no snapshot received");
+		var context = new NetIdProxyContext(null, id => _proxies.GetOrCreate((uint)id));
+		_snapshot = EngineCodec.DeserializeSnapshot(raw, context);
+		_snapshotBytes = raw.Length;
+		_snapshotRefs = context.Read;
 		return _snapshot;
 	}
 
 	private void ApplySnapshot(NetworkGameClientComponent client, SessionBuilder clientSession)
 	{
-		Stopwatch stopwatch = Stopwatch.StartNew();
-		string text = "no blob service";
+		var stopwatch = Stopwatch.StartNew();
+		string blobNote = "no blob service";
 		try
 		{
 			RegisterBlobs(clientSession.ExternalServices.TryGet<IStreamedOutBlobs>(), "session load");
-			IReadOnlyList<Guid> readOnlyList = _session?.SnapshotBlobs ?? Array.Empty<Guid>();
-			int num = readOnlyList.Count((Guid id) =>
+			IReadOnlyList<Guid> blobs = _session?.SnapshotBlobs ?? Array.Empty<Guid>();
+			int missing = blobs.Count(id =>
 			{
-				ClientSession? session = _session;
+				var session = _session;
 				return session == null || !session.Blobs.Has(id);
 			});
-			text = $"{readOnlyList.Count} offloaded blobs referenced ({num} not here), {_blobsRegistered} registered";
-			if (num > 0)
+			blobNote = $"{blobs.Count} offloaded blobs referenced ({missing} not here), {_blobsRegistered} registered";
+			if (missing > 0)
 			{
-				_log.Warn($"client: the snapshot references {num} offloaded blob(s) this PC does not have; session components using them may misbehave");
+				_log.Warn($"client: the snapshot references {missing} offloaded blob(s) this PC does not have; session components using them may misbehave");
 			}
 		}
 		catch (Exception ex)
 		{
-			text = "blob registration failed: " + ex.GetType().Name;
+			blobNote = "blob registration failed: " + ex.GetType().Name;
 			_log.Error($"client: registering offloaded blobs at session load failed: {ex}");
 		}
-		SessionComponentsSnapshot sessionComponentsSnapshot = EnsureSnapshot();
-		sessionComponentsSnapshot.Apply(ref clientSession.SessionComponents);
-		JoinAccept joinAccept = _session?.Accept;
-		long num2 = joinAccept?.IdentityId ?? 0;
-		Keen.Game2.Simulation.GameSystems.GameTimes.GameTimeSessionComponentObjectBuilder? hostTime = sessionComponentsSnapshot.Components?.Select((SessionComponentsSnapshot.ComponentInfo c) => c.ObjectBuilder).OfType<Keen.Game2.Simulation.GameSystems.GameTimes.GameTimeSessionComponentObjectBuilder>().FirstOrDefault();
-		_hostGameTime0 = (hostTime != null && hostTime.Valid && joinAccept != null) ? hostTime.ElapsedTime : null;
-		_hostTick0 = joinAccept?.HostTick ?? 0;
-		TeamPermissions.Enabled = joinAccept != null && joinAccept.Settings.Identities && joinAccept.Settings.Grids == GridPermissionMode.Team;
-		string value = "shared identity (identities off on the host)";
+		var snapshot = EnsureSnapshot();
+		snapshot.Apply(ref clientSession.SessionComponents);
+		var accept = _session?.Accept;
+		long identityId = accept?.IdentityId ?? 0;
+		var hostTime = snapshot.Components?.Select(c => c.ObjectBuilder).OfType<Keen.Game2.Simulation.GameSystems.GameTimes.GameTimeSessionComponentObjectBuilder>().FirstOrDefault();
+		_hostGameTime0 = (hostTime != null && hostTime.Valid && accept != null) ? hostTime.ElapsedTime : null;
+		_hostTick0 = accept?.HostTick ?? 0;
+		TeamPermissions.Enabled = accept != null && accept.Settings.Identities && accept.Settings.Grids == GridPermissionMode.Team;
+		string players = "shared identity (identities off on the host)";
 		string summary = "no per-player data component";
-		foreach (EntityBuilder.ComponentBuildInfo item in clientSession.SessionComponents.Components ?? new List<EntityBuilder.ComponentBuildInfo>())
+		foreach (var info in clientSession.SessionComponents.Components ?? new List<EntityBuilder.ComponentBuildInfo>())
 		{
-			object? objectBuilder = item.ObjectBuilder;
-			InProcessPerPlayerDataClientSessionComponentObjectBuilder val = (InProcessPerPlayerDataClientSessionComponentObjectBuilder)((objectBuilder is InProcessPerPlayerDataClientSessionComponentObjectBuilder) ? objectBuilder : null);
-			if (val != null)
+			if (info.ObjectBuilder is InProcessPerPlayerDataClientSessionComponentObjectBuilder perPlayerOb)
 			{
-				val.ManuallyTranslatedData = PerPlayerDataFromSnapshot(sessionComponentsSnapshot, num2, out summary);
+				perPlayerOb.ManuallyTranslatedData = PerPlayerDataFromSnapshot(snapshot, identityId, out summary);
 			}
-			else if (num2 != 0L && item.Type == typeof(ClientPlayersSessionComponent))
+			else if (identityId != 0L && info.Type == typeof(ClientPlayersSessionComponent))
 			{
-				object? objectBuilder2 = item.ObjectBuilder;
-				PlayersSessionObjectBuilder val2 = (PlayersSessionObjectBuilder)((objectBuilder2 is PlayersSessionObjectBuilder) ? objectBuilder2 : null);
-				if (val2 != null)
+				if (info.ObjectBuilder is PlayersSessionObjectBuilder playersOb)
 				{
-					value = SeedPlayers(val2, _session.Players, joinAccept.ClientId, num2, joinAccept.PlayerId);
-					_playersOb = val2;
+					players = SeedPlayers(playersOb, _session.Players, accept.ClientId, identityId, accept.PlayerId);
+					_playersOb = playersOb;
 				}
 			}
 		}
-		if (num2 != 0L && _playersOb == null)
+		if (identityId != 0L && _playersOb == null)
 		{
 			_log.Error("client: the client session has no ClientPlayersSessionComponent builder to seed; this player will act as the host's identity locally");
 		}
 		_snapshotApplied = true;
-		string text2 = $"session snapshot applied: {sessionComponentsSnapshot.Components?.Length ?? 0} session components, {MpLogExtensions.Bytes(_snapshotBytes)}, {_snapshotRefs} entity refs (proxies; {SnapshotRefOwners(sessionComponentsSnapshot)}), players: {value}, per-player data: {summary}, {text}, {stopwatch.ElapsedMilliseconds} ms";
-		_log.Info("client: " + text2);
-		Report(ClientPhase.Progress, text2);
+		string status = $"session snapshot applied: {snapshot.Components?.Length ?? 0} session components, {MpLogExtensions.Bytes(_snapshotBytes)}, {_snapshotRefs} entity refs (proxies; {SnapshotRefOwners(snapshot)}), players: {players}, per-player data: {summary}, {blobNote}, {stopwatch.ElapsedMilliseconds} ms";
+		_log.Info("client: " + status);
+		Report(ClientPhase.Progress, status);
 	}
 
 	private object EmptyClientVisibleData(out string note)
@@ -1117,17 +1088,17 @@ internal sealed class ClientWorld
 		catch (Exception ex)
 		{
 			note = " (Keen's defaults unavailable: " + ex.GetType().Name + ")";
-			Type? typeFromHandle = typeof(InProcessPerPlayerDataBaseSessionComponent);
-			Type nestedType = typeFromHandle.GetNestedType("ClientVisibleData", BindingFlags.NonPublic);
-			Type? nestedType2 = typeFromHandle.GetNestedType("ClientVisiblePerPlayerData", BindingFlags.NonPublic);
-			object obj = Activator.CreateInstance(nestedType, nonPublic: true);
-			object value = Activator.CreateInstance(nestedType2, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new object[2]
+			var baseType = typeof(InProcessPerPlayerDataBaseSessionComponent);
+			var dataType = baseType.GetNestedType("ClientVisibleData", BindingFlags.NonPublic);
+			var perPlayerType = baseType.GetNestedType("ClientVisiblePerPlayerData", BindingFlags.NonPublic);
+			object data = Activator.CreateInstance(dataType, nonPublic: true);
+			object perPlayer = Activator.CreateInstance(perPlayerType, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new object[]
 			{
 				InProcessPerPlayerDataSessionComponent.HotfixIdentity,
 				true
 			}, null);
-			((IList)nestedType.GetProperty("Data").GetValue(obj)).Add(value);
-			return obj;
+			((IList)dataType.GetProperty("Data").GetValue(data)).Add(perPlayer);
+			return data;
 		}
 	}
 
@@ -1148,87 +1119,85 @@ internal sealed class ClientWorld
 
 	internal static object BuildPerPlayerData(SessionComponentsSnapshot snapshot, long own, out string summary)
 	{
-		//IL_035a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0364: Expected Obj, but got Unknown
-		long num = -1559595548L;
-		long num2 = ((own != 0L) ? own : num);
-		Dictionary<long, List<PerPlayerData>> dictionary = new Dictionary<long, List<PerPlayerData>>();
-		SessionComponentsSnapshot.ComponentInfo[] array = snapshot.Components ?? Array.Empty<SessionComponentsSnapshot.ComponentInfo>();
-		for (int i = 0; i < array.Length; i++)
+		long hotfix = PlayerIdentities.HotfixIdentity;
+		long local = own != 0L ? own : hotfix;
+		var hostData = new Dictionary<long, List<PerPlayerData>>();
+		var components = snapshot.Components ?? Array.Empty<SessionComponentsSnapshot.ComponentInfo>();
+		for (int i = 0; i < components.Length; i++)
 		{
-			if (!(array[i].ObjectBuilder is PerPlayerDataSessionComponentObjectBuilder perPlayerDataSessionComponentObjectBuilder))
+			if (components[i].ObjectBuilder is not PerPlayerDataSessionComponentObjectBuilder perPlayerOb)
 			{
 				continue;
 			}
-			foreach (KeyValuePair<IdentityId, List<object>> item in (CollectionDictionary<IdentityId, List<object>, object>)(object)perPlayerDataSessionComponentObjectBuilder.PerPlayerData)
+			foreach (var entry in (CollectionDictionary<IdentityId, List<object>, object>)(object)perPlayerOb.PerPlayerData)
 			{
-				long num3 = item.Key;
-				if (own != 0L || num3 == num)
+				long identity = entry.Key;
+				if (own != 0L || identity == hotfix)
 				{
-					if (!dictionary.TryGetValue(num3, out var value))
+					if (!hostData.TryGetValue(identity, out var list))
 					{
-						value = (dictionary[num3] = new List<PerPlayerData>());
+						list = hostData[identity] = new List<PerPlayerData>();
 					}
-					value.AddRange(item.Value.OfType<PerPlayerData>());
+					list.AddRange(entry.Value.OfType<PerPlayerData>());
 				}
 			}
 		}
-		List<long> ids = new List<long> { num2 };
-		if (!ids.Contains(num))
+		var ids = new List<long> { local };
+		if (!ids.Contains(hotfix))
 		{
-			ids.Add(num);
+			ids.Add(hotfix);
 		}
-		ids.AddRange(dictionary.Keys.Where((long k) => !ids.Contains(k) && !PlayerIdentities.IsNpc(k)));
-		InProcessPerPlayerDataBaseSessionComponent.ClientVisibleData clientVisibleData = new InProcessPerPlayerDataBaseSessionComponent.ClientVisibleData();
-		List<string> list2 = new List<string>();
-		string text = null;
-		foreach (long item2 in ids)
+		ids.AddRange(hostData.Keys.Where(k => !ids.Contains(k) && !PlayerIdentities.IsNpc(k)));
+		var result = new InProcessPerPlayerDataBaseSessionComponent.ClientVisibleData();
+		var lines = new List<string>();
+		string defaultsNote = null;
+		foreach (long id in ids)
 		{
-			InProcessPerPlayerDataBaseSessionComponent.ClientVisiblePerPlayerData clientVisiblePerPlayerData = new InProcessPerPlayerDataBaseSessionComponent.ClientVisiblePerPlayerData(new IdentityId(item2), true);
+			var perPlayer = new InProcessPerPlayerDataBaseSessionComponent.ClientVisiblePerPlayerData(new IdentityId(id), true);
 			try
 			{
-				InProcessPerPlayerDataBaseSessionComponent.ClientVisibleData clientVisibleData2 = (InProcessPerPlayerDataBaseSessionComponent.ClientVisibleData)InProcessPerPlayerDataSessionComponent.CreateEmptyClientVisibleData();
-				List<PerPlayerData> list3 = clientVisibleData2.Data[0].Data.ToList();
-				clientVisibleData2.Data[0].Data.Clear();
-				foreach (PerPlayerData item3 in list3)
+				var defaults = (InProcessPerPlayerDataBaseSessionComponent.ClientVisibleData)InProcessPerPlayerDataSessionComponent.CreateEmptyClientVisibleData();
+				var defaultItems = defaults.Data[0].Data.ToList();
+				defaults.Data[0].Data.Clear();
+				foreach (var item in defaultItems)
 				{
-					clientVisiblePerPlayerData.Data.Add(item3);
+					perPlayer.Data.Add(item);
 				}
 			}
 			catch (Exception ex)
 			{
-				if (text == null)
+				if (defaultsNote == null)
 				{
-					text = " (Keen's defaults unavailable: " + ex.GetType().Name + ")";
+					defaultsNote = " (Keen's defaults unavailable: " + ex.GetType().Name + ")";
 				}
 			}
-			int num4 = 0;
-			List<string> list4 = new List<string>();
-			if (dictionary.TryGetValue(item2, out var value2))
+			int fromHost = 0;
+			var names = new List<string>();
+			if (hostData.TryGetValue(id, out var hostItems))
 			{
-				foreach (PerPlayerData p in value2)
+				foreach (var p in hostItems)
 				{
-					PerPlayerData val = clientVisiblePerPlayerData.Data.FirstOrDefault((PerPlayerData x) => ((object)x).GetType() == ((object)p).GetType());
-					if (val != null)
+					var existing = perPlayer.Data.FirstOrDefault(x => x.GetType() == p.GetType());
+					if (existing != null)
 					{
-						clientVisiblePerPlayerData.Data.Remove(val);
+						perPlayer.Data.Remove(existing);
 					}
-					clientVisiblePerPlayerData.Data.Add(p);
-					num4++;
-					list4.Add(((object)p).GetType().Name);
+					perPlayer.Data.Add(p);
+					fromHost++;
+					names.Add(p.GetType().Name);
 				}
 			}
-			int num5 = 0;
-			if (item2 == num2 && item2 != num && dictionary.TryGetValue(num, out var value3))
+			int defaultsAdded = 0;
+			if (id == local && id != hotfix && hostData.TryGetValue(hotfix, out var sharedItems))
 			{
-				foreach (Type t in value3.Select((PerPlayerData r) => ((object)r).GetType()).Distinct())
+				foreach (var t in sharedItems.Select(r => r.GetType()).Distinct())
 				{
-					if (!clientVisiblePerPlayerData.Data.Any((PerPlayerData x) => t.IsInstanceOfType(x)) && !(t.GetConstructor(Type.EmptyTypes) == null))
+					if (!perPlayer.Data.Any(x => t.IsInstanceOfType(x)) && t.GetConstructor(Type.EmptyTypes) != null)
 					{
 						try
 						{
-							clientVisiblePerPlayerData.Data.Add((PerPlayerData)Activator.CreateInstance(t));
-							num5++;
+							perPlayer.Data.Add((PerPlayerData)Activator.CreateInstance(t));
+							defaultsAdded++;
 						}
 						catch (Exception)
 						{
@@ -1236,21 +1205,21 @@ internal sealed class ClientWorld
 					}
 				}
 			}
-			PadToolbar(clientVisiblePerPlayerData.Data.OfType<ToolbarPerPlayerData>().FirstOrDefault());
-			clientVisibleData.Data.Add(clientVisiblePerPlayerData);
-			string value4;
-			if (item2 == num2)
+			PadToolbar(perPlayer.Data.OfType<ToolbarPerPlayerData>().FirstOrDefault());
+			result.Data.Add(perPlayer);
+			string role;
+			if (id == local)
 			{
-				value4 = ((own != 0L) ? "own" : "host player (shared)");
+				role = own != 0L ? "own" : "host player (shared)";
 			}
 			else
 			{
-				value4 = ((item2 == num) ? "host player" : "other player");
+				role = id == hotfix ? "host player" : "other player";
 			}
-			list2.Add($"{item2} ({value4}): {num4} from the host ({string.Join(", ", list4)}){((num5 > 0) ? $", {num5} defaults added" : "")}");
+			lines.Add($"{id} ({role}): {fromHost} from the host ({string.Join(", ", names)}){(defaultsAdded > 0 ? $", {defaultsAdded} defaults added" : "")}");
 		}
-		summary = $"{ids.Count} identit{((ids.Count == 1) ? "y" : "ies")}, local {num2}; " + string.Join("; ", list2) + text;
-		return clientVisibleData;
+		summary = $"{ids.Count} identit{(ids.Count == 1 ? "y" : "ies")}, local {local}; " + string.Join("; ", lines) + defaultsNote;
+		return result;
 	}
 
 	private static void PadToolbar(ToolbarPerPlayerData? toolbar)
@@ -1259,126 +1228,112 @@ internal sealed class ClientWorld
 		{
 			return;
 		}
-		ToolbarSelection selection = toolbar.Selection.Selection;
-		int num = Math.Max(1, selection.ToolbarIndexIndex + 1);
-		int num2 = Math.Max(10, selection.TileIndex + 1);
-		while (toolbar.ToolbarTiles.Count < num)
+		var selection = toolbar.Selection.Selection;
+		int toolbars = Math.Max(1, selection.ToolbarIndexIndex + 1);
+		int tiles = Math.Max(10, selection.TileIndex + 1);
+		while (toolbar.ToolbarTiles.Count < toolbars)
 		{
 			toolbar.ToolbarTiles.Add(new ObservableCollection<ToolbarTile>());
 		}
-		foreach (ObservableCollection<ToolbarTile> toolbarTile in toolbar.ToolbarTiles)
+		foreach (var row in toolbar.ToolbarTiles)
 		{
-			while (toolbarTile.Count < num2)
+			while (row.Count < tiles)
 			{
-				toolbarTile.Add(null);
+				row.Add(null);
 			}
 		}
 	}
 
 	internal static string SeedPlayers(PlayersSessionObjectBuilder ob, IReadOnlyList<PlayerInfo> table, ushort ownClientId, long own, long ownPlayer)
 	{
-		//IL_00f7: Unknown result type (might be due to invalid IL or missing references)
 		ob.PlayerData.Clear();
 		ob.Identities.Clear();
 		ob.ClientIds.Clear();
-		List<PlayerInfo> list = (from r in table
+		var others = (from r in table
 			where r.ClientId != 1 && r.Identity != own
 			orderby r.ClientId
 			select r).ToList();
 		if (table.Any(p => p.ClientId == 1)) Add(1, 1559595546L, -1559595548L);
 		Add(ownClientId, ownPlayer, own);
-		foreach (PlayerInfo item in list)
+		foreach (var other in others)
 		{
-			Add(item.ClientId, item.Player, item.Identity);
+			Add(other.ClientId, other.Player, other.Identity);
 		}
 		ob.Identities[InProcessPerPlayerDataSessionComponent.HotfixIdentity] = new PlayerIdentity(ownPlayer);
 		return $"local player = IdentityId {own} (PlayerIdentity {ownPlayer}, ClientId {ownClientId}); {ob.PlayerData.Count} players seeded";
 		void Add(ushort clientId, long player, long identity)
 		{
-			//IL_0003: Unknown result type (might be due to invalid IL or missing references)
-			//IL_001f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-			//IL_003f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0058: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0070: Unknown result type (might be due to invalid IL or missing references)
-			PlayerIdentity val = new PlayerIdentity(player);
-			PlayerData value = new PlayerData
+			var playerId = new PlayerIdentity(player);
+			var data = new PlayerData
 			{
 				ClientId = new ClientId(clientId),
-				Player = val,
+				Player = playerId,
 				Identity = new IdentityId(identity)
 			};
-			ob.PlayerData.TryAdd(val, value);
-			ob.ClientIds.TryAdd(value.ClientId, val);
-			ob.Identities.TryAdd(value.Identity, val);
+			ob.PlayerData.TryAdd(playerId, data);
+			ob.ClientIds.TryAdd(data.ClientId, playerId);
+			ob.Identities.TryAdd(data.Identity, playerId);
 		}
 	}
 
 	internal static void RepairPlayers(PlayersSessionObjectBuilder ob)
 	{
-		//IL_0011: Unknown result type (might be due to invalid IL or missing references)
 		if (ob.ClientIds.TryGetValue(new ClientId(1), out var host)) ob.Identities[InProcessPerPlayerDataSessionComponent.HotfixIdentity] = host;
 	}
 
-	private void UpdatePlayers(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp, ClientSession session)
+	private void UpdatePlayers(InProcessReplicationSessionComponent comp, ClientSession session)
 	{
-		//IL_015e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0180: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0182: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01d7: Unknown result type (might be due to invalid IL or missing references)
-		PlayersSessionObjectBuilder playersOb = _playersOb;
+		var playersOb = _playersOb;
 		if (playersOb != null && !_playersRepaired)
 		{
 			_playersRepaired = true;
-			ClientPlayersSessionComponent clientPlayersSessionComponent = comp.Session.SessionComponents.TryGet<ClientPlayersSessionComponent>();
+			var players = comp.Session.SessionComponents.TryGet<ClientPlayersSessionComponent>();
 			RepairPlayers(playersOb);
-			long num = ((clientPlayersSessionComponent != null) ? ((long)clientPlayersSessionComponent.LocalPlayerIdentity) : 0);
-			string text = $"LocalPlayerIdentity = {num}" + ((num == session.IdentityId) ? " (this player's own identity)" : $" (EXPECTED {session.IdentityId}: the client acts as another identity)");
-			if (num == session.IdentityId)
+			long localIdentity = players != null ? (long)players.LocalPlayerIdentity : 0;
+			string line = $"LocalPlayerIdentity = {localIdentity}" + (localIdentity == session.IdentityId ? " (this player's own identity)" : $" (EXPECTED {session.IdentityId}: the client acts as another identity)");
+			if (localIdentity == session.IdentityId)
 			{
-				_log.Info("client: " + text);
+				_log.Info("client: " + line);
 			}
 			else
 			{
-				_log.Error("client: " + text);
+				_log.Error("client: " + line);
 			}
-			Report((num == session.IdentityId) ? ClientPhase.Progress : ClientPhase.Warning, text);
+			Report(localIdentity == session.IdentityId ? ClientPhase.Progress : ClientPhase.Warning, line);
 		}
 		if (playersOb != null && session.PlayersVersion != _playersVersionSeen)
 		{
 			_playersVersionSeen = session.PlayersVersion;
-			int num2 = 0;
-			foreach (PlayerInfo player in session.Players)
+			int added = 0;
+			foreach (var player in session.Players)
 			{
-				PlayerIdentity val = new PlayerIdentity(player.Player);
-				PlayerData value = new PlayerData
+				var playerId = new PlayerIdentity(player.Player);
+				var data = new PlayerData
 				{
 					ClientId = new ClientId(player.ClientId),
-					Player = val,
+					Player = playerId,
 					Identity = new IdentityId(player.Identity)
 				};
-				if (playersOb.PlayerData.TryAdd(val, value))
+				if (playersOb.PlayerData.TryAdd(playerId, data))
 				{
-					num2++;
+					added++;
 				}
-				playersOb.ClientIds.TryAdd(value.ClientId, val);
-				playersOb.Identities.TryAdd(value.Identity, val);
+				playersOb.ClientIds.TryAdd(data.ClientId, playerId);
+				playersOb.Identities.TryAdd(data.Identity, playerId);
 			}
-			if (num2 > 0)
+			if (added > 0)
 			{
-				_log.Info($"client: {num2} player(s) added to this game's player table ({ClientSession.DescribePlayers(session.Players)})");
+				_log.Info($"client: {added} player(s) added to this game's player table ({ClientSession.DescribePlayers(session.Players)})");
 			}
 		}
-		(int, int, long) status = session.Status;
+		var status = session.Status;
 		if (!_pcuStreamedLogged && _ticks % 30 == 0L)
 		{
-			PCUClientSessionComponent pCUClientSessionComponent = comp.Session.SessionComponents.TryGet<PCUClientSessionComponent>();
-			if (pCUClientSessionComponent != null && PcuModelField?.GetValue(pCUClientSessionComponent) is PlayerPcuModel playerPcuModel && playerPcuModel != _pcuStandIn && _observables.IsReplica(playerPcuModel))
+			var pcu = comp.Session.SessionComponents.TryGet<PCUClientSessionComponent>();
+			if (pcu != null && PcuModelField?.GetValue(pcu) is PlayerPcuModel model && model != _pcuStandIn && _observables.IsReplica(model))
 			{
 				_pcuStreamedLogged = true;
-				_log.Info($"client: PCU readout is the host's streamed model (observable #{_observables.IdOf(playerPcuModel)}): {playerPcuModel.PCU} / {playerPcuModel.MaxPCU}" + ((_pcuStandIn != null) ? "; the stand-in is retired" : ""));
+				_log.Info($"client: PCU readout is the host's streamed model (observable #{_observables.IdOf(model)}): {model.PCU} / {model.MaxPCU}" + (_pcuStandIn != null ? "; the stand-in is retired" : ""));
 			}
 		}
 		if (status.Item3 == _statusSeen || !_pcuDone)
@@ -1388,12 +1343,12 @@ internal sealed class ClientWorld
 		_statusSeen = status.Item3;
 		try
 		{
-			PCUClientSessionComponent pCUClientSessionComponent2 = comp.Session.SessionComponents.TryGet<PCUClientSessionComponent>();
-			if (pCUClientSessionComponent2 != null && PcuModelField?.GetValue(pCUClientSessionComponent2) is PlayerPcuModel playerPcuModel2 && playerPcuModel2 == _pcuStandIn)
+			var pcu = comp.Session.SessionComponents.TryGet<PCUClientSessionComponent>();
+			if (pcu != null && PcuModelField?.GetValue(pcu) is PlayerPcuModel model && model == _pcuStandIn)
 			{
-				bool flag = playerPcuModel2.MaxPCU == 1073741823;
-				(playerPcuModel2.PCU, playerPcuModel2.MaxPCU, _) = status;
-				if (flag)
+				bool firstLive = model.MaxPCU == 1073741823;
+				(model.PCU, model.MaxPCU, _) = status;
+				if (firstLive)
 				{
 					_log.Info($"client: PCU readout is live from the host's server: {status.Item1} / {status.Item2}");
 				}
@@ -1409,18 +1364,16 @@ internal sealed class ClientWorld
 	{
 		try
 		{
-			List<string> list = new List<string>();
-			SessionComponentsSnapshot.ComponentInfo[] array = snapshot.Components ?? Array.Empty<SessionComponentsSnapshot.ComponentInfo>();
-			for (int i = 0; i < array.Length; i++)
+			var owners = new List<string>();
+			foreach (var info in snapshot.Components ?? Array.Empty<SessionComponentsSnapshot.ComponentInfo>())
 			{
-				SessionComponentsSnapshot.ComponentInfo componentInfo = array[i];
-				int num = CountEntities(componentInfo.ObjectBuilder, 0);
-				if (num > 0)
+				int count = CountEntities(info.ObjectBuilder, 0);
+				if (count > 0)
 				{
-					list.Add($"{componentInfo.Type?.Name ?? "?"} {num}");
+					owners.Add($"{info.Type?.Name ?? "?"} {count}");
 				}
 			}
-			return (list.Count == 0) ? "none found in fields" : ("in " + string.Join(", ", list));
+			return owners.Count == 0 ? "none found in fields" : "in " + string.Join(", ", owners);
 		}
 		catch (Exception ex)
 		{
@@ -1442,40 +1395,39 @@ internal sealed class ClientWorld
 		{
 			return 0;
 		}
-		int num = 0;
+		int count = 0;
 		if (o is IEnumerable enumerable && depth < 3)
 		{
-			int num2 = 0;
+			int seen = 0;
 			foreach (object item in enumerable)
 			{
-				num += CountEntities(item, depth + 1);
-				if (++num2 > 2000)
+				count += CountEntities(item, depth + 1);
+				if (++seen > 2000)
 				{
 					break;
 				}
 			}
-			return num;
+			return count;
 		}
 		if (depth >= 2)
 		{
 			return 0;
 		}
-		FieldInfo[] fields = o.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-		foreach (FieldInfo fieldInfo in fields)
+		foreach (var field in o.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
 		{
-			if (!fieldInfo.FieldType.IsPrimitive && !fieldInfo.FieldType.IsEnum && !(fieldInfo.FieldType == typeof(string)))
+			if (!field.FieldType.IsPrimitive && !field.FieldType.IsEnum && field.FieldType != typeof(string))
 			{
-				num += CountEntities(fieldInfo.GetValue(o), depth + 1);
+				count += CountEntities(field.GetValue(o), depth + 1);
 			}
 		}
-		return num;
+		return count;
 	}
 
 	public static bool CommitPrefix(object __instance)
 	{
-		ClientWorld current = Current;
-		InProcessReplication val = current?._replication;
-		if (val == null || !(__instance is Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent inProcessReplicationSessionComponent) || inProcessReplicationSessionComponent._context != val.Client)
+		var current = Current;
+		var replication = current?._replication;
+		if (replication == null || __instance is not InProcessReplicationSessionComponent comp || comp._context != replication.Client)
 		{
 			return true;
 		}
@@ -1485,7 +1437,7 @@ internal sealed class ClientWorld
 		}
 		try
 		{
-			current.OnClientCommit(inProcessReplicationSessionComponent);
+			current.OnClientCommit(comp);
 		}
 		catch (Exception ex)
 		{
@@ -1496,7 +1448,7 @@ internal sealed class ClientWorld
 		return false;
 	}
 
-	private void OnClientCommit(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp)
+	private void OnClientCommit(InProcessReplicationSessionComponent comp)
 	{
 		_ticks++;
 		if (_comp != comp)
@@ -1521,17 +1473,17 @@ internal sealed class ClientWorld
 				Report(ClientPhase.Warning, "snapshot not applied: PullDataFromServerAsync was not called");
 			}
 		}
-		ClientSession? session = _session;
-		if (session != null && session.Blobs.HasFresh)
+		var blobSession = _session;
+		if (blobSession != null && blobSession.Blobs.HasFresh)
 		{
 			RegisterBlobs(BlobTarget(comp.Session), "tick");
 		}
-		ClientSession session2 = _session;
-		if (session2 != null && session2.IdentityId != 0L)
+		var session = _session;
+		if (session != null && session.IdentityId != 0L)
 		{
 			try
 			{
-				UpdatePlayers(comp, session2);
+				UpdatePlayers(comp, session);
 			}
 			catch (Exception ex)
 			{
@@ -1539,114 +1491,113 @@ internal sealed class ClientWorld
 			}
 		}
 		((IReplicationContext)comp._context).CommitFrame();
-		ReplicationCommandBuffer buffer = Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent.AllocateCB();
+		var fresh = InProcessReplicationSessionComponent.AllocateCB();
 		object exchangeSync = comp._exchangeSync;
-		ReplicationCommandBuffer buffer2;
+		ReplicationCommandBuffer outgoing;
 		if (exchangeSync != null)
 		{
 			lock (exchangeSync)
 			{
-				buffer2 = ((ReplicationCommandBufferSessionComponent)(object)comp).Buffer;
-				((ReplicationCommandBufferSessionComponent)(object)comp).Buffer = buffer;
+				outgoing = comp.Buffer;
+				comp.Buffer = fresh;
 			}
 		}
 		else
 		{
-			buffer2 = ((ReplicationCommandBufferSessionComponent)(object)comp).Buffer;
-			((ReplicationCommandBufferSessionComponent)(object)comp).Buffer = buffer;
+			outgoing = comp.Buffer;
+			comp.Buffer = fresh;
 		}
 		if (_worldApplied)
 		{
-			ClientSession session3 = _session;
-			if (session3 != null)
+			var lookSession = _session;
+			if (lookSession != null)
 			{
-				LookTick(session3, MpClock.NowMs());
+				LookTick(lookSession, MpClock.NowMs());
 			}
 		}
 		if (_worldApplied && !_upstreamFailed)
 		{
 			try
 			{
-				SendUpstream(comp, buffer2);
+				SendUpstream(comp, outgoing);
 			}
-			catch (Exception ex2)
+			catch (Exception ex)
 			{
 				_upstreamFailed = true;
-				_log.Error($"client: input upstream failed and is switched off (you can still watch): {ex2}");
-				Report(ClientPhase.Error, "input upstream failed: " + ex2.GetType().Name + ": " + ex2.Message);
+				_log.Error($"client: input upstream failed and is switched off (you can still watch): {ex}");
+				Report(ClientPhase.Error, "input upstream failed: " + ex.GetType().Name + ": " + ex.Message);
 			}
 		}
-		else if (buffer2.GetBuffersCount() > 0)
+		else if (outgoing.GetBuffersCount() > 0)
 		{
 			_c2sDropped++;
-			HoldEarlyStories(buffer2, comp);
+			HoldEarlyStories(outgoing, comp);
 		}
-		Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent.ReturnCB(buffer2);
+		InProcessReplicationSessionComponent.ReturnCB(outgoing);
 		BuildInbound(comp);
 		UpdateNametags(comp);
-		long num = MpClock.NowMs();
-		if (num - _lastStatusMs < 10000)
+		long now = MpClock.NowMs();
+		if (now - _lastStatusMs < 10000)
 		{
 			return;
 		}
-		_lastStatusMs = num;
-		ClientSession session4 = _session;
-		_log.Info($"client sync: ticks {_ticks}, commands injected {_commands}, lifecycle applied {_lifecycleApplied}, entities built {_entitiesBuilt}, state applied {_stateApplied} (bad size {_stateBadSize}), proxies {_proxies.LiveCount}/{_proxies.Count}, " + ((session4 != null) ? $"pending state {session4.State.DirtyCount} (stale {session4.State.Stale}, expired {session4.State.Expired}), lifecycle buffered {session4.Lifecycle.Buffered} ready {session4.Lifecycle.Ready}, blobs {session4.Blobs.Describe()} / {_blobsRegistered} registered, " : "") + $"roots dropped {_rootsDropped} (bundles retried {_bundlesRetried}), despawns skipped {_despawnSkipped}, dead entities purged {_purgedDead}, C2S ticks dropped {_c2sDropped}");
-		if (session4 != null)
+		_lastStatusMs = now;
+		var statusSession = _session;
+		_log.Info($"client sync: ticks {_ticks}, commands injected {_commands}, lifecycle applied {_lifecycleApplied}, entities built {_entitiesBuilt}, state applied {_stateApplied} (bad size {_stateBadSize}), proxies {_proxies.LiveCount}/{_proxies.Count}, " + ((statusSession != null) ? $"pending state {statusSession.State.DirtyCount} (stale {statusSession.State.Stale}, expired {statusSession.State.Expired}), lifecycle buffered {statusSession.Lifecycle.Buffered} ready {statusSession.Lifecycle.Ready}, blobs {statusSession.Blobs.Describe()} / {_blobsRegistered} registered, " : "") + $"roots dropped {_rootsDropped} (bundles retried {_bundlesRetried}), despawns skipped {_despawnSkipped}, dead entities purged {_purgedDead}, C2S ticks dropped {_c2sDropped}");
+		if (statusSession != null)
 		{
-			_log.Info($"client sync: character {((_ownNetId != 0) ? $"NetworkId {_ownNetId} possessed" : ((_pendingNetId != 0) ? $"NetworkId {_pendingNetId} assigned, not built yet" : (_charRequested ? "requested" : "none")))}; {_upstream?.Describe() ?? "upstream: idle"}, sent {session4.InputSent} input values / {session4.CommandsSent} commands; {session4.Smoother.Describe()}, applied {_smoothApplied}; {LookDescribe()}");
+			_log.Info($"client sync: character {(_ownNetId != 0 ? $"NetworkId {_ownNetId} possessed" : _pendingNetId != 0 ? $"NetworkId {_pendingNetId} assigned, not built yet" : _charRequested ? "requested" : "none")}; {_upstream?.Describe() ?? "upstream: idle"}, sent {statusSession.InputSent} input values / {statusSession.CommandsSent} commands; {statusSession.Smoother.Describe()}, applied {_smoothApplied}; {LookDescribe()}");
 		}
-		if (session4 != null)
+		if (statusSession != null)
 		{
-			_log.Info($"client sync: host signals applied {_signalsApplied}, dropped {_signalsDropped}, names registered {_namesRegistered} (known {_namesKnown}, bad {_namesBad})" + ((_sigDrops.Count == 0) ? "" : (" (" + string.Join(", ", from kv in _sigDrops.OrderByDescending((KeyValuePair<string, long> kv) => kv.Value).Take(6)
-				select $"{kv.Key} x{kv.Value}") + ")")) + $"; {_stories?.Describe() ?? "stories: none"}{DescribeSecure()}; {ReplayGuard.Describe()}; 0.7.6: {AudioGate.Describe()}; {ToolShadowGuard.Describe()}; {BuildGuards.Describe()}; {ControlGuard.Describe()}; data types: {DataTypeRegistry.State}; 0.8.3: {_sids.Describe()}, {FractureGuard.Describe()}; {SlowTicks.Describe()}");
+			_log.Info($"client sync: host signals applied {_signalsApplied}, dropped {_signalsDropped}, names registered {_namesRegistered} (known {_namesKnown}, bad {_namesBad})" + ((_sigDrops.Count == 0) ? "" : (" (" + string.Join(", ", from kv in _sigDrops.OrderByDescending(kv => kv.Value).Take(6) select $"{kv.Key} x{kv.Value}") + ")")) + $"; {_stories?.Describe() ?? "stories: none"}{DescribeSecure()}; {ReplayGuard.Describe()}; 0.7.6: {AudioGate.Describe()}; {ToolShadowGuard.Describe()}; {BuildGuards.Describe()}; {ControlGuard.Describe()}; data types: {DataTypeRegistry.State}; 0.8.3: {_sids.Describe()}, {FractureGuard.Describe()}; {SlowTicks.Describe()}");
 		}
-		if (session4 != null && (_observables.Count > 0 || session4.ObservableOpsIn > 0))
+		if (statusSession != null && (_observables.Count > 0 || statusSession.ObservableOpsIn > 0))
 		{
-			_log.Info($"client sync: {_observables.Describe()}; {session4.ObservableOpsIn} steps received, {session4.ObservableEditsOut} edits sent");
+			_log.Info($"client sync: {_observables.Describe()}; {statusSession.ObservableOpsIn} steps received, {statusSession.ObservableEditsOut} edits sent");
 		}
 	}
 
 	private void RegisterHostStrings(List<string> names)
 	{
-		int num = 0;
-		int num2 = 0;
-		int num3 = 0;
-		string text = null;
+		int registered = 0;
+		int known = 0;
+		int failed = 0;
+		string firstError = null;
 		foreach (string name in names)
 		{
 			try
 			{
 				if (!_sids.TryRegister(name))
 				{
-					if (StringHash.TryGet(name, out var _))
+					if (StringHash.TryGet(name, out _))
 					{
-						num2++;
+						known++;
 						continue;
 					}
 					StringHash.GetOrCompute(name);
-					num++;
+					registered++;
 				}
 			}
 			catch (Exception ex)
 			{
-				num3++;
-				if (text == null)
+				failed++;
+				if (firstError == null)
 				{
-					text = $"'{name}': {ex.GetType().Name}: {ex.Message}";
+					firstError = $"'{name}': {ex.GetType().Name}: {ex.Message}";
 				}
 			}
 		}
-		_namesRegistered += num;
-		_namesKnown += num2;
-		_namesBad += num3;
-		if (_namesRegistered + _namesKnown == num + num2)
+		_namesRegistered += registered;
+		_namesKnown += known;
+		_namesBad += failed;
+		if (_namesRegistered + _namesKnown == registered + known)
 		{
-			_log.Info($"client: host StringHash names: {num} registered, {num2} already known, {num3} failed (first table)");
+			_log.Info($"client: host StringHash names: {registered} registered, {known} already known, {failed} failed (first table)");
 		}
-		if (num3 > 0)
+		if (failed > 0)
 		{
-			_log.WarnOnce("client-names-bad", $"client: {num3} host StringHash name(s) could not be registered (first: {text})");
+			_log.WarnOnce("client-names-bad", $"client: {failed} host StringHash name(s) could not be registered (first: {firstError})");
 		}
 	}
 
@@ -1656,21 +1607,20 @@ internal sealed class ClientWorld
 		{
 			Name = "client",
 			IdOf = NetIdOf,
-			Resolve = (uint id, bool translated) =>
+			Resolve = (id, translated) =>
 			{
 				if (!translated)
 				{
 					return ClientEntity(id);
 				}
-				Entity e;
-				return (ClientEntity(id) == null || !_proxies.TryGet(id, out e)) ? null : e;
+				return (ClientEntity(id) == null || !_proxies.TryGet(id, out var e)) ? null : e;
 			},
 			Session = _comp?.Session,
 			TranslatedSession = SessionStandIn()
 		});
 	}
 
-	private void HoldEarlyStories(ReplicationCommandBuffer old, Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp)
+	private void HoldEarlyStories(ReplicationCommandBuffer old, InProcessReplicationSessionComponent comp)
 	{
 		if (_earlyStoriesSent || _earlyStories.Count >= 32)
 		{
@@ -1678,15 +1628,15 @@ internal sealed class ClientWorld
 		}
 		try
 		{
-			List<Delegate> list = new List<Delegate>();
-			ClientUpstream.CollectStoryMoves(old, list, 32 - _earlyStories.Count);
-			foreach (Delegate item in list)
+			var moves = new List<Delegate>();
+			ClientUpstream.CollectStoryMoves(old, moves, 32 - _earlyStories.Count);
+			foreach (var move in moves)
 			{
-				_earlyStories.Add((item, comp));
+				_earlyStories.Add((move, comp));
 			}
-			if (list.Count > 0)
+			if (moves.Count > 0)
 			{
-				_log.Info($"client: holding {list.Count} story move(s) made during the load until the world is applied ({_earlyStories.Count} held)");
+				_log.Info($"client: holding {moves.Count} story move(s) made during the load until the world is applied ({_earlyStories.Count} held)");
 			}
 		}
 		catch (Exception ex)
@@ -1706,14 +1656,14 @@ internal sealed class ClientWorld
 		{
 			return;
 		}
-		List<string> list = new List<string>();
+		var names = new List<string>();
 		foreach (var (d, comp) in _earlyStories)
 		{
 			try
 			{
-				if (ClientStories.ReadClosure(d, out NetworkStoryContext _, out object box, out Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent _) && box != null)
+				if (ClientStories.ReadClosure(d, out NetworkStoryContext _, out object box, out InProcessReplicationSessionComponent _) && box != null)
 				{
-					list.Add(StoryState.Name(ObjectCodec.TypeName(box.GetType())));
+					names.Add(StoryState.Name(ObjectCodec.TypeName(box.GetType())));
 				}
 				_stories.OnMove(d, session, ClientSpace(), comp);
 			}
@@ -1722,7 +1672,7 @@ internal sealed class ClientWorld
 				_log.WarnOnce("client-early-story", $"client: sending a story held during the load failed ({ex.GetType().Name}: {ex.Message})");
 			}
 		}
-		_log.Info($"client: {_earlyStories.Count} story move(s) held during the load sent to the host now: {string.Join(", ", list)}");
+		_log.Info($"client: {_earlyStories.Count} story move(s) held during the load sent to the host now: {string.Join(", ", names)}");
 		_earlyStories.Clear();
 	}
 
@@ -1733,13 +1683,13 @@ internal sealed class ClientWorld
 		{
 			return null;
 		}
-		InProcessPerPlayerDataBaseSessionComponent.ClientVisiblePerPlayerData? mine = _comp?.Session.SessionComponents.TryGet<InProcessPerPlayerDataClientSessionComponent>()?._data?.Data.FirstOrDefault((InProcessPerPlayerDataBaseSessionComponent.ClientVisiblePerPlayerData d) => (long)d.IdentityId == own);
-		return mine?.Data.FirstOrDefault((PerPlayerData p) => type.IsInstanceOfType(p) && !_observables.IsReplica(p));
+		var mine = _comp?.Session.SessionComponents.TryGet<InProcessPerPlayerDataClientSessionComponent>()?._data?.Data.FirstOrDefault(d => (long)d.IdentityId == own);
+		return mine?.Data.FirstOrDefault(p => type.IsInstanceOfType(p) && !_observables.IsReplica(p));
 	}
 
 	private void SyncGameTime(uint hostTick)
 	{
-		Keen.Game2.Simulation.GameSystems.GameTimes.GameTimeSessionComponent? gameTime = _comp?.Session.SessionComponents.TryGet<Keen.Game2.Simulation.GameSystems.GameTimes.GameTimeSessionComponent>();
+		var gameTime = _comp?.Session.SessionComponents.TryGet<Keen.Game2.Simulation.GameSystems.GameTimes.GameTimeSessionComponent>();
 		if (_hostGameTime0 is not TimeSpan hostTime0 || gameTime?._timeProvider == null)
 		{
 			return;
@@ -1761,7 +1711,7 @@ internal sealed class ClientWorld
 	{
 		try
 		{
-			ObservableObjectReplicationClientSessionComponent comp = _comp?.Session.SessionComponents.TryGet<ObservableObjectReplicationClientSessionComponent>();
+			var comp = _comp?.Session.SessionComponents.TryGet<ObservableObjectReplicationClientSessionComponent>();
 			_observables.Apply(comp, ops, ClientSpace());
 		}
 		catch (Exception ex)
@@ -1778,7 +1728,7 @@ internal sealed class ClientWorld
 		}
 		try
 		{
-			Session session = (Session)RuntimeHelpers.GetUninitializedObject(typeof(Session));
+			var session = (Session)RuntimeHelpers.GetUninitializedObject(typeof(Session));
 			typeof(Session).GetField("<SessionComponents>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(session, _sessionProxy);
 			_sessionStandIn = session;
 		}
@@ -1828,50 +1778,50 @@ internal sealed class ClientWorld
 
 	private void WriteSignals(ClientSession session, ReplicationCommandBuffer cb, List<WireCommand> cmds)
 	{
-		ObjectSpace objectSpace = ClientSpace();
-		bool flag = _comp != null && ReplicationProbe.IsGuarded(_comp);
-		foreach (WireCommand cmd in cmds)
+		var space = ClientSpace();
+		bool guarded = _comp != null && ReplicationProbe.IsGuarded(_comp);
+		foreach (var cmd in cmds)
 		{
-			string text = $"key {cmd.Key}";
+			string name = $"key {cmd.Key}";
 			string fail = null;
 			SignalKeyDef def;
-			if (!flag)
+			if (!guarded)
 			{
 				fail = "replay guard not armed (see the probe:CommitFrame line)";
 			}
 			else if (!session.RemoteSignals.TryGet(cmd.Key, out def))
 			{
-				fail = (session.RemoteSignals.IsKnown(cmd.Key) ? "unusable here" : "unknown key");
+				fail = session.RemoteSignals.IsKnown(cmd.Key) ? "unusable here" : "unknown key";
 			}
 			else
 			{
-				text = def.Name;
-				CommandLayout commandLayout = CommandLayouts.ByName(def.Name);
-				if (commandLayout == null)
+				name = def.Name;
+				var layout = CommandLayouts.ByName(def.Name);
+				if (layout == null)
 				{
 					fail = "not in this build";
 				}
 				else
 				{
-					uint num = ((cmd.Refs.Count > 0 && cmd.Refs[0].Kind == WireKind.Entity) ? cmd.Refs[0].Id : 0u);
-					if (num == 0 || !_proxies.IsLive(num))
+					uint target = (cmd.Refs.Count > 0 && cmd.Refs[0].Kind == WireKind.Entity) ? cmd.Refs[0].Id : 0u;
+					if (target == 0 || !_proxies.IsLive(target))
 					{
 						fail = "target not live here";
 					}
 					else
 					{
-						Entity entity = ClientEntity(num);
+						var entity = ClientEntity(target);
 						if (entity == null || !EntityInternalSignalsApi.Constructed(entity))
 						{
 							fail = "target destroyed here";
 						}
 						else
 						{
-							WireCommand c = cmd;
-							if (commandLayout.StringIdOffsets.Length != 0)
+							var c = cmd;
+							if (layout.StringIdOffsets.Length != 0)
 							{
-								byte[] array = _sids.Map(cmd.Payload, commandLayout.StringIdOffsets, toLocal: true);
-								if (array == null)
+								byte[] payload = _sids.Map(cmd.Payload, layout.StringIdOffsets, toLocal: true);
+								if (payload == null)
 								{
 									fail = "StringId the host did not announce";
 								}
@@ -1880,16 +1830,16 @@ internal sealed class ClientWorld
 									c = new WireCommand
 									{
 										Key = cmd.Key,
-										Payload = array,
+										Payload = payload,
 										Refs = cmd.Refs
 									};
-									fail = FractureGuard.Check(commandLayout, c, entity);
+									fail = FractureGuard.Check(layout, c, entity);
 								}
 							}
 							if (fail == null)
 							{
-								objectSpace.ClearLocalIds();
-								SignalCodec.Write(cb, commandLayout, c, objectSpace, _sigScratch, ref fail);
+								space.ClearLocalIds();
+								SignalCodec.Write(cb, layout, c, space, _sigScratch, ref fail);
 							}
 						}
 					}
@@ -1898,16 +1848,16 @@ internal sealed class ClientWorld
 			if (fail == null)
 			{
 				_signalsApplied++;
-				if (_sigFirst.Count < 80 && _sigFirst.Add(text))
+				if (_sigFirst.Count < 80 && _sigFirst.Add(name))
 				{
-					_log.Info("client: host signal " + ClientUpstream.Short(text) + " written for replay (first one; the replay guard reports handler errors)");
+					_log.Info("client: host signal " + ClientUpstream.Short(name) + " written for replay (first one; the replay guard reports handler errors)");
 				}
 			}
 			else
 			{
 				_signalsDropped++;
-				string key = ClientUpstream.Short(text) + ": " + fail;
-				_sigDrops[key] = (_sigDrops.TryGetValue(key, out var value) ? (value + 1) : 1);
+				string key = ClientUpstream.Short(name) + ": " + fail;
+				_sigDrops[key] = _sigDrops.TryGetValue(key, out var drops) ? drops + 1 : 1;
 			}
 		}
 	}
@@ -1918,42 +1868,33 @@ internal sealed class ClientWorld
 		{
 			return null;
 		}
-		ReplayContext replayContext = _comp.ReplayContext;
-		if (!replayContext.HasPairingLocal(e))
+		var context = _comp.ReplayContext;
+		if (!context.HasPairingLocal(e))
 		{
 			return null;
 		}
-		if (!(replayContext.TranslateLocalToRemote(e) is Entity e2) || !_proxies.TryGetId(e2, out var id))
+		if (context.TranslateLocalToRemote(e) is not Entity remote || !_proxies.TryGetId(remote, out var id))
 		{
 			return null;
 		}
 		return id;
 	}
 
-	private void SendUpstream(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp, ReplicationCommandBuffer old)
+	private void SendUpstream(InProcessReplicationSessionComponent comp, ReplicationCommandBuffer old)
 	{
-		ClientSession session = _session;
-		Entity ownCharacter = _ownCharacter;
+		var session = _session;
+		var ownCharacter = _ownCharacter;
 		if (session == null)
 		{
 			return;
 		}
-		if (_upstream == null)
-		{
-			_upstream = new ClientUpstream(_log);
-		}
-		ClientUpstream upstream = _upstream;
+		_upstream ??= new ClientUpstream(_log);
+		var upstream = _upstream;
 		if (upstream.OnObservableEdit == null)
 		{
-			upstream.OnObservableEdit = (object? replica, string? name, object? value) =>
-			{
-				_observables.OnLocalEdit(replica, name, value, ClientSpace());
-			};
+			upstream.OnObservableEdit = (replica, name, value) => _observables.OnLocalEdit(replica, name, value, ClientSpace());
 		}
-		if (_stories == null)
-		{
-			_stories = new ClientStories(_log);
-		}
+		_stories ??= new ClientStories(_log);
 		_stories.PerPlayer = session.IdentityId != 0;
 		SendEarlyStories(session);
 		long nowMs = MpClock.NowMs();
@@ -1966,31 +1907,31 @@ internal sealed class ClientWorld
 			}
 			try
 			{
-				IController controller = _controller;
+				var controller = _controller;
 				if (controller != null && ownCharacter != null)
 				{
 					foreach (var (controllable, entity) in controller.ControlledEntities)
 					{
-						if (controllable is Component component && IsForeignCharacter(component.Entity))
+						if (controllable is Component foreign && IsForeignCharacter(foreign.Entity))
 						{
 							continue;
 						}
-						if (controllable is Component component2 && component2.Entity != ownCharacter && !_controlled.Contains(component2.Entity))
+						if (controllable is Component component && component.Entity != ownCharacter && !_controlled.Contains(component.Entity))
 						{
-							Collect(component2.Entity, 0);
-							Entity entity2 = component2.Entity;
-							_recentlyDriven[entity2] = nowMs;
-							for (int num = 0; num < 8; num++)
+							Collect(component.Entity, 0);
+							var root = component.Entity;
+							_recentlyDriven[root] = nowMs;
+							for (int depth = 0; depth < 8; depth++)
 							{
-								Entity entity3 = entity2.TryGet<HierarchyComponent>()?.Parent;
-								if (entity3 == null)
+								var parent = root.TryGet<HierarchyComponent>()?.Parent;
+								if (parent == null)
 								{
 									break;
 								}
-								entity2 = entity3;
-								_recentlyDriven[entity2] = nowMs;
+								root = parent;
+								_recentlyDriven[root] = nowMs;
 							}
-							_controlled.Add(entity2);
+							_controlled.Add(root);
 						}
 						if (entity != null && !_controlled.Contains(entity))
 						{
@@ -2006,35 +1947,30 @@ internal sealed class ClientWorld
 			ObjectSpace space = ClientSpace();
 			if (_recentlyDriven.Count > 0)
 			{
-				foreach (Entity item in (from kv in _recentlyDriven
-					where nowMs - kv.Value > 2000
-					select kv.Key).ToList())
+				foreach (var stale in (from kv in _recentlyDriven where nowMs - kv.Value > 2000 select kv.Key).ToList())
 				{
-					_recentlyDriven.Remove(item);
+					_recentlyDriven.Remove(stale);
 				}
 			}
-			_upstream.Capture(old, (Entity? e) => (e == null || !_controlled.Contains(e)) ? ((uint?)null) : NetIdOf(e), space, (Delegate d) =>
-			{
-				_stories.OnMove(d, session, ClientSpace(), comp);
-			}, (Entity? e) => (e == null || (!_controlled.Contains(e) && !_recentlyDriven.ContainsKey(e))) ? ((uint?)null) : NetIdOf(e));
+			_upstream.Capture(old, e => (e == null || !_controlled.Contains(e)) ? null : NetIdOf(e), space, d => _stories.OnMove(d, session, ClientSpace(), comp), e => (e == null || (!_controlled.Contains(e) && !_recentlyDriven.ContainsKey(e))) ? null : NetIdOf(e));
 		}
 		_upstream.Flush(session, MpClock.NowMs());
-		List<MemberEdit> list = _observables.TakeEdits();
-		if (list != null)
+		var edits = _observables.TakeEdits();
+		if (edits != null)
 		{
-			session.SendObservableEdits(list);
+			session.SendObservableEdits(edits);
 		}
 		void Collect(Entity e, int depth)
 		{
 			_controlled.Add(e);
 			if (depth <= 8)
 			{
-				PooledList<Entity> pooledList = e.TryGet<HierarchyComponent>()?.Children;
-				if (pooledList != null)
+				var children = e.TryGet<HierarchyComponent>()?.Children;
+				if (children != null)
 				{
-					foreach (Entity item2 in pooledList)
+					foreach (var child in children)
 					{
-						Collect(item2, depth + 1);
+						Collect(child, depth + 1);
 					}
 				}
 			}
@@ -2124,20 +2060,14 @@ internal sealed class ClientWorld
 		{
 			_pendingNetId = 0u;
 			_possessQueued = true;
-			w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<Keen.VRage.Multiplayer.Replications.InProcess.SceneContext>)delegate
-			{
-				Possess(assigned);
-			});
+			w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<SceneContext>)(_ => Possess(assigned)));
 			cmds++;
 		}
 		if (_o.Spectator && !_spectatorQueued && _ownCharacter == null && _assignedNetId == 0 && session.SpawnMenu == null && (_charFailed || now - _charRequestMs > 60000))
 		{
 			_spectatorQueued = true;
 			_log.Info("client: " + (_charFailed ? "no character" : $"no character assigned after {60} s") + "; using the free camera until one arrives");
-			w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<Keen.VRage.Multiplayer.Replications.InProcess.SceneContext>)delegate
-			{
-				Spectate();
-			});
+			w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<SceneContext>)(_ => Spectate()));
 			cmds++;
 		}
 	}
@@ -2151,41 +2081,41 @@ internal sealed class ClientWorld
 		}
 		try
 		{
-			Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp = _comp;
+			var comp = _comp;
 			if (!_proxies.TryGet(netId, out Entity e))
 			{
 				throw new InvalidOperationException($"NetworkId {netId} unknown");
 			}
 			bool skip = false;
-			if (!(comp.ReplayContext.TranslateObject(e, ReplicationFailureStrategy.NullOnAnyFail, ref skip) is Entity entity) || EngineCodec.IsDead(entity))
+			if (comp.ReplayContext.TranslateObject(e, ReplicationFailureStrategy.NullOnAnyFail, ref skip) is not Entity entity || EngineCodec.IsDead(entity))
 			{
 				throw new InvalidOperationException($"NetworkId {netId} has no live client entity");
 			}
-			IControllable controllable = entity.Components.OfType<IControllable>().FirstOrDefault() ?? throw new InvalidOperationException($"entity {entity} has no IControllable component");
-			PlayerControllerComponent playerControllerComponent = (comp.Session.SessionComponents.TryGet<ClientPlayersSessionComponent>() ?? throw new InvalidOperationException("no ClientPlayersSessionComponent")).LocalPlayerController ?? throw new InvalidOperationException("no local player controller");
-			bool flag = _ownNetId == netId;
-			playerControllerComponent.RequestUnpossessionAll();
-			playerControllerComponent.RequestPossession(controllable);
-			_controller = playerControllerComponent;
+			var controllable = entity.Components.OfType<IControllable>().FirstOrDefault() ?? throw new InvalidOperationException($"entity {entity} has no IControllable component");
+			var controller = (comp.Session.SessionComponents.TryGet<ClientPlayersSessionComponent>() ?? throw new InvalidOperationException("no ClientPlayersSessionComponent")).LocalPlayerController ?? throw new InvalidOperationException("no local player controller");
+			bool alreadyOwn = _ownNetId == netId;
+			controller.RequestUnpossessionAll();
+			controller.RequestPossession(controllable);
+			_controller = controller;
 			_ownCharacter = entity;
 			_ownNetId = netId;
 			_session?.Smoother.SetRaw(netId, raw: true);
 			_ownSmoothed = false;
 			_upstream?.Reset();
-			if (!flag)
+			if (!alreadyOwn)
 			{
 				LookBegin(netId);
 			}
 			CloseSpectator("own character possessed");
 			_possessRetryAtMs = MpClock.NowMs() + 1000;
-			if (flag)
+			if (alreadyOwn)
 			{
 				_log.Info($"client: control back on own character NetworkId {netId} (this game's controller had left it)");
 				return;
 			}
-			string text = $"POSSESSED own character NetworkId {netId} ({entity.GetComposition()?.Guid.ToString() ?? "?"}, {controllable.GetType().Name}); input goes to the host from now on" + ((_possessFailures > 0) ? $" (after {_possessFailures} failed attempt(s))" : "");
-			_log.Info("client: " + text);
-			Report(ClientPhase.CharacterReady, text);
+			string line = $"POSSESSED own character NetworkId {netId} ({entity.GetComposition()?.Guid.ToString() ?? "?"}, {controllable.GetType().Name}); input goes to the host from now on" + (_possessFailures > 0 ? $" (after {_possessFailures} failed attempt(s))" : "");
+			_log.Info("client: " + line);
+			Report(ClientPhase.CharacterReady, line);
 			Progress.Set(JoinStage.Playing, MpClock.NowMs());
 			EnsureLocalPcuModel(comp);
 		}
@@ -2201,7 +2131,7 @@ internal sealed class ClientWorld
 		}
 	}
 
-	private void EnsureLocalPcuModel(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp)
+	private void EnsureLocalPcuModel(InProcessReplicationSessionComponent comp)
 	{
 		if (_pcuDone)
 		{
@@ -2210,30 +2140,30 @@ internal sealed class ClientWorld
 		_pcuDone = true;
 		try
 		{
-			PCUClientSessionComponent pCUClientSessionComponent = comp.Session.SessionComponents.TryGet<PCUClientSessionComponent>();
-			if (pCUClientSessionComponent == null || PcuModelField == null)
+			var pcu = comp.Session.SessionComponents.TryGet<PCUClientSessionComponent>();
+			if (pcu == null || PcuModelField == null)
 			{
-				_log.Warn("client: no PCU session component (" + ((pCUClientSessionComponent == null) ? "component" : "field") + " missing); block placement may be refused locally");
+				_log.Warn("client: no PCU session component (" + (pcu == null ? "component" : "field") + " missing); block placement may be refused locally");
 				return;
 			}
-			if (PcuModelField.GetValue(pCUClientSessionComponent) is PlayerPcuModel local)
+			if (PcuModelField.GetValue(pcu) is PlayerPcuModel local)
 			{
 				_log.Info("client: PCU model already attached (" + (_observables.IsReplica(local) ? "the host's streamed model" : "local") + "); no stand-in needed");
 				return;
 			}
-			PlayerPcuModel playerPcuModel = new PlayerPcuModel
+			var standIn = new PlayerPcuModel
 			{
 				PCU = 0,
 				MaxPCU = 1073741823
 			};
-			PcuModelField.SetValue(pCUClientSessionComponent, playerPcuModel);
-			_pcuStandIn = playerPcuModel;
+			PcuModelField.SetValue(pcu, standIn);
+			_pcuStandIn = standIn;
 			try
 			{
-				MethodInfo method = typeof(PCUClientSessionComponent).GetMethod("OnStreamedModelDataChanged", BindingFlags.Instance | BindingFlags.NonPublic);
+				var method = typeof(PCUClientSessionComponent).GetMethod("OnStreamedModelDataChanged", BindingFlags.Instance | BindingFlags.NonPublic);
 				if (method != null)
 				{
-					playerPcuModel.PropertyChanged += (PropertyChangedEventHandler)Delegate.CreateDelegate(typeof(PropertyChangedEventHandler), pCUClientSessionComponent, method);
+					standIn.PropertyChanged += (PropertyChangedEventHandler)Delegate.CreateDelegate(typeof(PropertyChangedEventHandler), pcu, method);
 				}
 				else
 				{
@@ -2245,13 +2175,11 @@ internal sealed class ClientWorld
 				_log.Warn($"client: PCU readout refresh hook failed ({ex.GetType().Name}: {ex.Message})");
 			}
 			_statusSeen = 0L;
-			IMpLog log = _log;
-			ClientSession? session = _session;
-			log.Info((session == null || session.IdentityId != 0) ? "client: PCU model stand-in installed (this player's live PCU on the host's server follows every second)" : "client: PCU model stand-in installed (the host's server enforces the real limit; the PCU readout here is not live)");
+			_log.Info(_session is not { IdentityId: 0 } ? "client: PCU model stand-in installed (this player's live PCU on the host's server follows every second)" : "client: PCU model stand-in installed (the host's server enforces the real limit; the PCU readout here is not live)");
 		}
-		catch (Exception ex2)
+		catch (Exception ex)
 		{
-			_log.Warn($"client: PCU model stand-in failed ({ex2.GetType().Name}: {ex2.Message}); block placement may be refused locally");
+			_log.Warn($"client: PCU model stand-in failed ({ex.GetType().Name}: {ex.Message}); block placement may be refused locally");
 		}
 	}
 
@@ -2271,7 +2199,6 @@ internal sealed class ClientWorld
 
 	private void ApplySmoothed(ClientSession session, VRage.Multiplayer.Replication.CB.ReplicationCommandBufferWriterReader w, int baseIndex, ref int cmds, long now)
 	{
-		//IL_00bc: Unknown result type (might be due to invalid IL or missing references)
 		if (!session.Smoother.Enabled || !session.TryGetTransformType(out var typeId, out var size))
 		{
 			return;
@@ -2279,38 +2206,37 @@ internal sealed class ClientWorld
 		_smoothOut.Clear();
 		session.Smoother.Sample(now, _smoothOut);
 		NoteDeckSample(_smoothOut);
-		foreach (var (num, array) in _smoothOut)
+		foreach (var (netId, value) in _smoothOut)
 		{
-			if (array.Length == size && _proxies.IsLive(num) && _proxies.TryGet(num, out Entity e) && !LookTakeSmoothed(num, array, now))
+			if (value.Length == size && _proxies.IsLive(netId) && _proxies.TryGet(netId, out Entity e) && !LookTakeSmoothed(netId, value, now))
 			{
-				if (Ragdolling(num, now))
+				if (Ragdolling(netId, now))
 				{
 					RagdollWritesSkipped++;
 					continue;
 				}
-				NoteOwnWrittenElsewhere(num, array, now);
-				if (WatchWritten != null) WatchWritten[num] = array;
-				w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostDataSignal(baseIndex + 1, _sessionProxy, e, new Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent.InProcessPayload(typeId, (ReadOnlySpan<byte>)array));
+				NoteOwnWrittenElsewhere(netId, value, now);
+				if (WatchWritten != null) WatchWritten[netId] = value;
+				w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostDataSignal(baseIndex + 1, _sessionProxy, e, new InProcessReplicationSessionComponent.InProcessPayload(typeId, (ReadOnlySpan<byte>)value));
 				_smoothApplied++;
 				cmds++;
 			}
 		}
 	}
 
-	private void BuildInbound(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp)
+	private void BuildInbound(InProcessReplicationSessionComponent comp)
 	{
-		//IL_069c: Unknown result type (might be due to invalid IL or missing references)
-		ClientSession session = _session;
+		var session = _session;
 		if (session == null || _sessionProxy == null)
 		{
 			return;
 		}
-		ReplicationCommandBuffer replicationCommandBuffer = Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent.AllocateCB();
-		VRage.Multiplayer.Replication.CB.ReplicationCommandBufferWriterReader w = new VRage.Multiplayer.Replication.CB.ReplicationCommandBufferWriterReader(replicationCommandBuffer);
+		var cb = InProcessReplicationSessionComponent.AllocateCB();
+		var w = new VRage.Multiplayer.Replication.CB.ReplicationCommandBufferWriterReader(cb);
 		int cmds = 0;
 		int baseIndex = VRage.Multiplayer.Replication.CB.ReplicationCommandBufferWriterReader.AssemblyOffset;
-		int num = 0;
-		int num2 = 0;
+		int taken = 0;
+		int applies = 0;
 		long now = MpClock.NowMs();
 		uint seq;
 		LifecycleItem item;
@@ -2319,78 +2245,63 @@ internal sealed class ClientWorld
 			if (!pending.Job.IsCompleted)
 			{
 				// Later updates may touch the entities still being built: hold them until it is done.
-				num = int.MaxValue;
+				taken = int.MaxValue;
 			}
 			else
 			{
 				_backgroundBuild = null;
-				w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<Keen.VRage.Multiplayer.Replications.InProcess.SceneContext>)delegate
-				{
-					FinishBackgroundBuild(pending);
-				});
+				w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<SceneContext>)(_ => FinishBackgroundBuild(pending)));
 				cmds++;
 			}
 		}
-		while (num < 64 && session.Lifecycle.TryPeek(out seq, out item))
+		while (taken < 64 && session.Lifecycle.TryPeek(out seq, out item))
 		{
-			if ((item.Type == SyncMsg.EntityBundle && item.Bundle.RequiredBlobs.Count > 0 && !BlobsReady(session, seq, item.Bundle, now)) || (item.Type == SyncMsg.SignalBatch && num2 > 0) || !session.Lifecycle.TryTake(out uint _, out LifecycleItem item2))
+			if ((item.Type == SyncMsg.EntityBundle && item.Bundle.RequiredBlobs.Count > 0 && !BlobsReady(session, seq, item.Bundle, now)) || (item.Type == SyncMsg.SignalBatch && applies > 0) || !session.Lifecycle.TryTake(out uint _, out LifecycleItem next))
 			{
 				break;
 			}
-			if (item2.Type == SyncMsg.StringTable)
+			if (next.Type == SyncMsg.StringTable)
 			{
-				RegisterHostStrings(item2.Strings);
+				RegisterHostStrings(next.Strings);
 				_lifecycleApplied++;
-				num++;
+				taken++;
 			}
-			else if (item2.Type == SyncMsg.ObservableBatch)
+			else if (next.Type == SyncMsg.ObservableBatch)
 			{
-				List<ObservableOp> ops = item2.Observables;
-				w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<Keen.VRage.Multiplayer.Replications.InProcess.SceneContext>)delegate
-				{
-					ApplyObservables(ops);
-				});
+				var ops = next.Observables;
+				w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<SceneContext>)(_ => ApplyObservables(ops)));
 				_lifecycleApplied++;
-				num++;
-				int num3 = cmds;
-				cmds = num3 + 1;
+				taken++;
+				cmds++;
 			}
-			else if (item2.Type == SyncMsg.SignalBatch)
+			else if (next.Type == SyncMsg.SignalBatch)
 			{
 				if (_hostGameTime0.HasValue && now - _gameTimeCheckMs >= 1000)
 				{
 					_gameTimeCheckMs = now;
-					uint hostTick = item2.HostTick;
-					w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<Keen.VRage.Multiplayer.Replications.InProcess.SceneContext>)delegate
-					{
-						SyncGameTime(hostTick);
-					});
+					uint hostTick = next.HostTick;
+					w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<SceneContext>)(_ => SyncGameTime(hostTick)));
 					cmds++;
 				}
 				try
 				{
-					WriteSignals(session, replicationCommandBuffer, item2.Signals);
+					WriteSignals(session, cb, next.Signals);
 				}
 				catch (Exception ex)
 				{
 					_log.WarnOnce("client-signals", $"client: writing host signals failed ({ex.GetType().Name}: {ex.Message}); this batch is skipped");
 				}
 				_lifecycleApplied++;
-				num++;
-				int num3 = cmds;
-				cmds = num3 + 1;
+				taken++;
+				cmds++;
 			}
 			else
 			{
-				LifecycleItem it = item2;
-				w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<Keen.VRage.Multiplayer.Replications.InProcess.SceneContext>)delegate
-				{
-					Apply(it);
-				});
-				int num3 = cmds;
-				cmds = num3 + 1;
-				num2++;
-				num++;
+				var it = next;
+				w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<SceneContext>)(_ => Apply(it)));
+				cmds++;
+				applies++;
+				taken++;
 				if (it.Type == SyncMsg.EntityBundle && it.Bundle.Entities.Count >= 200)
 				{
 					break;
@@ -2403,18 +2314,15 @@ internal sealed class ClientWorld
 			{
 				CharacterFlow(session, w, baseIndex, ref cmds, now);
 			}
-			catch (Exception ex2)
+			catch (Exception ex)
 			{
 				_characterFlowFailed = true;
-				_log.Error($"client: the character flow failed and is switched off (world sync continues, free camera): {ex2}");
-				Report(ClientPhase.Error, "character flow failed: " + ex2.GetType().Name + ": " + ex2.Message);
+				_log.Error($"client: the character flow failed and is switched off (world sync continues, free camera): {ex}");
+				Report(ClientPhase.Error, "character flow failed: " + ex.GetType().Name + ": " + ex.Message);
 				if (_o.Spectator && !_spectatorQueued)
 				{
 					_spectatorQueued = true;
-					w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<Keen.VRage.Multiplayer.Replications.InProcess.SceneContext>)delegate
-					{
-						Spectate();
-					});
+					w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<SceneContext>)(_ => Spectate()));
 					cmds++;
 				}
 			}
@@ -2422,10 +2330,7 @@ internal sealed class ClientWorld
 		else if (_worldApplied && !_spectatorQueued && _o.Spectator)
 		{
 			_spectatorQueued = true;
-			w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<Keen.VRage.Multiplayer.Replications.InProcess.SceneContext>)delegate
-			{
-				Spectate();
-			});
+			w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<SceneContext>)(_ => Spectate()));
 			cmds++;
 		}
 		if (_stories != null)
@@ -2433,19 +2338,15 @@ internal sealed class ClientWorld
 			try
 			{
 				Entity proxy = _sessionProxy;
-				_stories.ProcessInbox(session.StoryInbox, ClientSpace(), (Action action) =>
+				_stories.ProcessInbox(session.StoryInbox, ClientSpace(), action =>
 				{
-					w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, proxy, (Action<Keen.VRage.Multiplayer.Replications.InProcess.SceneContext>)delegate
-					{
-						action();
-					});
-					int num4 = cmds;
-					cmds = num4 + 1;
+					w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, proxy, (Action<SceneContext>)(_ => action()));
+					cmds++;
 				});
 			}
-			catch (Exception ex3)
+			catch (Exception ex)
 			{
-				_log.WarnOnce("client-stories", "client: processing the host's story replies failed: " + ex3.GetType().Name + ": " + ex3.Message);
+				_log.WarnOnce("client-stories", "client: processing the host's story replies failed: " + ex.GetType().Name + ": " + ex.Message);
 			}
 		}
 		if (!_smoothingFailed)
@@ -2454,33 +2355,33 @@ internal sealed class ClientWorld
 			{
 				ApplySmoothed(session, w, baseIndex, ref cmds, now);
 			}
-			catch (Exception value)
+			catch (Exception ex)
 			{
 				_smoothingFailed = true;
 				session.Smoother.DelayMs = 0;
-				_log.Error($"client: motion smoothing failed and is switched off (transforms are applied raw): {value}");
+				_log.Error($"client: motion smoothing failed and is switched off (transforms are applied raw): {ex}");
 			}
 		}
 		_drain.Clear();
-		session.State.Drain((uint id) => _proxies.IsLive(id), (ushort key) => (!session.Types.IsKnown(key)) ? ((bool?)null) : new bool?(session.Types.TryResolve(key, out var _, out var _)), _drain, MpClock.NowMs());
-		foreach (StateEntry item3 in _drain)
+		session.State.Drain(id => _proxies.IsLive(id), key => !session.Types.IsKnown(key) ? null : session.Types.TryResolve(key, out _, out _), _drain, MpClock.NowMs());
+		foreach (var entry in _drain)
 		{
-			if (!session.Types.TryResolve(item3.Key, out var localTypeId, out var size) || item3.Bytes.Length != size || !_proxies.TryGet(item3.NetId, out Entity e))
+			if (!session.Types.TryResolve(entry.Key, out var localTypeId, out var size) || entry.Bytes.Length != size || !_proxies.TryGet(entry.NetId, out Entity e))
 			{
 				_stateBadSize++;
 			}
-			else if (!LookIntercept(session, item3, now))
+			else if (!LookIntercept(session, entry, now))
 			{
-				if (session.IsTransformKey(item3.Key) && Ragdolling(item3.NetId, now))
+				if (session.IsTransformKey(entry.Key) && Ragdolling(entry.NetId, now))
 				{
 					RagdollWritesSkipped++;
 					continue;
 				}
-				if (session.IsTransformKey(item3.Key))
+				if (session.IsTransformKey(entry.Key))
 				{
-					NoteOwnWrittenElsewhere(item3.NetId, item3.Bytes, now);
+					NoteOwnWrittenElsewhere(entry.NetId, entry.Bytes, now);
 				}
-				w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostDataSignal(baseIndex + 1, _sessionProxy, e, new Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent.InProcessPayload(localTypeId, (ReadOnlySpan<byte>)item3.Bytes));
+				w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostDataSignal(baseIndex + 1, _sessionProxy, e, new InProcessReplicationSessionComponent.InProcessPayload(localTypeId, (ReadOnlySpan<byte>)entry.Bytes));
 				_stateApplied++;
 				cmds++;
 			}
@@ -2488,11 +2389,11 @@ internal sealed class ClientWorld
 		LookWrite(session, w, baseIndex, ref cmds);
 		if (cmds == 0)
 		{
-			Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent.ReturnCB(replicationCommandBuffer);
+			InProcessReplicationSessionComponent.ReturnCB(cb);
 			return;
 		}
 		_commands += cmds;
-		comp.ScheduleForReplay(replicationCommandBuffer);
+		comp.ScheduleForReplay(cb);
 	}
 
 	private void Apply(LifecycleItem item)
@@ -2538,8 +2439,8 @@ internal sealed class ClientWorld
 
 	private void RegisterBlobs(IStreamedOutBlobs? target, string where)
 	{
-		ClientBlobStore clientBlobStore = _session?.Blobs;
-		if (clientBlobStore == null)
+		var store = _session?.Blobs;
+		if (store == null)
 		{
 			return;
 		}
@@ -2548,43 +2449,43 @@ internal sealed class ClientWorld
 			_log.WarnOnce("client-no-blob-target", "client: the client game has no IStreamedOutBlobs (" + where + "); planets and asteroids cannot load their voxel data");
 			return;
 		}
-		List<(Guid, byte[])> list;
+		List<(Guid, byte[])> blobs;
 		if (target != _blobTarget)
 		{
 			_blobTarget = target;
-			clientBlobStore.TakeFresh();
-			list = (from x in clientBlobStore.All()
+			store.TakeFresh();
+			blobs = (from x in store.All()
 				select (Id: x.Id, x.Data)).ToList();
 		}
 		else
 		{
-			list = clientBlobStore.TakeFresh();
+			blobs = store.TakeFresh();
 		}
-		int num = 0;
-		int num2 = 0;
-		long num3 = 0L;
-		foreach (var (id, array) in list)
+		int registered = 0;
+		int unavailable = 0;
+		long bytes = 0L;
+		foreach (var (id, data) in blobs)
 		{
-			if (array == null)
+			if (data == null)
 			{
-				num2++;
+				unavailable++;
 				continue;
 			}
-			EngineCodec.Register(target, id, array);
-			num++;
-			num3 += array.Length;
+			EngineCodec.Register(target, id, data);
+			registered++;
+			bytes += data.Length;
 		}
-		_blobsRegistered += num;
-		_blobBytesRegistered += num3;
-		if (num > 0 || num2 > 0)
+		_blobsRegistered += registered;
+		_blobBytesRegistered += bytes;
+		if (registered > 0 || unavailable > 0)
 		{
-			_log.Info($"client: {num} offloaded blob(s) ({MpLogExtensions.Bytes(num3)}) registered with the client game ({where}); {_blobsRegistered} in total ({MpLogExtensions.Bytes(_blobBytesRegistered)})" + ((num2 > 0) ? $"; {num2} the host could not load (entities using them will be missing)" : ""));
+			_log.Info($"client: {registered} offloaded blob(s) ({MpLogExtensions.Bytes(bytes)}) registered with the client game ({where}); {_blobsRegistered} in total ({MpLogExtensions.Bytes(_blobBytesRegistered)})" + (unavailable > 0 ? $"; {unavailable} the host could not load (entities using them will be missing)" : ""));
 		}
 	}
 
 	private bool BlobsReady(ClientSession session, uint seq, EntityBundleMessage b, long now)
 	{
-		ClientBlobStore.Gate gate = session.Blobs.Check(b.RequiredBlobs, now, out var absent);
+		var gate = session.Blobs.Check(b.RequiredBlobs, now, out var absent);
 		if (gate == ClientBlobStore.Gate.Ready)
 		{
 			if (_gateSeq == seq)
@@ -2614,44 +2515,44 @@ internal sealed class ClientWorld
 
 	private void ReplicateBundle(EntityBundleMessage m)
 	{
-		Stopwatch sw = Stopwatch.StartNew();
-		Session session = _comp.Session;
+		var sw = Stopwatch.StartNew();
+		var session = _comp.Session;
 		if (_o.BuildFix)
 		{
 			DataTypeRegistry.EnsureDone(_log);
 		}
 		RegisterBlobs(BlobTarget(session), $"bundle #{m.LifeSeq}");
-		bool flag = m.Kind == 0;
-		if (flag)
+		bool world = m.Kind == 0;
+		if (world)
 		{
 			SlowTicks.Note = $"world part {_worldPartsApplied + 1} build ({m.Entities.Count} entities)";
 		}
-		HashSet<Entity> excluded = new HashSet<Entity>(ReferenceEqualityComparer.Instance);
-		List<string> list = new List<string>();
-		int num = 1;
+		var excluded = new HashSet<Entity>(ReferenceEqualityComparer.Instance);
+		var failures = new List<string>();
+		int tries = 1;
 		Attempt attempt;
 		while (true)
 		{
-			attempt = TryReplicate(m, excluded, num, sw);
+			attempt = TryReplicate(m, excluded, tries, sw);
 			if (attempt.Built || attempt.Error == null)
 			{
 				return;
 			}
-			list.Add(attempt.FailureDetail);
-			int num2 = attempt.FailedRoots.Count((Entity r) => excluded.Add(r));
-			if (num >= 3 || num2 == 0)
+			failures.Add(attempt.FailureDetail);
+			int newlyExcluded = attempt.FailedRoots.Count(r => excluded.Add(r));
+			if (tries >= 3 || newlyExcluded == 0)
 			{
 				break;
 			}
 			_bundlesRetried++;
-			_rootsDropped += num2;
-			_log.Warn($"client: bundle #{m.LifeSeq}: {attempt.FailureDetail}; building it again without {num2} failed root(s)");
-			num++;
+			_rootsDropped += newlyExcluded;
+			_log.Warn($"client: bundle #{m.LifeSeq}: {attempt.FailureDetail}; building it again without {newlyExcluded} failed root(s)");
+			tries++;
 		}
-		string text = $"bundle #{m.LifeSeq} ({(flag ? "world" : "spawn")}, {m.Entities.Count} entities) could not be built after {num} attempt(s): " + string.Join(" | ", list);
-		_log.Error("client: " + text + $"\n{attempt.Error}");
-		Report(ClientPhase.Error, text);
-		if (flag)
+		string line = $"bundle #{m.LifeSeq} ({(world ? "world" : "spawn")}, {m.Entities.Count} entities) could not be built after {tries} attempt(s): " + string.Join(" | ", failures);
+		_log.Error("client: " + line + $"\n{attempt.Error}");
+		Report(ClientPhase.Error, line);
+		if (world)
 		{
 			WorldPartDone(0, $"bundle #{m.LifeSeq} FAILED ({attempt.Error.GetType().Name})");
 		}
@@ -2659,112 +2560,108 @@ internal sealed class ClientWorld
 
 	private Attempt TryReplicate(EntityBundleMessage m, HashSet<Entity> excludedRoots, int attempt, Stopwatch sw)
 	{
-		Attempt a = new Attempt();
-		Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp = _comp;
-		Session session = comp.Session;
-		ReplayContext replay = comp.ReplayContext;
-		ReplicationStrategy replicationStrategy = _replication.ReplicationStrategy;
-		RemoteTypeTable types = _session.Types;
+		var a = new Attempt();
+		var comp = _comp;
+		var session = comp.Session;
+		var replay = comp.ReplayContext;
+		var strategy = _replication.ReplicationStrategy;
+		var types = _session.Types;
 		bool world = m.Kind == 0;
-		double totalMilliseconds = sw.Elapsed.TotalMilliseconds;
-		NetIdProxyContext proxies = new NetIdProxyContext(null, (int id2) => _proxies.GetOrCreate((uint)id2));
-		HashSet<Blob> referenced = new HashSet<Blob>();
-		EntityBundle entityBundle = ((m.Bundle.Length != 0) ? EngineCodec.DeserializeBundle(m.Bundle, proxies, referenced) : new EntityBundle());
-		double num = sw.Elapsed.TotalMilliseconds - totalMilliseconds;
+		double startMs = sw.Elapsed.TotalMilliseconds;
+		var proxies = new NetIdProxyContext(null, netId => _proxies.GetOrCreate((uint)netId));
+		var referenced = new HashSet<Blob>();
+		var bundle = m.Bundle.Length != 0 ? EngineCodec.DeserializeBundle(m.Bundle, proxies, referenced) : new EntityBundle();
+		double deserializeMs = sw.Elapsed.TotalMilliseconds - startMs;
 		if (attempt == 1 && referenced.Count > 0)
 		{
-			List<Guid> list = referenced.Select(EngineCodec.Id).Where((Guid id2) =>
+			var missing = referenced.Select(EngineCodec.Id).Where(blobId =>
 			{
-				ClientSession? session2 = _session;
-				return session2 == null || !session2.Blobs.Has(id2);
+				var clientSession = _session;
+				return clientSession == null || !clientSession.Blobs.Has(blobId);
 			}).ToList();
-			if (list.Count > 0)
+			if (missing.Count > 0)
 			{
-				_log.Warn($"client: bundle #{m.LifeSeq} references {referenced.Count} offloaded blob(s), {list.Count} not on this PC (first {list[0]}; host listed {m.RequiredBlobs.Count}); entities using them will fail to build");
+				_log.Warn($"client: bundle #{m.LifeSeq} references {referenced.Count} offloaded blob(s), {missing.Count} not on this PC (first {missing[0]}; host listed {m.RequiredBlobs.Count}); entities using them will fail to build");
 			}
 		}
-		Dictionary<Entity, EntityObjectBuilder> dictionary = new Dictionary<Entity, EntityObjectBuilder>(ReferenceEqualityComparer.Instance);
-		foreach (EntityLocator entity5 in m.Entities)
+		var builders = new Dictionary<Entity, EntityObjectBuilder>(ReferenceEqualityComparer.Instance);
+		foreach (var locator in m.Entities)
 		{
-			EntityObjectBuilder entityObjectBuilder = EngineCodec.Resolve(entityBundle, entity5);
-			if (entityObjectBuilder == null)
+			var ob = EngineCodec.Resolve(bundle, locator);
+			if (ob == null)
 			{
 				a.Missing++;
 			}
 			else
 			{
-				dictionary[_proxies.GetOrCreate(entity5.NetId)] = entityObjectBuilder;
+				builders[_proxies.GetOrCreate(locator.NetId)] = ob;
 			}
 		}
-		for (int num2 = 0; num2 < entityBundle.Entities.Count && num2 < entityBundle.Builders.Count; num2++)
+		for (int i = 0; i < bundle.Entities.Count && i < bundle.Builders.Count; i++)
 		{
-			Entity entity = entityBundle.Entities[num2];
-			if (entity != null && !dictionary.ContainsKey(entity))
+			var proxy = bundle.Entities[i];
+			if (proxy != null && !builders.ContainsKey(proxy))
 			{
-				dictionary[entity] = entityBundle.Builders[num2];
+				builders[proxy] = bundle.Builders[i];
 			}
 		}
-		HashSet<Entity> hashSet = new HashSet<Entity>(ReferenceEqualityComparer.Instance);
-		foreach (var parent in m.Parents)
+		var orphans = new HashSet<Entity>(ReferenceEqualityComparer.Instance);
+		foreach (var (child, parent) in m.Parents)
 		{
-			uint item = parent.Child;
-			uint item2 = parent.Parent;
-			Entity orCreate = _proxies.GetOrCreate(item2);
-			if (!_proxies.IsLive(item2) && !dictionary.ContainsKey(orCreate))
+			var parentProxy = _proxies.GetOrCreate(parent);
+			if (!_proxies.IsLive(parent) && !builders.ContainsKey(parentProxy))
 			{
-				hashSet.Add(_proxies.GetOrCreate(item));
+				orphans.Add(_proxies.GetOrCreate(child));
 			}
 		}
-		for (int num3 = Math.Min(entityBundle.Roots, entityBundle.Entities.Count) - 1; num3 >= 0; num3--)
+		for (int i = Math.Min(bundle.Roots, bundle.Entities.Count) - 1; i >= 0; i--)
 		{
-			Entity entity2 = entityBundle.Entities[num3];
-			if (entity2 != null)
+			var root = bundle.Entities[i];
+			if (root != null)
 			{
-				if (replay.HasPairingRemote(entity2))
+				if (replay.HasPairingRemote(root))
 				{
-					entityBundle.RemoveAt(num3);
+					bundle.RemoveAt(i);
 					a.Duplicates++;
 				}
-				else if (excludedRoots.Contains(entity2) || hashSet.Contains(entity2))
+				else if (excludedRoots.Contains(root) || orphans.Contains(root))
 				{
-					entityBundle.RemoveAt(num3);
+					bundle.RemoveAt(i);
 					a.Excluded++;
 				}
 			}
 		}
-		if (hashSet.Count > 0 && attempt == 1)
+		if (orphans.Count > 0 && attempt == 1)
 		{
-			_log.Warn($"client: bundle #{m.LifeSeq}: {hashSet.Count} root(s) skipped, their parent entity is not on this PC");
+			_log.Warn($"client: bundle #{m.LifeSeq}: {orphans.Count} root(s) skipped, their parent entity is not on this PC");
 		}
-		if (entityBundle.Builders.Count == 0 || entityBundle.Roots == 0)
+		if (bundle.Builders.Count == 0 || bundle.Roots == 0)
 		{
-			string text = $"bundle #{m.LifeSeq}: nothing to build ({a.Duplicates} already present, {a.Excluded} excluded, {a.Missing} unlocated)";
+			string line = $"bundle #{m.LifeSeq}: nothing to build ({a.Duplicates} already present, {a.Excluded} excluded, {a.Missing} unlocated)";
 			if (world)
 			{
-				WorldPartDone(0, text);
+				WorldPartDone(0, line);
 			}
 			else if (a.Excluded > 0)
 			{
-				_log.Info("client: " + text);
+				_log.Info("client: " + line);
 			}
 			return a;
 		}
-		Dictionary<EntityObjectBuilder, Entity> dictionary2 = new Dictionary<EntityObjectBuilder, Entity>(ReferenceEqualityComparer.Instance);
-		foreach (KeyValuePair<Entity, EntityObjectBuilder> item7 in dictionary)
+		var proxyOf = new Dictionary<EntityObjectBuilder, Entity>(ReferenceEqualityComparer.Instance);
+		foreach (var pair in builders)
 		{
-			dictionary2[item7.Value] = item7.Key;
+			proxyOf[pair.Value] = pair.Key;
 		}
-		Dictionary<Entity, DEntityBuilder> dictionary3 = new Dictionary<Entity, DEntityBuilder>(ReferenceEqualityComparer.Instance);
-		foreach (var datum in m.Data)
+		var data = new Dictionary<Entity, DEntityBuilder>(ReferenceEqualityComparer.Instance);
+		foreach (var (netId, blobs) in m.Data)
 		{
-			uint item3 = datum.NetId;
-			List<DataBlob> item4 = datum.Data;
-			DEntityBuilder value = default;
-			foreach (DataBlob item8 in item4)
+			DEntityBuilder builder = default;
+			foreach (var blob in blobs)
 			{
-				if (item8.Bytes.Length != 0 && types.TryResolve(item8.Key, out var localTypeId, out var size) && item8.Bytes.Length == size)
+				if (blob.Bytes.Length != 0 && types.TryResolve(blob.Key, out var localTypeId, out var size) && blob.Bytes.Length == size)
 				{
-					value.Set(localTypeId, in item8.Bytes[0], size);
+					builder.Set(localTypeId, in blob.Bytes[0], size);
 					a.DataSet++;
 				}
 				else
@@ -2772,72 +2669,70 @@ internal sealed class ClientWorld
 					a.DataSkipped++;
 				}
 			}
-			dictionary3[_proxies.GetOrCreate(item3)] = value;
+			data[_proxies.GetOrCreate(netId)] = builder;
 		}
-		HashSet<Entity> hashSet2 = new HashSet<Entity>(m.Staged.Select((uint id2) => _proxies.GetOrCreate(id2)), ReferenceEqualityComparer.Instance);
-		HashSet<Entity> hashSet3 = new HashSet<Entity>(m.Skipped.Select((uint id2) => _proxies.GetOrCreate(id2)), ReferenceEqualityComparer.Instance);
-		EntityTranslationContext tctx = new EntityTranslationContext(replay);
-		EntityBundle clientBundle = entityBundle.CloneBundle(tctx);
-		Dictionary<Entity, DEntityBuilder> dictionary4 = new Dictionary<Entity, DEntityBuilder>();
-		replicationStrategy.TranslateBundle(clientBundle, entityBundle, tctx, dictionary2, dictionary4, hashSet3, dictionary3, hashSet2, false);
-		Dictionary<Entity, Entity> dictionary5 = new Dictionary<Entity, Entity>();
-		foreach (var parent2 in m.Parents)
+		var staged = new HashSet<Entity>(m.Staged.Select(netId => _proxies.GetOrCreate(netId)), ReferenceEqualityComparer.Instance);
+		var skipped = new HashSet<Entity>(m.Skipped.Select(netId => _proxies.GetOrCreate(netId)), ReferenceEqualityComparer.Instance);
+		var tctx = new EntityTranslationContext(replay);
+		var clientBundle = bundle.CloneBundle(tctx);
+		var clientBuilders = new Dictionary<Entity, DEntityBuilder>();
+		strategy.TranslateBundle(clientBundle, bundle, tctx, proxyOf, clientBuilders, skipped, data, staged, false);
+		var parents = new Dictionary<Entity, Entity>();
+		foreach (var (child, parent) in m.Parents)
 		{
-			uint item5 = parent2.Child;
-			uint item6 = parent2.Parent;
-			Entity orCreate2 = _proxies.GetOrCreate(item5);
-			if (!hashSet.Contains(orCreate2) && !excludedRoots.Contains(orCreate2))
+			var childProxy = _proxies.GetOrCreate(child);
+			if (!orphans.Contains(childProxy) && !excludedRoots.Contains(childProxy))
 			{
-				dictionary5[tctx.AddEntity(orCreate2)] = tctx.AddEntity(_proxies.GetOrCreate(item6));
+				parents[tctx.AddEntity(childProxy)] = tctx.AddEntity(_proxies.GetOrCreate(parent));
 			}
 		}
-		List<Entity> pairedProxies = new List<Entity>();
-		List<uint> paired = new List<uint>();
-		Dictionary<Entity, Entity> clientToServer = new Dictionary<Entity, Entity>(ReferenceEqualityComparer.Instance);
-		foreach (KeyValuePair<Entity, (Entity, bool)> translation in tctx.Translations)
+		var pairedProxies = new List<Entity>();
+		var paired = new List<uint>();
+		var clientToServer = new Dictionary<Entity, Entity>(ReferenceEqualityComparer.Instance);
+		foreach (var translation in tctx.Translations)
 		{
-			Entity key = translation.Key;
-			var (entity3, flag) = translation.Value;
-			clientToServer[entity3] = key;
-			if (!flag && dictionary.ContainsKey(key) && !hashSet3.Contains(key) && !replay.HasPairingRemote(key))
+			var proxy = translation.Key;
+			var (clientEntity, translated) = translation.Value;
+			clientToServer[clientEntity] = proxy;
+			if (!translated && builders.ContainsKey(proxy) && !skipped.Contains(proxy) && !replay.HasPairingRemote(proxy))
 			{
-				replay.AddObjectPairing(key, entity3);
-				pairedProxies.Add(key);
-				if (_proxies.TryGetId(key, out var id))
+				replay.AddObjectPairing(proxy, clientEntity);
+				pairedProxies.Add(proxy);
+				if (_proxies.TryGetId(proxy, out var id))
 				{
 					paired.Add(id);
 				}
 			}
 		}
-		double value2 = sw.Elapsed.TotalMilliseconds - totalMilliseconds - num;
+		double translateMs = sw.Elapsed.TotalMilliseconds - startMs - deserializeMs;
 		a.Paired = paired.Count;
-		a.Summary = $"bundle #{m.LifeSeq} ({(world ? "world" : "spawn")}): {m.Entities.Count} entities sent, {paired.Count} paired, {a.Missing} unlocated, {a.Duplicates} duplicates, {a.Excluded} roots excluded, data {a.DataSet} set / {a.DataSkipped} skipped, {referenced.Count} blobs; deserialize {num:0} ms, translate {value2:0} ms" + ((attempt > 1) ? $", attempt {attempt}" : "");
+		a.Summary = $"bundle #{m.LifeSeq} ({(world ? "world" : "spawn")}): {m.Entities.Count} entities sent, {paired.Count} paired, {a.Missing} unlocated, {a.Duplicates} duplicates, {a.Excluded} roots excluded, data {a.DataSet} set / {a.DataSkipped} skipped, {referenced.Count} blobs; deserialize {deserializeMs:0} ms, translate {translateMs:0} ms" + (attempt > 1 ? $", attempt {attempt}" : "");
 		// A big pasted or spawned grid (40k blocks took 3.1 s) is built on a worker thread while the game keeps
 		// running: Scene.OpenNoSyncSection exists for allocating entities concurrently with Tick, and SE2's own
 		// spawner does the same. Only adding it to the scene stays on this thread; later updates wait for it.
-		bool background = !world && m.Entities.Count >= BackgroundBuildEntities && dictionary5.Count == 0 && _sessionProxy != null;
-		if (_o.BuildFix && dictionary5.Count == 0 && _sessionProxy != null && !background)
+		bool background = !world && m.Entities.Count >= BackgroundBuildEntities && parents.Count == 0 && _sessionProxy != null;
+		if (_o.BuildFix && parents.Count == 0 && _sessionProxy != null && !background)
 		{
-			dictionary5[_sessionProxy] = _sessionProxy;
+			parents[_sessionProxy] = _sessionProxy;
 		}
 		if (!_dcsLogged)
 		{
 			_dcsLogged = true;
-			bool flag2 = false;
+			bool dcs = false;
 			try
 			{
-				flag2 = session.Scene.IsCurrentThreadDCS();
+				dcs = session.Scene.IsCurrentThreadDCS();
 			}
 			catch (Exception)
 			{
 			}
-			_log.Info($"client: entity bundles are built on thread '{Thread.CurrentThread.Name}' (scene-synchronized: {(flag2 ? "yes" : "no")}); " + (_o.BuildFix ? "roots one by one (0.8.2 build fix)" : "roots in parallel (buildfix off)"));
+			_log.Info($"client: entity bundles are built on thread '{Thread.CurrentThread.Name}' (scene-synchronized: {(dcs ? "yes" : "no")}); " + (_o.BuildFix ? "roots one by one (0.8.2 build fix)" : "roots in parallel (buildfix off)"));
 		}
-		GameEntitySerializer.BundleInitArgs args = new GameEntitySerializer.BundleInitArgs
+		var args = new GameEntitySerializer.BundleInitArgs
 		{
 			Bundle = clientBundle,
-			EntityParents = dictionary5,
-			EntityBuilders = dictionary4
+			EntityParents = parents,
+			EntityBuilders = clientBuilders
 		};
 		Task<Entity[]> task;
 		Entity[] halfAdded = null;
@@ -2855,9 +2750,9 @@ internal sealed class ClientWorld
 		{
 			task = session.EntitySerializer.BuildFromBundleAsync(args, allowAsyncSpawn: false);
 		}
-		catch (Exception e)
+		catch (Exception ex)
 		{
-			Fail(e);
+			Fail(ex);
 			return a;
 		}
 		if (!task.IsCompleted)
@@ -2869,14 +2764,14 @@ internal sealed class ClientWorld
 				{
 					Finish(task.GetAwaiter().GetResult());
 				}
-				catch (Exception ex2)
+				catch (Exception ex)
 				{
-					Fail(ex2);
-					_log.Error($"client: async {a.Summary} failed and was rolled back: {a.FailureDetail}\n{ex2}");
+					Fail(ex);
+					_log.Error($"client: async {a.Summary} failed and was rolled back: {a.FailureDetail}\n{ex}");
 					Report(ClientPhase.Error, $"bundle #{m.LifeSeq} build failed: {a.FailureDetail}");
 					if (world)
 					{
-						WorldPartDone(0, $"bundle #{m.LifeSeq} FAILED ({ex2.GetType().Name})");
+						WorldPartDone(0, $"bundle #{m.LifeSeq} FAILED ({ex.GetType().Name})");
 					}
 				}
 			});
@@ -2888,59 +2783,59 @@ internal sealed class ClientWorld
 			Finish(task.GetAwaiter().GetResult());
 			a.Built = true;
 		}
-		catch (Exception e2)
+		catch (Exception ex)
 		{
-			Fail(e2);
+			Fail(ex);
 		}
 		return a;
-		void Fail(Exception ex2)
+		void Fail(Exception error)
 		{
-			a.Error = ex2;
-			int value3 = RollBackPairings(replay, pairedProxies, out string firstError);
+			a.Error = error;
+			int rolledBack = RollBackPairings(replay, pairedProxies, out var firstError);
 			if (firstError != null)
 			{
 				_log.WarnOnce("client-unpair", "client: removing a pairing after a failed bundle threw " + firstError);
 			}
-			int num4 = 0;
+			int purged = 0;
 			try
 			{
-				List<Entity> entities = (from v in tctx.Translations.Values
+				var entities = (from v in tctx.Translations.Values
 					where !v.IsTranslated
 					select v.Entity).ToList();
-				num4 = EngineCodec.RemoveFromCloseQueues(session, entities);
-				if (num4 > 0)
+				purged = EngineCodec.RemoveFromCloseQueues(session, entities);
+				if (purged > 0)
 				{
-					_purgedDead += num4;
-					_log.Warn($"client: bundle #{m.LifeSeq}: {num4} of its unrolled entities were queued for close; removed from the session's close queue");
+					_purgedDead += purged;
+					_log.Warn($"client: bundle #{m.LifeSeq}: {purged} of its unrolled entities were queued for close; removed from the session's close queue");
 				}
 			}
-			catch (Exception ex3)
+			catch (Exception ex)
 			{
-				_log.WarnOnce("client-unqueue", "client: clearing a failed bundle's entities from the close queue threw " + ex3.GetType().Name + ": " + ex3.Message);
+				_log.WarnOnce("client-unqueue", "client: clearing a failed bundle's entities from the close queue threw " + ex.GetType().Name + ": " + ex.Message);
 			}
-			num4 += PurgeDead(session, $"failed bundle #{m.LifeSeq}");
-			GameEntitySerializer.EntityBundleInitException ex4 = Unwrap<GameEntitySerializer.EntityBundleInitException>(ex2);
-			List<string> list2 = new List<string>();
-			if (ex4?.Failures != null && ex4.Bundle != null)
+			purged += PurgeDead(session, $"failed bundle #{m.LifeSeq}");
+			var initError = Unwrap<GameEntitySerializer.EntityBundleInitException>(error);
+			var rootErrors = new List<string>();
+			if (initError?.Failures != null && initError.Bundle != null)
 			{
-				for (int num5 = 0; num5 < ex4.Failures.Length && num5 < ex4.Bundle.Entities.Count; num5++)
+				for (int i = 0; i < initError.Failures.Length && i < initError.Bundle.Entities.Count; i++)
 				{
-					Exception ex5 = ex4.Failures[num5];
-					if (ex5 != null)
+					var failure = initError.Failures[i];
+					if (failure != null)
 					{
-						Entity entity4 = ex4.Bundle.Entities[num5];
-						if (entity4 != null && clientToServer.TryGetValue(entity4, out Entity value4))
+						var clientEntity = initError.Bundle.Entities[i];
+						if (clientEntity != null && clientToServer.TryGetValue(clientEntity, out Entity serverProxy))
 						{
-							a.FailedRoots.Add(value4);
+							a.FailedRoots.Add(serverProxy);
 						}
-						if (list2.Count < 3)
+						if (rootErrors.Count < 3)
 						{
-							list2.Add($"{Innermost(ex5).GetType().Name} '{Short(Innermost(ex5).Message)}' in {Short(ex5.Message)}");
+							rootErrors.Add($"{Innermost(failure).GetType().Name} '{Short(Innermost(failure).Message)}' in {Short(failure.Message)}");
 						}
 					}
 				}
 			}
-			a.FailureDetail = ((ex4 != null) ? $"{a.FailedRoots.Count} of {clientBundle.Roots} root(s) failed ({string.Join("; ", list2)})" : (ex2.GetType().Name + ": " + Short(ex2.Message))) + $"; rolled back {value3} pairing(s), purged {num4} dead entities";
+			a.FailureDetail = (initError != null ? $"{a.FailedRoots.Count} of {clientBundle.Roots} root(s) failed ({string.Join("; ", rootErrors)})" : (error.GetType().Name + ": " + Short(error.Message))) + $"; rolled back {rolledBack} pairing(s), purged {purged} dead entities";
 			if (halfAdded != null)
 			{
 				a.FailureDetail += $"; closed {CloseHalfAdded(session, halfAdded)} half-added root(s)";
@@ -2958,27 +2853,27 @@ internal sealed class ClientWorld
 				halfAdded = built;
 				throw;
 			}
-			foreach (uint item9 in paired)
+			foreach (var netId in paired)
 			{
-				_proxies.MarkLive(item9);
+				_proxies.MarkLive(netId);
 			}
 			_entitiesBuilt += built.Length;
 			a.BuiltRoots = built.Length;
-			string text2 = $"{a.Summary}; built {built.Length} root entities in {sw.ElapsedMilliseconds} ms total";
+			string line = $"{a.Summary}; built {built.Length} root entities in {sw.ElapsedMilliseconds} ms total";
 			if (world)
 			{
-				WorldPartDone(paired.Count, text2);
+				WorldPartDone(paired.Count, line);
 			}
 			else if (m.Entities.Count >= 20 || _lifecycleApplied < 5 || attempt > 1 || referenced.Count > 0)
 			{
-				_log.Info("client: " + text2);
+				_log.Info("client: " + line);
 			}
 		}
 	}
 
 	internal static int RollBackPairings(ReplayContext replay, IEnumerable<Entity> proxies, out string? firstError)
 	{
-		int num = 0;
+		int removed = 0;
 		firstError = null;
 		foreach (Entity proxy in proxies)
 		{
@@ -2987,7 +2882,7 @@ internal sealed class ClientWorld
 				if (replay.HasPairingRemote(proxy))
 				{
 					replay.RemoveObjectPairing(proxy);
-					num++;
+					removed++;
 				}
 			}
 			catch (Exception ex)
@@ -2998,7 +2893,7 @@ internal sealed class ClientWorld
 				}
 			}
 		}
-		return num;
+		return removed;
 	}
 
 	private static T? Unwrap<T>(Exception e) where T : Exception
@@ -3009,14 +2904,14 @@ internal sealed class ClientWorld
 			{
 				return result;
 			}
-			if (ex is AggregateException ex2 && !(ex2 is T))
+			if (ex is AggregateException aggregate && aggregate is not T)
 			{
-				foreach (Exception innerException in ex2.InnerExceptions)
+				foreach (var inner in aggregate.InnerExceptions)
 				{
-					T val = Unwrap<T>(innerException);
-					if (val != null)
+					var found = Unwrap<T>(inner);
+					if (found != null)
 					{
-						return val;
+						return found;
 					}
 				}
 			}
@@ -3046,13 +2941,13 @@ internal sealed class ClientWorld
 	{
 		try
 		{
-			int num = EngineCodec.PurgeDeadFromCloseQueues(session, out string sample);
-			if (num > 0)
+			int purged = EngineCodec.PurgeDeadFromCloseQueues(session, out var sample);
+			if (purged > 0)
 			{
-				_purgedDead += num;
-				_log.Warn($"client: dropped {num} dead entit{((num == 1) ? "y" : "ies")} from the session's close queue ({where}; first: {sample}); " + "Session.Update would have crashed on them");
+				_purgedDead += purged;
+				_log.Warn($"client: dropped {purged} dead entit{(purged == 1 ? "y" : "ies")} from the session's close queue ({where}; first: {sample}); " + "Session.Update would have crashed on them");
 			}
-			return num;
+			return purged;
 		}
 		catch (Exception ex)
 		{
@@ -3063,15 +2958,15 @@ internal sealed class ClientWorld
 
 	public static void SessionUpdatePrefix(Session __instance, bool doEntityLifetimeUpdates)
 	{
-		ClientWorld current = Current;
-		Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent inProcessReplicationSessionComponent = current?._comp;
-		if (inProcessReplicationSessionComponent == null || !doEntityLifetimeUpdates)
+		var current = Current;
+		var comp = current?._comp;
+		if (comp == null || !doEntityLifetimeUpdates)
 		{
 			return;
 		}
 		try
 		{
-			if (inProcessReplicationSessionComponent.Session == __instance)
+			if (comp.Session == __instance)
 			{
 				SlowTicks.Begin();
 				current.PurgeDead(__instance, "Session.Update");
@@ -3100,23 +2995,23 @@ internal sealed class ClientWorld
 		_worldPartsApplied++;
 		_worldEntitiesBuilt += entities;
 		Progress.PartBuilt(entities);
-		int num = Math.Max(1, _session?.Accept?.WorldParts ?? 1);
-		_log.Info($"client: world part {_worldPartsApplied}/{num}: {detail}");
-		Report(ClientPhase.Progress, $"world part {_worldPartsApplied}/{num}: {detail}");
-		if (_worldPartsApplied >= num && !_worldApplied)
+		int parts = Math.Max(1, _session?.Accept?.WorldParts ?? 1);
+		_log.Info($"client: world part {_worldPartsApplied}/{parts}: {detail}");
+		Report(ClientPhase.Progress, $"world part {_worldPartsApplied}/{parts}: {detail}");
+		if (_worldPartsApplied >= parts && !_worldApplied)
 		{
 			_worldApplied = true;
-			string text = $"WORLD APPLIED: {_worldEntitiesBuilt} entities paired in {num} part(s), {_proxies.LiveCount} live NetworkIds";
-			_log.Info("client: " + text);
-			Report(ClientPhase.WorldApplied, text);
+			string line = $"WORLD APPLIED: {_worldEntitiesBuilt} entities paired in {parts} part(s), {_proxies.LiveCount} live NetworkIds";
+			_log.Info("client: " + line);
+			Report(ClientPhase.WorldApplied, line);
 			Progress.Set(_o.Character ? JoinStage.WaitingForCharacter : JoinStage.Playing, MpClock.NowMs(), _o.Character ? null : "Free camera (no character).");
 		}
 	}
 
 	private void Despawn(List<uint> ids, byte mode)
 	{
-		Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp = _comp;
-		ReplayContext replayContext = comp.ReplayContext;
+		var comp = _comp;
+		var replay = comp.ReplayContext;
 		foreach (uint id in ids)
 		{
 			if (!_proxies.TryGet(id, out Entity e))
@@ -3127,20 +3022,20 @@ internal sealed class ClientWorld
 			_session?.Smoother.Remove(id);
 			if (id == _ownNetId)
 			{
-				ClearOwnCharacter((mode == 0) ? "removed on the host" : "forgotten by the host");
+				ClearOwnCharacter(mode == 0 ? "removed on the host" : "forgotten by the host");
 			}
 			if (mode == 0)
 			{
 				_session?.State.Despawn(id, MpClock.NowMs());
-				bool flag = _proxies.IsLive(id);
+				bool wasLive = _proxies.IsLive(id);
 				_proxies.MarkDead(id);
-				if (!flag || !replayContext.HasPairingRemote(e))
+				if (!wasLive || !replay.HasPairingRemote(e))
 				{
 					_despawnSkipped++;
 					continue;
 				}
 				bool skip = false;
-				if (!(replayContext.TranslateObject(e, ReplicationFailureStrategy.NullOnAnyFail, ref skip) is Entity entity) || EngineCodec.IsDead(entity) || EngineCodec.IsClosing(comp.Session, entity))
+				if (replay.TranslateObject(e, ReplicationFailureStrategy.NullOnAnyFail, ref skip) is not Entity entity || EngineCodec.IsDead(entity) || EngineCodec.IsClosing(comp.Session, entity))
 				{
 					_despawnSkipped++;
 					continue;
@@ -3157,14 +3052,14 @@ internal sealed class ClientWorld
 			}
 			try
 			{
-				if (replayContext.HasPairingRemote(e))
+				if (replay.HasPairingRemote(e))
 				{
-					replayContext.RemoveObjectPairing(e);
+					replay.RemoveObjectPairing(e);
 				}
 			}
-			catch (Exception ex2)
+			catch (Exception ex)
 			{
-				_log.WarnOnce("client-forget", $"client: forgetting NetworkId {id} threw {ex2.GetType().Name}: {ex2.Message}");
+				_log.WarnOnce("client-forget", $"client: forgetting NetworkId {id} threw {ex.GetType().Name}: {ex.Message}");
 			}
 			_proxies.Forget(id);
 		}
@@ -3172,14 +3067,14 @@ internal sealed class ClientWorld
 
 	private void RemoveData(List<(uint NetId, ushort Key)> items)
 	{
-		ReplayContext replayContext = _comp.ReplayContext;
-		RemoteTypeTable types = _session.Types;
+		var replay = _comp.ReplayContext;
+		var types = _session.Types;
 		foreach (var (id, key) in items)
 		{
-			if (_proxies.IsLive(id) && _proxies.TryGet(id, out Entity e) && types.TryResolve(key, out var localTypeId, out var _))
+			if (_proxies.IsLive(id) && _proxies.TryGet(id, out Entity e) && types.TryResolve(key, out var localTypeId, out _))
 			{
 				bool skip = false;
-				if (replayContext.TranslateObject(e, ReplicationFailureStrategy.NullOnAnyFail, ref skip) is Entity entity && !EngineCodec.IsDead(entity))
+				if (replay.TranslateObject(e, ReplicationFailureStrategy.NullOnAnyFail, ref skip) is Entity entity && !EngineCodec.IsDead(entity))
 				{
 					entity.Scene.TryRemoveData(entity.Data, localTypeId);
 				}
@@ -3196,30 +3091,29 @@ internal sealed class ClientWorld
 		}
 		try
 		{
-			Session session = _comp.Session;
-			EntityObjectBuilder serverObjectBuilder = (Singleton<DefinitionManager>.Instance.GetDefinitionsOfType<SpectatingModesComponentDefinition>().FirstOrDefault() ?? throw new InvalidOperationException("no SpectatingModesComponentDefinition")).SpectatorPrefab.Get();
-			EntityObjectBuilder clientObjectBuilder = _replication.ReplicationStrategy.GetClientObjectBuilder(serverObjectBuilder);
-			ClientPlayersSessionComponent clientPlayersSessionComponent = session.SessionComponents.TryGet<ClientPlayersSessionComponent>();
-			if (clientPlayersSessionComponent != null)
+			var session = _comp.Session;
+			var serverOb = (Singleton<DefinitionManager>.Instance.GetDefinitionsOfType<SpectatingModesComponentDefinition>().FirstOrDefault() ?? throw new InvalidOperationException("no SpectatingModesComponentDefinition")).SpectatorPrefab.Get();
+			var clientOb = _replication.ReplicationStrategy.GetClientObjectBuilder(serverOb);
+			var players = session.SessionComponents.TryGet<ClientPlayersSessionComponent>();
+			if (players != null)
 			{
-				OwnershipSessionComponent.ChangeOwnership(clientObjectBuilder, clientPlayersSessionComponent.LocalPlayerIdentity);
+				OwnershipSessionComponent.ChangeOwnership(clientOb, players.LocalPlayerIdentity);
 			}
-			string value = "at the origin";
-			List<Entity> list = new List<Entity>();
-			if (session.TryFillAliveCharactersHotfix(list, preserveOrder: true) && list.Count > 0 && list[0].Data.TryGet<WorldTransform>(out var data))
+			string where = "at the origin";
+			var characters = new List<Entity>();
+			if (session.TryFillAliveCharactersHotfix(characters, preserveOrder: true) && characters.Count > 0 && characters[0].Data.TryGet<WorldTransform>(out var data))
 			{
-				Vector3D position = data.Position + Vector3D.Up * 3.0 + Vector3D.Backward * 6.0;
-				clientObjectBuilder.OB<WorldTransformComponent, WorldTransformComponentObjectBuilder>().Transform = new WorldTransform(position, data.Orientation);
-				value = $"next to character {list[0]} ({list.Count} characters in the client world)";
+				var position = data.Position + Vector3D.Up * 3.0 + Vector3D.Backward * 6.0;
+				clientOb.OB<WorldTransformComponent, WorldTransformComponentObjectBuilder>().Transform = new WorldTransform(position, data.Orientation);
+				where = $"next to character {characters[0]} ({characters.Count} characters in the client world)";
 			}
-			Entity value2 = (_spectator = (session.SessionComponents.TryGet<SimpleEntitySpawnerSessionComponent>() ?? throw new InvalidOperationException("no entity spawner in the client session")).SpawnEntity(clientObjectBuilder));
-			SpectatingModesSessionComponent spectatingModesSessionComponent = session.SessionComponents.TryGet<SpectatingModesSessionComponent>();
-			spectatingModesSessionComponent?.SetEntityTypeToPossess(InitialEntityOptions.Spectator);
-			string text = $"free camera: local spectator {value2} spawned {value}; possession requested via {((spectatingModesSessionComponent != null) ? "SpectatingModesSessionComponent" : "nothing (component missing)")}";
-			_log.Info("client: " + text);
-			Report(ClientPhase.CameraReady, text);
-			JoinStage stage = Progress.Stage;
-			if (stage - 7 <= JoinStage.WaitingForSteam)
+			var spectator = _spectator = (session.SessionComponents.TryGet<SimpleEntitySpawnerSessionComponent>() ?? throw new InvalidOperationException("no entity spawner in the client session")).SpawnEntity(clientOb);
+			var spectating = session.SessionComponents.TryGet<SpectatingModesSessionComponent>();
+			spectating?.SetEntityTypeToPossess(InitialEntityOptions.Spectator);
+			string line = $"free camera: local spectator {spectator} spawned {where}; possession requested via {(spectating != null ? "SpectatingModesSessionComponent" : "nothing (component missing)")}";
+			_log.Info("client: " + line);
+			Report(ClientPhase.CameraReady, line);
+			if (Progress.Stage is JoinStage.Building or JoinStage.WaitingForCharacter)
 			{
 				Progress.Set(JoinStage.Playing, MpClock.NowMs(), "No character from the host: free camera.");
 			}
@@ -3235,23 +3129,17 @@ internal sealed class ClientWorld
 	{
 		if (_o.Predict && !_lookFailed)
 		{
-			if (_look == null)
-			{
-				_look = new LookPredictor(_log);
-			}
+			_look ??= new LookPredictor(_log);
 			_look.Begin(netId, MpClock.NowMs());
 			_deckFrame = false;
 			_look.ExtraLagMs = 0.0;
 			_fastUntilMs = 0L;
 			_lookDirty = false;
 			_lookLastSent = default;
-			if (_body == null)
-			{
-				_body = new OwnBodyFilter(_log);
-			}
+			_body ??= new OwnBodyFilter(_log);
 			_body.Enabled = _o.BodyFilter;
 			_body.Reset();
-			(_move ?? (_move = new MovePredictor())).Reset();
+			(_move ??= new MovePredictor()).Reset();
 			_movePhys = null;
 			_lastWritten = null;
 			_bodyWhy = null;
@@ -3260,7 +3148,7 @@ internal sealed class ClientWorld
 
 	private void NoteBodyWhy(string what)
 	{
-		_bodyWhy = ((_bodyWhy == null) ? what : (_bodyWhy + "; " + what));
+		_bodyWhy = _bodyWhy == null ? what : _bodyWhy + "; " + what;
 	}
 
 	private void NoteOwnWrittenElsewhere(uint netId, byte[] value, long now)
@@ -3284,33 +3172,25 @@ internal sealed class ClientWorld
 		{
 			return;
 		}
-		byte[] array = new byte[40];
-		Unsafe.WriteUnaligned(ref array[0], data);
-		(double X, double Y, double Z, System.Numerics.Quaternion O) tuple = LookMath.ReadTransform(array);
-		double item = tuple.X;
-		double item2 = tuple.Y;
-		double item3 = tuple.Z;
-		System.Numerics.Quaternion item4 = tuple.O;
-		(double X, double Y, double Z, System.Numerics.Quaternion O) tuple2 = LookMath.ReadTransform(lastWritten);
-		double item5 = tuple2.X;
-		double item6 = tuple2.Y;
-		double item7 = tuple2.Z;
-		System.Numerics.Quaternion item8 = tuple2.O;
-		double num = Math.Sqrt((item - item5) * (item - item5) + (item2 - item6) * (item2 - item6) + (item3 - item7) * (item3 - item7));
-		float num2 = LookMath.AngleDeg(item4, item8);
-		if (!(num < 0.05) || !(num2 < 1f))
+		byte[] shown = new byte[40];
+		Unsafe.WriteUnaligned(ref shown[0], data);
+		var (sx, sy, sz, shownRot) = LookMath.ReadTransform(shown);
+		var (wx, wy, wz, writtenRot) = LookMath.ReadTransform(lastWritten);
+		double offM = Math.Sqrt((sx - wx) * (sx - wx) + (sy - wy) * (sy - wy) + (sz - wz) * (sz - wz));
+		float offDeg = LookMath.AngleDeg(shownRot, writtenRot);
+		if (!(offM < 0.05) || !(offDeg < 1f))
 		{
 			_otherWriterCount++;
-			if (num > _otherWriterMaxM)
+			if (offM > _otherWriterMaxM)
 			{
-				_otherWriterMaxM = num;
+				_otherWriterMaxM = offM;
 			}
 			if (now - _otherWriterLogMs < 2000)
 			{
 				_otherWriterSuppressed++;
 				return;
 			}
-			_log.Info($"client: own body: the game shows a transform Y51_SE2Online did not write ({num:0.00} m / {num2:0.0} deg off the one written {now - _lastWrittenMs} ms ago): a second writer (Keen's replay of host data / client physics){((_otherWriterSuppressed > 0) ? $" (+{_otherWriterSuppressed} more)" : "")}");
+			_log.Info($"client: own body: the game shows a transform Y51_SE2Online did not write ({offM:0.00} m / {offDeg:0.0} deg off the one written {now - _lastWrittenMs} ms ago): a second writer (Keen's replay of host data / client physics){(_otherWriterSuppressed > 0 ? $" (+{_otherWriterSuppressed} more)" : "")}");
 			_otherWriterSuppressed = 0L;
 			_otherWriterLogMs = now;
 		}
@@ -3325,8 +3205,8 @@ internal sealed class ClientWorld
 
 	private void LookTick(ClientSession session, long now)
 	{
-		LookPredictor look = _look;
-		Entity ownCharacter = _ownCharacter;
+		var look = _look;
+		var ownCharacter = _ownCharacter;
 		if (look == null || _lookFailed || ownCharacter == null || look.NetId == 0 || look.NetId != _ownNetId)
 		{
 			return;
@@ -3334,7 +3214,7 @@ internal sealed class ClientWorld
 		try
 		{
 			CheckOwnSecondWriter(ownCharacter, now);
-			_ownVel = (ownCharacter.Data.TryGet<RigidBodyData>(out var data) ? new System.Numerics.Vector3?(new System.Numerics.Vector3(data.LinearVelocity.X, data.LinearVelocity.Y, data.LinearVelocity.Z)) : ((System.Numerics.Vector3?)null));
+			_ownVel = ownCharacter.Data.TryGet<RigidBodyData>(out var data) ? new System.Numerics.Vector3(data.LinearVelocity.X, data.LinearVelocity.Y, data.LinearVelocity.Z) : null;
 			if (!_ownVelLogged)
 			{
 				_ownVelLogged = true;
@@ -3342,56 +3222,45 @@ internal sealed class ClientWorld
 			}
 			// Host samples are stamped at the end of the tick the input was applied in, the ack at its start.
 			look.MeasuredLagMs = session.InputRttMs >= 0 ? session.InputRttMs + 8.0 : null;
-			LookMode lookMode = LookModeOf(ownCharacter, out string detail);
-			if (lookMode != look.Mode)
+			LookMode mode = LookModeOf(ownCharacter, out string detail);
+			if (mode != look.Mode)
 			{
-				NoteBodyWhy($"movement mode {look.Mode} -> {lookMode}");
+				NoteBodyWhy($"movement mode {look.Mode} -> {mode}");
 			}
-			look.SetMode(lookMode, now, detail);
-			bool flag = lookMode == LookMode.Off && detail.StartsWith("controlling", StringComparison.Ordinal);
-			bool flag2 = lookMode == LookMode.Ground && OnMovingGrid(ownCharacter, session, now);
-			bool flag3 = _o.FastSmooth && lookMode == LookMode.Jetpack && FastOwnFlight(ownCharacter, now);
-			bool flag4 = flag | flag2 | flag3;
-			bool flag5 = flag2 && session.Smoother.Enabled && _o.DeckFrame;
-			if (flag5 != _deckFrame)
+			look.SetMode(mode, now, detail);
+			bool seated = mode == LookMode.Off && detail.StartsWith("controlling", StringComparison.Ordinal);
+			bool onDeck = mode == LookMode.Ground && OnMovingGrid(ownCharacter, session, now);
+			bool fastFlight = _o.FastSmooth && mode == LookMode.Jetpack && FastOwnFlight(ownCharacter, now);
+			bool smoothed = seated || onDeck || fastFlight;
+			bool deckFrame = onDeck && session.Smoother.Enabled && _o.DeckFrame;
+			if (deckFrame != _deckFrame)
 			{
-				_deckFrame = flag5;
-				System.Numerics.Quaternion delta = (flag5 ? System.Numerics.Quaternion.Conjugate(_deckQ) : _deckQ);
+				_deckFrame = deckFrame;
+				var delta = deckFrame ? System.Numerics.Quaternion.Conjugate(_deckQ) : _deckQ;
 				look.Rebase(delta);
 				_body?.Rebase(delta);
-				NoteBodyWhy(flag5 ? "prediction now in the deck's frame" : "prediction back in the world frame");
+				NoteBodyWhy(deckFrame ? "prediction now in the deck's frame" : "prediction back in the world frame");
 			}
-			if (flag4 != _ownSmoothed && session.Smoother.Enabled)
+			if (smoothed != _ownSmoothed && session.Smoother.Enabled)
 			{
-				_ownSmoothed = flag4;
-				NoteBodyWhy(flag4 ? "own body source: raw -> smoothed timeline" : "own body source: smoothed timeline -> raw");
-				session.Smoother.SetRaw(look.NetId, !flag4);
+				_ownSmoothed = smoothed;
+				NoteBodyWhy(smoothed ? "own body source: raw -> smoothed timeline" : "own body source: smoothed timeline -> raw");
+				session.Smoother.SetRaw(look.NetId, !smoothed);
 				if (_ownSmoothedLogged++ < 12)
 				{
-					IMpLog log = _log;
-					string message;
-					if (flag)
-					{
-						message = "client: seated: the own character follows the ship's smoothed timeline (no shaking in the seat)";
-					}
-					else if (flag2)
-					{
-						message = "client: standing on a moving grid: the own character follows that grid's smoothed timeline (no sliding on the deck)";
-					}
-					else
-					{
-						message = (flag3 ? "client: fast jetpack flight: the own character follows the smoothed timeline (no shaking at speed)" : "client: on foot again: the own character is shown raw (look prediction)");
-					}
-					log.Info(message);
+					_log.Info(seated ? "client: seated: the own character follows the ship's smoothed timeline (no shaking in the seat)"
+						: onDeck ? "client: standing on a moving grid: the own character follows that grid's smoothed timeline (no sliding on the deck)"
+						: fastFlight ? "client: fast jetpack flight: the own character follows the smoothed timeline (no shaking at speed)"
+						: "client: on foot again: the own character is shown raw (look prediction)");
 				}
 			}
-			look.ExtraLagMs = (((_deckFrame || ((_o.FastSmooth & flag3) && _ownSmoothed)) && session.Smoother.Enabled) ? session.Smoother.CurrentDelayMs : 0.0);
-			OwnBodyFilter body = _body;
-			if (body != null && body.Enabled && lookMode != LookMode.Off && look.Intercepts)
+			look.ExtraLagMs = (_deckFrame || (_o.FastSmooth && fastFlight && _ownSmoothed)) && session.Smoother.Enabled ? session.Smoother.CurrentDelayMs : 0.0;
+			var body = _body;
+			if (body != null && body.Enabled && mode != LookMode.Off && look.Intercepts)
 			{
 				_lookDirty = true;
 			}
-			if (lookMode == LookMode.Off)
+			if (mode == LookMode.Off)
 			{
 				if (look.Intercepts)
 				{
@@ -3400,26 +3269,24 @@ internal sealed class ClientWorld
 			}
 			else
 			{
-				System.Numerics.Vector3 rotation = (ownCharacter.Data.TryGet<ControlData>(out var data2) ? new System.Numerics.Vector3(data2.Rotation.X, data2.Rotation.Y, data2.Rotation.Z) : System.Numerics.Vector3.Zero);
-				float maxTorque = ((ownCharacter.Data.TryGet<CharacterMovementComponent.JetpackModeData>(out var data3) && data3.MaxTorque > 0f) ? data3.MaxTorque : 65f);
-				System.Numerics.Vector3 centerOfMass = (ownCharacter.Data.TryGet<RigidBodyMassProperties>(out var data4) ? new System.Numerics.Vector3(data4.CenterOfMass.X, data4.CenterOfMass.Y, data4.CenterOfMass.Z) : System.Numerics.Vector3.Zero);
+				var rotation = ownCharacter.Data.TryGet<ControlData>(out var control) ? new System.Numerics.Vector3(control.Rotation.X, control.Rotation.Y, control.Rotation.Z) : System.Numerics.Vector3.Zero;
+				float maxTorque = ownCharacter.Data.TryGet<CharacterMovementComponent.JetpackModeData>(out var jetpack) && jetpack.MaxTorque > 0f ? jetpack.MaxTorque : 65f;
+				var centerOfMass = ownCharacter.Data.TryGet<RigidBodyMassProperties>(out var mass) ? new System.Numerics.Vector3(mass.CenterOfMass.X, mass.CenterOfMass.Y, mass.CenterOfMass.Z) : System.Numerics.Vector3.Zero;
 				if (look.Step(now, rotation, maxTorque, centerOfMass))
 				{
 					_lookDirty = true;
 				}
 			}
-			MoveStep(ownCharacter, lookMode, look, now);
+			MoveStep(ownCharacter, mode, look, now);
 			if (_move != null && _move.Active && look.Intercepts)
 			{
 				_lookDirty = true;
 			}
-			(uint, ushort, double, double, double) tuple = (look.NetId, look.Epoch, look.TotalX, look.TotalY, look.TotalZ);
-			var (num, num2, num3, num4, num5) = tuple;
-			var (num6, num7, num8, num9, num10) = _lookLastSent;
-			if (num != num6 || num2 != num7 || num3 != num8 || num4 != num9 || num5 != num10 || now - _lookSentMs >= 100)
+			(uint, ushort, double, double, double) totals = (look.NetId, look.Epoch, look.TotalX, look.TotalY, look.TotalZ);
+			if (totals != _lookLastSent || now - _lookSentMs >= 100)
 			{
 				session.SendLook(look.NetId, look.Epoch, look.TotalX, look.TotalY, look.TotalZ);
-				_lookLastSent = tuple;
+				_lookLastSent = totals;
 				_lookSentMs = now;
 			}
 		}
@@ -3431,7 +3298,7 @@ internal sealed class ClientWorld
 
 	private void MoveStep(Entity own, LookMode mode, LookPredictor look, long now)
 	{
-		MovePredictor move = _move;
+		var move = _move;
 		if (move == null)
 		{
 			return;
@@ -3441,13 +3308,13 @@ internal sealed class ClientWorld
 			move.Reset();
 			return;
 		}
-		System.Numerics.Vector3 hostVel = _ownVel.GetValueOrDefault();
+		var hostVel = _ownVel.GetValueOrDefault();
 		if (mode != LookMode.Ground || !own.Data.TryGet<ControlData>(out var control) || !own.Data.TryGet<CharacterMovementComponent.GroundModeData>(out var ground))
 		{
 			move.Step(now, System.Numerics.Vector3.Zero, hostVel, inputChanged: false);
 			return;
 		}
-		Keen.VRage.Physics.Components.CharacterPhysicsComponent phys = _movePhys ?? (_movePhys = own.Components.OfType<Keen.VRage.Physics.Components.CharacterPhysicsComponent>().FirstOrDefault());
+		var phys = _movePhys ??= own.Components.OfType<Keen.VRage.Physics.Components.CharacterPhysicsComponent>().FirstOrDefault();
 		bool sprint = own.Data.TryGet<AdvancedCharacterControlData>(out var advanced) && advanced.IsSprinting;
 		bool crouch = own.Data.TryGet<CharacterCrouchTag>(out _);
 		// Sprint and crouch are requests the host answers: its state reaches us a round trip after the key, and the
@@ -3462,10 +3329,10 @@ internal sealed class ClientWorld
 			_crouchIntent = !crouch;
 		}
 		if (_crouchToggleMs != 0 && now - _crouchToggleMs < window) crouch = _crouchIntent;
-		System.Numerics.Quaternion shown = look.Shown;
-		System.Numerics.Vector3 up = System.Numerics.Vector3.Transform(LookMath.Up, shown);
-		System.Numerics.Vector3 hostVertical = up * System.Numerics.Vector3.Dot(hostVel, up);
-		System.Numerics.Vector3 target = MovePredictor.GroundVelocity(shown, control.Movement.X, control.Movement.Z, sprint, crouch, ground.NonSprintingSpeedMultiplier, ground.CrouchSpeedMultiplier, phys?.CharacterPhysicsDefinition.BaseGroundVelocity ?? 10f);
+		var shown = look.Shown;
+		var up = System.Numerics.Vector3.Transform(LookMath.Up, shown);
+		var hostVertical = up * System.Numerics.Vector3.Dot(hostVel, up);
+		var target = MovePredictor.GroundVelocity(shown, control.Movement.X, control.Movement.Z, sprint, crouch, ground.NonSprintingSpeedMultiplier, ground.CrouchSpeedMultiplier, phys?.CharacterPhysicsDefinition.BaseGroundVelocity ?? 10f);
 		(float, float, bool, bool) input = (control.Movement.X, control.Movement.Z, sprint, crouch);
 		move.StepGround(now, target, hostVel - hostVertical, hostVertical, phys?.CharacterPhysicsDefinition.MaxAcceleration ?? 200f, input != _moveInput);
 		_moveInput = input;
@@ -3475,10 +3342,10 @@ internal sealed class ClientWorld
 	{
 		if (own.Data.TryGet<RigidBodyData>(out var data))
 		{
-			Keen.VRage.Library.Mathematics.Vector3 linearVelocity = data.LinearVelocity;
-			double num = Math.Sqrt((double)linearVelocity.X * (double)linearVelocity.X + (double)linearVelocity.Y * (double)linearVelocity.Y + (double)linearVelocity.Z * (double)linearVelocity.Z);
-			bool flag = now < _fastUntilMs;
-			if (num >= 15.0 || (flag && num >= 8.0))
+			var v = data.LinearVelocity;
+			double speed = Math.Sqrt((double)v.X * (double)v.X + (double)v.Y * (double)v.Y + (double)v.Z * (double)v.Z);
+			bool wasFast = now < _fastUntilMs;
+			if (speed >= 15.0 || (wasFast && speed >= 8.0))
 			{
 				_fastUntilMs = now + 750;
 			}
@@ -3492,13 +3359,13 @@ internal sealed class ClientWorld
 		{
 			return;
 		}
-		foreach (var (num, array) in samples)
+		foreach (var (netId, value) in samples)
 		{
-			if (num == _deckRootId && array.Length == 40)
+			if (netId == _deckRootId && value.Length == 40)
 			{
-				(double, double, double, System.Numerics.Quaternion) tuple2 = LookMath.ReadTransform(array);
-				_deckQ = System.Numerics.Quaternion.Normalize(tuple2.Item4);
-				CheckDeckContinuity(num, tuple2.Item1, tuple2.Item2, tuple2.Item3);
+				var transform = LookMath.ReadTransform(value);
+				_deckQ = System.Numerics.Quaternion.Normalize(transform.O);
+				CheckDeckContinuity(netId, transform.X, transform.Y, transform.Z);
 				break;
 			}
 		}
@@ -3506,34 +3373,34 @@ internal sealed class ClientWorld
 
 	private void CheckDeckContinuity(uint id, double x, double y, double z)
 	{
-		long num = MpClock.NowMs();
-		double num2 = (double)(num - _deckCheckMs) / 1000.0;
-		if (id == _deckCheckId && num2 > 0.002 && num2 < 0.2)
+		long now = MpClock.NowMs();
+		double dt = (now - _deckCheckMs) / 1000.0;
+		if (id == _deckCheckId && dt > 0.002 && dt < 0.2)
 		{
-			double num3 = _dx + _dvx * num2;
-			double num4 = _dy + _dvy * num2;
-			double num5 = _dz + _dvz * num2;
-			double num6 = Math.Sqrt((x - num3) * (x - num3) + (y - num4) * (y - num4) + (z - num5) * (z - num5));
-			double num7 = Math.Sqrt(_dvx * _dvx + _dvy * _dvy + _dvz * _dvz);
-			if (num6 > 0.3 + 0.05 * num7 * num2 * 60.0)
+			double px = _dx + _dvx * dt;
+			double py = _dy + _dvy * dt;
+			double pz = _dz + _dvz * dt;
+			double jump = Math.Sqrt((x - px) * (x - px) + (y - py) * (y - py) + (z - pz) * (z - pz));
+			double speed = Math.Sqrt(_dvx * _dvx + _dvy * _dvy + _dvz * _dvz);
+			if (jump > 0.3 + 0.05 * speed * dt * 60.0)
 			{
 				_deckJumps++;
-				if (num - _deckJumpLogMs > 2000)
+				if (now - _deckJumpLogMs > 2000)
 				{
-					_deckJumpLogMs = num;
-					_log.Info($"client: deck NetworkId {id}: smoothed track jumped {num6:0.00} m against its velocity ({num7:0} m/s) this frame (diagnostic, {_deckJumps} so far; {_session?.Smoother.Describe()})");
+					_deckJumpLogMs = now;
+					_log.Info($"client: deck NetworkId {id}: smoothed track jumped {jump:0.00} m against its velocity ({speed:0} m/s) this frame (diagnostic, {_deckJumps} so far; {_session?.Smoother.Describe()})");
 				}
 			}
-			_dvx = (x - _dx) / num2;
-			_dvy = (y - _dy) / num2;
-			_dvz = (z - _dz) / num2;
+			_dvx = (x - _dx) / dt;
+			_dvy = (y - _dy) / dt;
+			_dvz = (z - _dz) / dt;
 		}
 		else
 		{
-			_dvx = (_dvy = (_dvz = 0.0));
+			_dvx = _dvy = _dvz = 0.0;
 		}
 		_deckCheckId = id;
-		_deckCheckMs = num;
+		_deckCheckMs = now;
 		_dx = x;
 		_dy = y;
 		_dz = z;
@@ -3541,27 +3408,25 @@ internal sealed class ClientWorld
 
 	private bool OnMovingGrid(Entity own, ClientSession session, long now)
 	{
-		Entity entity = own.TryGet<CharacterMovementEffectsComponent>()?._supportingEntity?.Entity;
-		if (entity != null && !EngineCodec.IsDead(entity))
+		var support = own.TryGet<CharacterMovementEffectsComponent>()?._supportingEntity?.Entity;
+		if (support != null && !EngineCodec.IsDead(support))
 		{
-			Entity entity2 = entity;
+			var root = support;
 			for (int i = 0; i < 16; i++)
 			{
-				Entity entity3 = entity2.TryGet<HierarchyComponent>()?.Parent;
-				if (entity3 == null)
+				var parent = root.TryGet<HierarchyComponent>()?.Parent;
+				if (parent == null)
 				{
 					break;
 				}
-				entity2 = entity3;
+				root = parent;
 			}
-			uint? num = NetIdOf(entity2);
-			if (num.HasValue)
+			if (NetIdOf(root) is uint rootId)
 			{
-				uint valueOrDefault = num.GetValueOrDefault();
-				if (session.Smoother.SpeedOf(valueOrDefault) > 1.0 || session.Smoother.TurnRateOf(valueOrDefault) > 1.0)
+				if (session.Smoother.SpeedOf(rootId) > 1.0 || session.Smoother.TurnRateOf(rootId) > 1.0)
 				{
 					_deckUntilMs = now + 500;
-					_deckRootId = valueOrDefault;
+					_deckRootId = rootId;
 				}
 			}
 		}
@@ -3570,7 +3435,7 @@ internal sealed class ClientWorld
 
 	private bool LookTakeSmoothed(uint netId, byte[] value, long now)
 	{
-		LookPredictor look = _look;
+		var look = _look;
 		if (look == null || _lookFailed || !_ownSmoothed || netId == 0 || netId != look.NetId || !look.Intercepts || value.Length != 40)
 		{
 			return false;
@@ -3596,13 +3461,13 @@ internal sealed class ClientWorld
 
 	private LookMode LookModeOf(Entity own, out string detail)
 	{
-		CharacterMovementComponent characterMovementComponent = own.TryGet<CharacterMovementComponent>();
-		if (characterMovementComponent == null)
+		var movement = own.TryGet<CharacterMovementComponent>();
+		if (movement == null)
 		{
 			detail = "the character has no CharacterMovementComponent here";
 			return LookMode.Off;
 		}
-		IController controller = _controller;
+		var controller = _controller;
 		if (controller != null)
 		{
 			foreach (var controlledEntity in controller.ControlledEntities)
@@ -3615,13 +3480,13 @@ internal sealed class ClientWorld
 				}
 			}
 		}
-		CharacterMovementState currentMovementState = characterMovementComponent.CurrentMovementState;
-		detail = $"movement state {currentMovementState}";
-		return currentMovementState switch
+		var state = movement.CurrentMovementState;
+		detail = $"movement state {state}";
+		return state switch
 		{
-			CharacterMovementState.Ground => LookMode.Ground, 
-			CharacterMovementState.Jetpack => LookMode.Jetpack, 
-			_ => LookMode.Off, 
+			CharacterMovementState.Ground => LookMode.Ground,
+			CharacterMovementState.Jetpack => LookMode.Jetpack,
+			_ => LookMode.Off,
 		};
 	}
 
@@ -3635,31 +3500,31 @@ internal sealed class ClientWorld
 		_seatDiagCount++;
 		try
 		{
-			SeatComponent seatComponent = controlled.TryGet<SeatComponent>();
-			CubeBlockComponent cubeBlockComponent = controlled.TryGet<CubeBlockComponent>();
-			string value;
-			if (seatComponent == null)
+			var seat = controlled.TryGet<SeatComponent>();
+			var block = controlled.TryGet<CubeBlockComponent>();
+			string pilot;
+			if (seat == null)
 			{
-				value = "no SeatComponent";
+				pilot = "no SeatComponent";
 			}
-			else if (seatComponent.Pilot == null)
+			else if (seat.Pilot == null)
 			{
-				value = "Pilot NULL";
-			}
-			else
-			{
-				value = ((seatComponent.Pilot == own) ? "Pilot = own character" : $"Pilot = {seatComponent.Pilot}");
-			}
-			string value2;
-			if (cubeBlockComponent == null)
-			{
-				value2 = "no CubeBlockComponent";
+				pilot = "Pilot NULL";
 			}
 			else
 			{
-				value2 = ((cubeBlockComponent.Grid == null) ? "CubeBlockComponent.Grid NULL" : $"grid {cubeBlockComponent.Grid.Entity}");
+				pilot = seat.Pilot == own ? "Pilot = own character" : $"Pilot = {seat.Pilot}";
 			}
-			_log.Info($"client: seated in {controlled} ({value}; {value2}) - the control panel from this seat needs both (diagnostic)");
+			string grid;
+			if (block == null)
+			{
+				grid = "no CubeBlockComponent";
+			}
+			else
+			{
+				grid = block.Grid == null ? "CubeBlockComponent.Grid NULL" : $"grid {block.Grid.Entity}";
+			}
+			_log.Info($"client: seated in {controlled} ({pilot}; {grid}) - the control panel from this seat needs both (diagnostic)");
 		}
 		catch (Exception ex)
 		{
@@ -3669,25 +3534,25 @@ internal sealed class ClientWorld
 
 	private static bool IsSelfOrBelow(Entity e, Entity own)
 	{
-		Entity entity = e;
+		var current = e;
 		for (int i = 0; i < 8; i++)
 		{
-			if (entity == null)
+			if (current == null)
 			{
 				break;
 			}
-			if (entity == own)
+			if (current == own)
 			{
 				return true;
 			}
-			entity = entity.TryGet<HierarchyComponent>()?.Parent;
+			current = current.TryGet<HierarchyComponent>()?.Parent;
 		}
 		return false;
 	}
 
 	private bool LookIntercept(ClientSession session, StateEntry e, long now)
 	{
-		LookPredictor look = _look;
+		var look = _look;
 		if (look == null || _lookFailed || e.NetId == 0 || e.NetId != look.NetId || !look.Intercepts || e.Bytes.Length != 40 || !session.IsTransformKey(e.Key))
 		{
 			return false;
@@ -3700,31 +3565,30 @@ internal sealed class ClientWorld
 				_lookDirty = true;
 			}
 			_ownHostLocalMs = session.Smoother.LocalOf(e.HostMs);
-			MovePredictor move = _move;
+			var move = _move;
 			if (move != null)
 			{
 				move.OnHost(now, e.HostMs);
 				if (look.Mode == LookMode.Ground && _ownVel.HasValue)
 				{
-					System.Numerics.Vector3 hostVel = _ownVel.GetValueOrDefault();
-					System.Numerics.Vector3 up = System.Numerics.Vector3.Transform(LookMath.Up, look.Shown);
+					var hostVel = _ownVel.GetValueOrDefault();
+					var up = System.Numerics.Vector3.Transform(LookMath.Up, look.Shown);
 					move.Observe(hostVel - up * System.Numerics.Vector3.Dot(hostVel, up), look.LagMs);
 				}
 			}
 			_lookIntercepted++;
 			return true;
 		}
-		catch (Exception e2)
+		catch (Exception ex)
 		{
-			LookFail(e2);
+			LookFail(ex);
 			return false;
 		}
 	}
 
 	private void LookWrite(ClientSession session, VRage.Multiplayer.Replication.CB.ReplicationCommandBufferWriterReader w, int baseIndex, ref int cmds)
 	{
-		//IL_0190: Unknown result type (might be due to invalid IL or missing references)
-		LookPredictor look = _look;
+		var look = _look;
 		if (look == null || _lookFailed || !_lookDirty)
 		{
 			return;
@@ -3737,8 +3601,8 @@ internal sealed class ClientWorld
 				RagdollWritesSkipped++;
 				return;
 			}
-			byte[] array = look.Display();
-			if (array == null || !session.TryGetTransformType(out var typeId, out var size) || size != array.Length || !_proxies.IsLive(look.NetId) || !_proxies.TryGet(look.NetId, out Entity e))
+			byte[] transform = look.Display();
+			if (transform == null || !session.TryGetTransformType(out var typeId, out var size) || size != transform.Length || !_proxies.IsLive(look.NetId) || !_proxies.TryGet(look.NetId, out Entity e))
 			{
 				return;
 			}
@@ -3748,26 +3612,26 @@ internal sealed class ClientWorld
 				NoteBodyWhy("prediction " + lastEvent);
 				look.LastEvent = null;
 			}
-			MovePredictor move = _move;
-			bool flag = move != null && move.Active && !_ownSmoothed;
-			if (_body != null || _deckFrame || flag)
+			var move = _move;
+			bool leading = move != null && move.Active && !_ownSmoothed;
+			if (_body != null || _deckFrame || leading)
 			{
-				var (x, y, z, quaternion) = LookMath.ReadTransform(array);
+				var (x, y, z, quaternion) = LookMath.ReadTransform(transform);
 				System.Numerics.Vector3 leadShown = default;
 				double ageShown = -1;
-				if (flag)
+				if (leading)
 				{
 					// A server stall pauses the host's simulation and never catches up: predicting through it put the body
 					// ahead of where the host resumed, and it was pulled back (the pop). Past 100 ms without a sample the lead
 					// stops growing, so the body waits with the server and carries on from there.
 					long leadNow = MpClock.NowMs();
 					if (_ownHostLocalMs is double sampleAt && leadNow - sampleAt > StallLeadMs) leadNow = (long)(sampleAt + StallLeadMs);
-					System.Numerics.Vector3 vector = move.Lead(leadNow, look.LagMs);
-					leadShown = vector;
+					var lead = move.Lead(leadNow, look.LagMs);
+					leadShown = lead;
 					if (_ownHostLocalMs is double sampleLocal) ageShown = MpClock.NowMs() - sampleLocal;
-					x += (double)vector.X;
-					y += (double)vector.Y;
-					z += (double)vector.Z;
+					x += lead.X;
+					y += lead.Y;
+					z += lead.Z;
 				}
 				else if (!_ownSmoothed && !_deckFrame && _ownVel is System.Numerics.Vector3 hostVel && _ownHostLocalMs is double hostLocal)
 				{
@@ -3787,18 +3651,14 @@ internal sealed class ClientWorld
 					string source;
 					if (_ownSmoothed)
 					{
-						source = (_deckFrame ? "deck's smoothed timeline" : "smoothed timeline");
+						source = _deckFrame ? "deck's smoothed timeline" : "smoothed timeline";
 					}
 					else
 					{
-						source = (flag ? "host's newest sample + movement lead" : "host's newest sample (raw)");
+						source = leading ? "host's newest sample + movement lead" : "host's newest sample (raw)";
 					}
 					long bigBefore = _body.BlendedBig;
-					(double X, double Y, double Z, System.Numerics.Quaternion Q) tuple2 = _body.Filter(MpClock.NowMs(), x, y, z, quaternion, flag ? new System.Numerics.Vector3?(move.Velocity) : _ownVel, look.LastStep, source, _bodyWhy, _ownSmoothed);
-					x = tuple2.X;
-					y = tuple2.Y;
-					z = tuple2.Z;
-					quaternion = tuple2.Q;
+					(x, y, z, quaternion) = _body.Filter(MpClock.NowMs(), x, y, z, quaternion, leading ? move.Velocity : _ownVel, look.LastStep, source, _bodyWhy, _ownSmoothed);
 					_bodyWhy = null;
 					long nowMs = MpClock.NowMs();
 					if (_body.BlendedBig != bigBefore && nowMs - _bodyDetailMs >= 1000)
@@ -3809,16 +3669,16 @@ internal sealed class ClientWorld
 						_log.Info($"client: own body jump detail: lead {leadShown.Length():0.00} m ({(look.MeasuredLagMs.HasValue ? "measured" : "estimated")} lag {look.LagMs:0} ms), newest host sample {ageShown:0} ms old, model speed {(move?.Velocity.Length() ?? 0f):0.0} m/s, host speed {hostSpeed:0.0} m/s, last input applied by the host {(session.InputAck.Seq == 0 ? "(no ack yet)" : $"#{session.InputAck.Seq}, {session.InputAck.RoundTripMs} ms from sending to its ack (worst of the last 5 s {session.InputAckWorstMs} ms)")}, mode {look.Mode}");
 					}
 				}
-				array = LookMath.WriteTransform(x, y, z, System.Numerics.Quaternion.Normalize(_deckFrame ? (_deckQ * quaternion) : quaternion));
+				transform = LookMath.WriteTransform(x, y, z, System.Numerics.Quaternion.Normalize(_deckFrame ? _deckQ * quaternion : quaternion));
 			}
-			w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostDataSignal(baseIndex + 1, _sessionProxy, e, new Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent.InProcessPayload(typeId, (ReadOnlySpan<byte>)array));
+			w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostDataSignal(baseIndex + 1, _sessionProxy, e, new InProcessReplicationSessionComponent.InProcessPayload(typeId, (ReadOnlySpan<byte>)transform));
 			cmds++;
-			_lastWritten = array;
+			_lastWritten = transform;
 			_lastWrittenMs = MpClock.NowMs();
 		}
-		catch (Exception e2)
+		catch (Exception ex)
 		{
-			LookFail(e2);
+			LookFail(ex);
 		}
 	}
 
@@ -3840,7 +3700,7 @@ internal sealed class ClientWorld
 			{
 				if (_look != null)
 				{
-					return $"{_look.Describe()}, host transforms taken {_lookIntercepted}, totals sent {_session?.LookSent ?? 0}, movement lead {((_move != null && _move.Active) ? $"on (wall gain {_move.Gain:0.00})" : "off")}, input round trip {_session?.InputAck.RoundTripMs ?? 0} ms (worst of 5 s {_session?.InputAckWorstMs ?? 0} ms)" + ((_body != null) ? $"; {_body.Describe()}; second writer on the own body {_otherWriterCount}x (largest {_otherWriterMaxM:0.00} m)" : "");
+					return $"{_look.Describe()}, host transforms taken {_lookIntercepted}, totals sent {_session?.LookSent ?? 0}, movement lead {(_move != null && _move.Active ? $"on (wall gain {_move.Gain:0.00})" : "off")}, input round trip {_session?.InputAck.RoundTripMs ?? 0} ms (worst of 5 s {_session?.InputAckWorstMs ?? 0} ms)" + (_body != null ? $"; {_body.Describe()}; second writer on the own body {_otherWriterCount}x (largest {_otherWriterMaxM:0.00} m)" : "");
 				}
 				return "look prediction: no character yet";
 			}
@@ -3849,9 +3709,9 @@ internal sealed class ClientWorld
 		return "look prediction off (-y51online:predict:off)";
 	}
 
-	private void UpdateNametags(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp)
+	private void UpdateNametags(InProcessReplicationSessionComponent comp)
 	{
-		ClientSession session = _session;
+		var session = _session;
 		if (session == null || !_worldApplied || !NametagOverlay.Enabled)
 		{
 			return;
@@ -3863,21 +3723,21 @@ internal sealed class ClientWorld
 			{
 				_tagChanges = changes;
 				_tagList.Clear();
-				foreach (PlayerTag item2 in session.Names.Others(session.ClientId))
+				foreach (var tag in session.Names.Others(session.ClientId))
 				{
-					if (item2.NetId != _ownNetId)
+					if (tag.NetId != _ownNetId)
 					{
-						Entity item = null;
-						if (_proxies.IsLive(item2.NetId) && _proxies.TryGet(item2.NetId, out Entity e))
+						Entity target = null;
+						if (_proxies.IsLive(tag.NetId) && _proxies.TryGet(tag.NetId, out Entity e))
 						{
 							bool skip = false;
-							item = comp.ReplayContext.TranslateObject(e, ReplicationFailureStrategy.NullOnAnyFail, ref skip) as Entity;
+							target = comp.ReplayContext.TranslateObject(e, ReplicationFailureStrategy.NullOnAnyFail, ref skip) as Entity;
 						}
-						_tagList.Add((item2.ClientId, item2.Name, item));
+						_tagList.Add((tag.ClientId, tag.Name, target));
 					}
 				}
 			}
-			(_tagOverlay ?? (_tagOverlay = new NametagOverlay(_log, "client"))).Update(comp.Session, comp.Entity, _tagList);
+			(_tagOverlay ??= new NametagOverlay(_log, "client")).Update(comp.Session, comp.Entity, _tagList);
 		}
 		catch (Exception ex)
 		{
@@ -3887,22 +3747,15 @@ internal sealed class ClientWorld
 
 	public void OnConnectionLost(string reason)
 	{
-		bool flag = _left || _retired || _lostReason != null;
-		if (!flag)
+		if (!(_left || _retired || _lostReason != null || Progress.Stage == JoinStage.Rejected))
 		{
-			JoinStage stage = Progress.Stage;
-			bool flag2 = ((stage == JoinStage.Rejected) ? true : false);
-			flag = flag2;
-		}
-		if (!flag)
-		{
-			_lostReason = (string.IsNullOrWhiteSpace(reason) ? "connection closed" : reason);
+			_lostReason = string.IsNullOrWhiteSpace(reason) ? "connection closed" : reason;
 		}
 	}
 
 	public static void ConnectionLost(ClientSession session, string reason)
 	{
-		ClientWorld current = Current;
+		var current = Current;
 		if (current != null && current._session == session)
 		{
 			current.OnConnectionLost(reason);
@@ -3940,18 +3793,16 @@ internal sealed class ClientWorld
 				_lostAtMs = now;
 				Progress.SetInGame(clientUp);
 				Progress.Set(JoinStage.Lost, now, lostReason);
-				IMpLog log = _log;
-				string text = lostReason;
-				string? text2;
+				string next;
 				if (_o.Rejoin)
 				{
-					text2 = ((clientUp | transitioning) ? $"back to the main menu in {4} s, then joining again (fresh world sync)" : $"joining again in {3} s");
+					next = clientUp || transitioning ? $"back to the main menu in {4} s, then joining again (fresh world sync)" : $"joining again in {3} s";
 				}
 				else
 				{
-					text2 = "the join dialog offers Retry";
+					next = "the join dialog offers Retry";
 				}
-				log.Warn("client: LOST THE HOST (" + text + "); " + text2);
+				_log.Warn("client: LOST THE HOST (" + lostReason + "); " + next);
 				Report(ClientPhase.Warning, "lost the host: " + lostReason);
 			}
 			if (!_o.Rejoin)
@@ -3987,7 +3838,7 @@ internal sealed class ClientWorld
 			}
 			return true;
 		}
-		if (((!_left && _configured) & atMenu) && !transitioning && !clientUp)
+		if (!_left && _configured && atMenu && !transitioning && !clientUp)
 		{
 			_left = true;
 			if (_startFailed)
@@ -4003,32 +3854,25 @@ internal sealed class ClientWorld
 			}
 			_session?.Leave("quit to the main menu");
 		}
-		bool flag = _left || _startFailed;
-		if (!flag)
+		bool done = _left || _startFailed || Progress.Stage is JoinStage.Rejected or JoinStage.GaveUp;
+		if (done && _o.Rejoin && atMenu && !transitioning && !clientUp)
 		{
-			JoinStage stage = Progress.Stage;
-			bool flag2 = ((stage - 12 <= JoinStage.WaitingForSteam) ? true : false);
-			flag = flag2;
-		}
-		bool flag3 = flag;
-		if (((flag3 && _o.Rejoin) & atMenu) && !transitioning && !clientUp)
-		{
-			string text3 = Interlocked.Exchange(ref _rejoinAsk, null);
-			if (text3 == null && RejoinKey.Pressed())
+			string why = Interlocked.Exchange(ref _rejoinAsk, null);
+			if (why == null && RejoinKey.Pressed())
 			{
-				text3 = "F3 pressed at the main menu";
+				why = "F3 pressed at the main menu";
 			}
-			if (text3 != null)
+			if (why != null)
 			{
-				Rejoin(text3, now);
+				Rejoin(why, now);
 			}
 			return true;
 		}
-		if (!flag3)
+		if (!done)
 		{
 			_rejoinAsk = null;
 		}
-		return flag3;
+		return done;
 	}
 
 	private void Rejoin(string why, long now)
@@ -4038,22 +3882,22 @@ internal sealed class ClientWorld
 			return;
 		}
 		_retired = true;
-		ClientWorld clientWorld = (Current = new ClientWorld(_log, _o)
+		var next = Current = new ClientWorld(_log, _o)
 		{
 			_mainQueue = _mainQueue,
 			_mainThreadSeen = true,
 			_generation = _generation + 1
-		});
+		};
 		AudioRouting.Instance.Reset();
 		Progress.NewJoin(now);
-		_log.Info($"client: JOINING AGAIN (join #{clientWorld._generation} in this game): {why}; the world sync starts from scratch " + "(NetworkIds, proxies, pairings, lifecycle, state, blobs, signal/type keys, stories, observables, look prediction, nametags)");
+		_log.Info($"client: JOINING AGAIN (join #{next._generation} in this game): {why}; the world sync starts from scratch " + "(NetworkIds, proxies, pairings, lifecycle, state, blobs, signal/type keys, stories, observables, look prediction, nametags)");
 		try
 		{
 			RejoinRequested?.Invoke(why);
 		}
-		catch (Exception value)
+		catch (Exception ex)
 		{
-			_log.Error($"client: asking the net thread to reconnect failed: {value}");
+			_log.Error($"client: asking the net thread to reconnect failed: {ex}");
 		}
 	}
 
@@ -4085,35 +3929,32 @@ internal sealed class ClientWorld
 
 	private void ShowProgress(Keen.Game2.GameAppComponent app, long now)
 	{
-		JoinStage stage = Progress.Stage;
+		var stage = Progress.Stage;
 		if (stage != _loggedStage)
 		{
 			_loggedStage = stage;
-			JoinText joinText = Progress.Describe(now);
+			var text = Progress.Describe(now);
 			if (stage != JoinStage.Idle)
 			{
-				_log.Info($"client: join progress ({stage}): {joinText.Toast ?? joinText.Loading ?? "-"}");
+				_log.Info($"client: join progress ({stage}): {text.Toast ?? text.Loading ?? "-"}");
 			}
 		}
 		s_ui?.Update(app, Progress, now);
 	}
 
-	internal static string UiDescribe()
-	{
-		return s_ui?.Describe() ?? "on-screen progress: none";
-	}
+	internal static string UiDescribe() => s_ui?.Describe() ?? "on-screen progress: none";
 
 	public static bool AwaitReplicationPrefix(object __instance, EntityId __0, ref Task<Entity> __result)
 	{
-		ClientWorld current = Current;
-		InProcessReplication val = current?._replication;
-		if (val == null || !(__instance is Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent inProcessReplicationSessionComponent) || inProcessReplicationSessionComponent._context != val.Client)
+		var current = Current;
+		var replication = current?._replication;
+		if (replication == null || __instance is not InProcessReplicationSessionComponent comp || comp._context != replication.Client)
 		{
 			return true;
 		}
 		try
 		{
-			__result = current.AwaitSecureEntity(inProcessReplicationSessionComponent, __0);
+			__result = current.AwaitSecureEntity(comp, __0);
 			return false;
 		}
 		catch (Exception ex)
@@ -4124,26 +3965,26 @@ internal sealed class ClientWorld
 		}
 	}
 
-	private Task<Entity> AwaitSecureEntity(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp, EntityId id)
+	private Task<Entity> AwaitSecureEntity(InProcessReplicationSessionComponent comp, EntityId id)
 	{
-		TaskCompletionSource<Entity> tcs = TaskCompletionSource<Entity>.Create("Y51_SE2Online.ClientWorld.AwaitSecureEntity");
-		if (id == default(EntityId))
+		var tcs = TaskCompletionSource<Entity>.Create("Y51_SE2Online.ClientWorld.AwaitSecureEntity");
+		if (id == default)
 		{
 			tcs.SetResult(null);
 			return tcs.Task;
 		}
 		long n = ++_secureAsked;
-		Keen.VRage.Library.Threading.TaskAwaiter<Entity?> awaiter = SecureEntities.ResolveSecureEntity(comp.Session, id).Task.GetAwaiter();
+		var awaiter = SecureEntities.ResolveSecureEntity(comp.Session, id).Task.GetAwaiter();
 		awaiter.OnCompleted(() =>
 		{
 			Entity entity = null;
-			string text = null;
+			string error = null;
 			try
 			{
-				ExceptionDispatchInfo exceptionResult = awaiter.GetExceptionResult();
-				if (exceptionResult != null)
+				var exception = awaiter.GetExceptionResult();
+				if (exception != null)
 				{
-					text = exceptionResult.SourceException.GetType().Name;
+					error = exception.SourceException.GetType().Name;
 				}
 				else
 				{
@@ -4152,7 +3993,7 @@ internal sealed class ClientWorld
 			}
 			catch (Exception ex)
 			{
-				text = ex.GetType().Name;
+				error = ex.GetType().Name;
 			}
 			if (entity != null)
 			{
@@ -4164,7 +4005,7 @@ internal sealed class ClientWorld
 			}
 			if (n <= 3 || (entity == null && _secureNull == 1))
 			{
-				_log.Info($"client: AwaitReplication #{n} (a host model's EntityId {id.EntityGuid}) -> " + ((entity != null) ? ("NetworkId " + (NetIdOf(entity)?.ToString() ?? "?") + " via the host") : ("nothing (" + (text ?? "the host does not know it, or it never arrived here") + ")")));
+				_log.Info($"client: AwaitReplication #{n} (a host model's EntityId {id.EntityGuid}) -> " + (entity != null ? "NetworkId " + (NetIdOf(entity)?.ToString() ?? "?") + " via the host" : "nothing (" + (error ?? "the host does not know it, or it never arrived here") + ")"));
 			}
 			tcs.SetResult(entity);
 		});
