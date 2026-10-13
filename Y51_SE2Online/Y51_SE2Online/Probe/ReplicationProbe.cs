@@ -57,21 +57,21 @@ internal static class ReplicationProbe
 
 	private sealed class DirAcc
 	{
-		public readonly DirectionTotals Totals = new DirectionTotals();
+		public readonly DirectionTotals Totals = new();
 
-		public readonly Dictionary<int, Counter> Stubs = new Dictionary<int, Counter>();
+		public readonly Dictionary<int, Counter> Stubs = new();
 
-		public readonly Dictionary<int, Counter> Data = new Dictionary<int, Counter>();
+		public readonly Dictionary<int, Counter> Data = new();
 
-		public readonly Dictionary<int, Counter> DataRemove = new Dictionary<int, Counter>();
+		public readonly Dictionary<int, Counter> DataRemove = new();
 
-		public readonly Dictionary<MethodInfo, Counter> Invokes = new Dictionary<MethodInfo, Counter>();
+		public readonly Dictionary<MethodInfo, Counter> Invokes = new();
 
-		public readonly Dictionary<Type, Counter> Stories = new Dictionary<Type, Counter>();
+		public readonly Dictionary<Type, Counter> Stories = new();
 
-		public readonly Dictionary<Type, Counter> StoryFinish = new Dictionary<Type, Counter>();
+		public readonly Dictionary<Type, Counter> StoryFinish = new();
 
-		public readonly Dictionary<Type, Counter> ObjRefs = new Dictionary<Type, Counter>();
+		public readonly Dictionary<Type, Counter> ObjRefs = new();
 	}
 
 	private sealed class Window
@@ -84,13 +84,9 @@ internal static class ReplicationProbe
 
 		public long ClientTicks;
 
-		public readonly DirAcc[] Dir = new DirAcc[2]
-		{
-			new DirAcc(),
-			new DirAcc()
-		};
+		public readonly DirAcc[] Dir = [new DirAcc(), new DirAcc()];
 
-		public readonly BundleTotals Bundles = new BundleTotals();
+		public readonly BundleTotals Bundles = new();
 	}
 
 	private const string PostInvokeSignal = "Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent+PostInvokeInternalSignal";
@@ -101,11 +97,11 @@ internal static class ReplicationProbe
 
 	private static IMpLog _log = GameLog.Instance;
 
-	private static readonly object Sync = new object();
+	private static readonly object Sync = new();
 
-	private static Window _window = new Window();
+	private static Window _window = new();
 
-	private static readonly CodecSurface Surface = new CodecSurface();
+	private static readonly CodecSurface Surface = new();
 
 	private static Timer? _timer;
 
@@ -161,13 +157,13 @@ internal static class ReplicationProbe
 
 	private static StubInfo[] _stubs = Array.Empty<StubInfo>();
 
-	private static readonly ConditionalWeakTable<ReplicationCommandBuffer.Stub[], object> Instrumented = new ConditionalWeakTable<ReplicationCommandBuffer.Stub[], object>();
+	private static readonly ConditionalWeakTable<ReplicationCommandBuffer.Stub[], object> Instrumented = new();
 
-	private static readonly ConcurrentDictionary<int, (string Name, int Size)> DataTypes = new ConcurrentDictionary<int, (string, int)>();
+	private static readonly ConcurrentDictionary<int, (string Name, int Size)> DataTypes = new();
 
-	private static readonly ConcurrentDictionary<Type, FieldInfo?> StoryField = new ConcurrentDictionary<Type, FieldInfo>();
+	private static readonly ConcurrentDictionary<Type, FieldInfo?> StoryField = new();
 
-	private static readonly ConcurrentDictionary<Type, string> StoryFieldsText = new ConcurrentDictionary<Type, string>();
+	private static readonly ConcurrentDictionary<Type, string> StoryFieldsText = new();
 
 	private static long _bundleNo;
 
@@ -183,56 +179,29 @@ internal static class ReplicationProbe
 
 	public static IS2CTap? Tap
 	{
-		get
-		{
-			return _tap;
-		}
-		set
-		{
-			_tap = value;
-		}
+		get => _tap;
+		set => _tap = value;
 	}
 
-	public static bool Active
-	{
-		get
-		{
-			if (!_commitActive)
-			{
-				return _bundleActive;
-			}
-			return true;
-		}
-	}
+	public static bool Active => _commitActive || _bundleActive;
 
-	public static bool MeterArmed
-	{
-		get
-		{
-			if (_meterAllowed)
-			{
-				return _commitActive;
-			}
-			return false;
-		}
-	}
+	public static bool MeterArmed => _meterAllowed && _commitActive;
 
 	public unsafe static bool IsGuarded(object component)
 	{
-		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
 		try
 		{
 			if (!MeterArmed || _replayTableField == null)
 			{
 				return false;
 			}
-			ReplicationCommandBuffer.Stub[] array = ((Keen.VRage.Multiplayer.Sessions.ReplicationCommandBuffer.ReplayTable?)_replayTableField.GetValue(component))?.Stubs;
-			if (array == null || array.Length == 0)
+			ReplicationCommandBuffer.Stub[] stubs = ((ReplicationCommandBuffer.ReplayTable?)_replayTableField.GetValue(component))?.Stubs;
+			if (stubs == null || stubs.Length == 0)
 			{
 				return false;
 			}
-			delegate*<object, ref CommandBufferState, nint, ReplicationCommandBuffer, void> obj = &MeasuringReader;
-			return array[0].Wrapper.Reader == (delegate*<object, ref CommandBufferState, IntPtr, ReplicationCommandBuffer, void>)obj;
+			delegate*<object, ref CommandBufferState, nint, ReplicationCommandBuffer, void> meter = &MeasuringReader;
+			return stubs[0].Wrapper.Reader == meter;
 		}
 		catch (Exception)
 		{
@@ -244,11 +213,11 @@ internal static class ReplicationProbe
 	{
 		_log = log;
 		ReplayGuard.Log = log;
-		_sizeBundles = sizeBundles & report;
+		_sizeBundles = sizeBundles && report;
 		_report = report;
 		_classify = report;
-		List<(string, bool, string)> list = new List<(string, bool, string)>();
-		list.Add(TryInstall("probe:CommitFrame", () =>
+		var results = new List<(string, bool, string)>();
+		results.Add(TryInstall("probe:CommitFrame", () =>
 		{
 			MethodInfo original = EngineMembers.Method(HookTargets.CommitFrame);
 			_isServer = EngineMembers.Getter<bool>(EngineMembers.Property(R("ipr-isserver")));
@@ -257,17 +226,20 @@ internal static class ReplicationProbe
 			_committedBuffers = AccessTools.FieldRefAccess<CommandBufferBase, List<byte[]>>(EngineMembers.Field(R("cb-buffers")));
 			_objects = AccessTools.FieldRefAccess<CommandBufferBase.WithObjects, List<ValueTuple<object>>>(EngineMembers.Field(R("cb-objects")));
 			_readBuffer = (ReadBufferFn)Delegate.CreateDelegate(typeof(ReadBufferFn), EngineMembers.Method(R("cb-read")));
-			byte[] array = EngineMembers.Method(HookTargets.Replay).GetMethodBody()?.GetILAsByteArray() ?? Array.Empty<byte>();
-			string text2 = Convert.ToHexString(SHA256.HashData(array)).ToLowerInvariant();
-			_meterAllowed = text2 == "6d1fd8c2bbcf3dcb7f2525c5260093504ed818b1d57706e8e358da1aa8feb064";
+			// The command meter parses Replay's command header, so it only runs against the exact IL it was written for.
+			byte[] replayIl = EngineMembers.Method(HookTargets.Replay).GetMethodBody()?.GetILAsByteArray() ?? Array.Empty<byte>();
+			string hash = Convert.ToHexString(SHA256.HashData(replayIl)).ToLowerInvariant();
+			_meterAllowed = hash == "6d1fd8c2bbcf3dcb7f2525c5260093504ed818b1d57706e8e358da1aa8feb064";
 			harmony.Patch(original, new HarmonyMethod(typeof(ReplicationProbe), "CommitPrefix"), new HarmonyMethod(typeof(ReplicationProbe), "CommitPostfix"));
 			_commitActive = true;
 			_measure = _meterAllowed;
-			return _meterAllowed ? $"ok; command meter armed (Replay IL {array.Length} B, sha256 matches build {"2.4.0.95"})" : ("ok, but Replay IL sha256 " + text2 + " != expected (game updated?): command meter OFF, only ticks/buffers/bundles");
+			return _meterAllowed
+				? $"ok; command meter armed (Replay IL {replayIl.Length} B, sha256 matches build {HookTargets.GameBuild})"
+				: "ok, but Replay IL sha256 " + hash + " != expected (game updated?): command meter OFF, only ticks/buffers/bundles";
 		}));
 		if (report)
 		{
-			list.Add(TryInstall("probe:BuildAndReset", () =>
+			results.Add(TryInstall("probe:BuildAndReset", () =>
 			{
 				MethodInfo original = EngineMembers.Method(HookTargets.BuildAndReset);
 				_bundleCount = EngineMembers.Getter<int>(P("bundle-count"));
@@ -276,44 +248,37 @@ internal static class ReplicationProbe
 				_bundleServer = EngineMembers.Getter<object>(P("bundle-server"));
 				harmony.Patch(original, null, new HarmonyMethod(typeof(ReplicationProbe), "BundlePostfix"));
 				_bundleActive = true;
-				return (!sizeBundles) ? "ok (bundle sizing off)" : "ok (bundles will be serialized for size)";
+				return !sizeBundles ? "ok (bundle sizing off)" : "ok (bundles will be serialized for size)";
 			}));
 		}
-		if (Active & report)
+		if (Active && report)
 		{
 			try
 			{
-				string path = GameLog.LogDirectory();
-				string text = DateTime.Now.ToString("yyyyMMdd_HHmmss") + "_" + Environment.ProcessId;
-				_csvPath = Path.Combine(path, "y51online_probe_" + text + ".csv");
-				_typesPath = Path.Combine(path, "y51online_probe_" + text + "_types.txt");
-				File.WriteAllText(_csvPath, "utc,window_s,server_ticks,direction,category,key,count,bytes,count_per_tick,bytes_per_tick" + Environment.NewLine);
+				string dir = GameLog.LogDirectory();
+				string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss") + "_" + Environment.ProcessId;
+				_csvPath = Path.Combine(dir, "y51online_probe_" + stamp + ".csv");
+				_typesPath = Path.Combine(dir, "y51online_probe_" + stamp + "_types.txt");
+				File.WriteAllText(_csvPath, ProbeWindow.CsvHeader + Environment.NewLine);
 				_log.Info("probe: CSV " + _csvPath);
 				_log.Info("probe: codec list " + _typesPath);
 			}
 			catch (Exception ex)
 			{
 				_log.Warn("probe: cannot create CSV (" + ex.Message + "); summaries go to the log only");
-				_csvPath = (_typesPath = null);
+				_csvPath = _typesPath = null;
 			}
 			lock (Sync)
 			{
 				_window = new Window();
 			}
-			_timer = new Timer((object? _) =>
-			{
-				Flush();
-			}, null, 10000, 10000);
+			_timer = new Timer(_ => Flush(), null, 10000, 10000);
 		}
-		return list;
-		static PropertyInfo P(string id)
-		{
-			return EngineMembers.Property(HookTargets.Reflected.Single((EngineMember m) => m.Id == id));
-		}
-		static EngineMember R(string id)
-		{
-			return HookTargets.Reflected.Single((EngineMember m) => m.Id == id);
-		}
+		return results;
+
+		static PropertyInfo P(string id) => EngineMembers.Property(HookTargets.Reflected.Single(m => m.Id == id));
+
+		static EngineMember R(string id) => HookTargets.Reflected.Single(m => m.Id == id);
 	}
 
 	private static (string, bool, string) TryInstall(string name, Func<string> install)
@@ -324,41 +289,41 @@ internal static class ReplicationProbe
 		}
 		catch (Exception ex)
 		{
-			return (name, false, (ex is MissingMemberException) ? ex.Message : ex.ToString());
+			return (name, false, ex is MissingMemberException ? ex.Message : ex.ToString());
 		}
 	}
 
 	private static void Disable(string where, Exception e)
 	{
-		_commitActive = (_bundleActive = (_measure = false));
+		_commitActive = _bundleActive = _measure = false;
 		_log.Error($"probe: {where} failed, probe disabled (game unaffected): {e}");
 	}
 
 	private unsafe static void InstrumentTable(ReplicationCommandBuffer.Stub[] stubs)
 	{
-		if (!_meterAllowed || stubs.Length == 0 || Instrumented.TryGetValue(stubs, out object _))
+		if (!_meterAllowed || stubs.Length == 0 || Instrumented.TryGetValue(stubs, out _))
 		{
 			return;
 		}
 		lock (Sync)
 		{
-			if (Instrumented.TryGetValue(stubs, out object _))
+			if (Instrumented.TryGetValue(stubs, out _))
 			{
 				return;
 			}
-			nint[] array = new nint[stubs.Length];
+			nint[] readers = new nint[stubs.Length];
 			for (int i = 0; i < stubs.Length; i++)
 			{
-				array[i] = (nint)stubs[i].Wrapper.Reader;
+				readers[i] = (nint)stubs[i].Wrapper.Reader;
 			}
 			delegate*<object, ref CommandBufferState, nint, ReplicationCommandBuffer, void> meter = &MeasuringReader;
 			if (_origReaders != null)
 			{
-				if (_origReaders.Length != array.Length || !_origReaders.AsSpan().SequenceEqual<nint>((ReadOnlySpan<nint>)array))
+				if (_origReaders.Length != readers.Length || !_origReaders.AsSpan().SequenceEqual(readers))
 				{
-					if (!array.All((nint r) => r == (nint)meter))
+					if (!readers.All(r => r == (nint)meter))
 					{
-						_log.Warn($"probe: another replay table with different readers ({array.Length} entries); not metering it");
+						_log.Warn($"probe: another replay table with different readers ({readers.Length} entries); not metering it");
 					}
 					Instrumented.AddOrUpdate(stubs, new object());
 					return;
@@ -366,15 +331,15 @@ internal static class ReplicationProbe
 			}
 			else
 			{
-				_stubs = BuildStubInfo(array);
-				Volatile.Write(ref _origReaders, array);
+				_stubs = BuildStubInfo(readers);
+				Volatile.Write(ref _origReaders, readers);
 			}
-			for (int num = 0; num < stubs.Length; num++)
+			for (int i = 0; i < stubs.Length; i++)
 			{
-				stubs[num].Wrapper = new ReaderSignature((delegate*<object, ref CommandBufferState, IntPtr, ReplicationCommandBuffer, void>)meter);
+				stubs[i].Wrapper = new ReaderSignature(meter);
 			}
 			Instrumented.AddOrUpdate(stubs, new object());
-			_log.Info($"probe: command meter live on {stubs.Length} replicated command types ({_stubs.Count((StubInfo s) => s.Kind != StubKind.Signal)} generic InProcess commands)");
+			_log.Info($"probe: command meter live on {stubs.Length} replicated command types ({_stubs.Count(s => s.Kind != StubKind.Signal)} generic InProcess commands)");
 		}
 	}
 
@@ -386,25 +351,25 @@ internal static class ReplicationProbe
 			return;
 		}
 		int stub = Unsafe.ReadUnaligned<int>(st.DataPtr + st.DataOffset - 4);
-		long timestamp = Stopwatch.GetTimestamp();
+		long start = Stopwatch.GetTimestamp();
 		MeasuringReaderCore(context, ref st, callback, cb);
-		SlowTicks.Record(stub, Stopwatch.GetTimestamp() - timestamp);
+		SlowTicks.Record(stub, Stopwatch.GetTimestamp() - start);
 	}
 
 	private unsafe static void MeasuringReaderCore(object context, ref CommandBufferState st, nint callback, ReplicationCommandBuffer cb)
 	{
 		byte* dataPtr = st.DataPtr;
 		nint dataOffset = st.DataOffset;
-		int num = Unsafe.ReadUnaligned<int>(dataPtr + dataOffset - 4);
-		delegate*<object, ref CommandBufferState, nint, ReplicationCommandBuffer, void> obj = (delegate*<object, ref CommandBufferState, nint, ReplicationCommandBuffer, void>)_origReaders[num];
+		int stub = Unsafe.ReadUnaligned<int>(dataPtr + dataOffset - 4);
+		var original = (delegate*<object, ref CommandBufferState, nint, ReplicationCommandBuffer, void>)_origReaders[stub];
 		if (dataOffset >= 8 && Unsafe.ReadUnaligned<int>(dataPtr + dataOffset - 8) == 1580056798)
 		{
-			if (AudioGate.Enabled && AudioGate.Mute(num, cb, dataPtr + dataOffset, st.ActiveBytes - dataOffset, injected: true, s2c: true))
+			if (AudioGate.Enabled && AudioGate.Mute(stub, cb, dataPtr + dataOffset, st.ActiveBytes - dataOffset, injected: true, s2c: true))
 			{
 				AudioGate.Enter();
 				try
 				{
-					ReplayGuard.Invoke(obj, context, ref st, callback, cb, num);
+					ReplayGuard.Invoke(original, context, ref st, callback, cb, stub);
 					return;
 				}
 				finally
@@ -412,91 +377,89 @@ internal static class ReplicationProbe
 					AudioGate.Exit();
 				}
 			}
-			ReplayGuard.Invoke(obj, context, ref st, callback, cb, num);
+			ReplayGuard.Invoke(original, context, ref st, callback, cb, stub);
 			return;
 		}
-		if ((ControlGuard.Enabled || ControlGuard.HostFlightGate) && _serverCtx != null && _serverCtx.TryGetTarget(out object target) && target == context)
+		if ((ControlGuard.Enabled || ControlGuard.HostFlightGate) && _serverCtx != null && _serverCtx.TryGetTarget(out object server) && server == context)
 		{
-			int num2 = -1;
+			int skip = -1;
 			try
 			{
 				StubInfo[] stubs = _stubs;
-				bool flag = ControlGuard.HostFlightGate && num >= 0 && num < stubs.Length;
-				if (flag)
+				bool flightCommand = ControlGuard.HostFlightGate && stub >= 0 && stub < stubs.Length;
+				if (flightCommand)
 				{
-					StubKind kind = stubs[num].Kind;
-					bool flag2 = kind - 2 <= StubKind.PostInvoke;
-					flag = flag2;
+					flightCommand = stubs[stub].Kind is StubKind.PostData or StubKind.RemoveData;
 				}
-				if (flag)
+				if (flightCommand)
 				{
-					num2 = ControlGuard.HostFlightSkip(stubs[num].Kind == StubKind.RemoveData, dataPtr + dataOffset, st.ActiveBytes - dataOffset, cb);
+					skip = ControlGuard.HostFlightSkip(stubs[stub].Kind == StubKind.RemoveData, dataPtr + dataOffset, st.ActiveBytes - dataOffset, cb);
 				}
 				else if (ControlGuard.Enabled)
 				{
-					num2 = ControlGuard.HostClientSkip(num, dataPtr + dataOffset, st.ActiveBytes - dataOffset, cb);
+					skip = ControlGuard.HostClientSkip(stub, dataPtr + dataOffset, st.ActiveBytes - dataOffset, cb);
 				}
 			}
-			catch (Exception value)
+			catch (Exception ex)
 			{
 				ControlGuard.Enabled = false;
 				ControlGuard.HostFlightGate = false;
-				_log.Error($"control guard failed and is switched off (the game is unaffected): {value}");
+				_log.Error($"control guard failed and is switched off (the game is unaffected): {ex}");
 			}
-			if (num2 >= 0)
+			if (skip >= 0)
 			{
-				st.DataOffset = dataOffset + num2;
+				st.DataOffset = dataOffset + skip;
 				return;
 			}
 		}
 		if (!_measure)
 		{
-			obj(context, ref st, callback, cb);
+			original(context, ref st, callback, cb);
 			return;
 		}
-		bool flag3 = false;
+		bool known = false;
 		Direction dir = Direction.S2C;
-		StubKind kind2 = StubKind.Signal;
-		object key = null;
-		int intKey = num;
+		StubKind kind = StubKind.Signal;
+		object? key = null;
+		int intKey = stub;
 		int payloadBytes = 0;
 		IS2CTap tap = _tap;
 		try
 		{
-			flag3 = TryDirection(context, out dir);
-			bool flag4 = ((tap != null) & flag3) && dir == Direction.S2C;
-			if (flag3 && (_classify | flag4))
+			known = TryDirection(context, out dir);
+			bool tapS2C = tap != null && known && dir == Direction.S2C;
+			if (known && (_classify || tapS2C))
 			{
-				Classify(cb, num, dataPtr + dataOffset, st.ActiveBytes - dataOffset, out kind2, out key, out intKey, out payloadBytes);
+				Classify(cb, stub, dataPtr + dataOffset, st.ActiveBytes - dataOffset, out kind, out key, out intKey, out payloadBytes);
 			}
-			if (flag4 && kind2 != StubKind.Signal)
+			if (tapS2C && kind != StubKind.Signal)
 			{
-				TapCommand(tap, cb, kind2, dataPtr + dataOffset, st.ActiveBytes - dataOffset, key, intKey, payloadBytes);
+				TapCommand(tap, cb, kind, dataPtr + dataOffset, st.ActiveBytes - dataOffset, key, intKey, payloadBytes);
 			}
-			else if (flag4)
+			else if (tapS2C)
 			{
-				tap.OnSignal(cb, num, new ReadOnlySpan<byte>(dataPtr + dataOffset, (int)Math.Min(int.MaxValue, st.ActiveBytes - dataOffset)));
+				tap.OnSignal(cb, stub, new ReadOnlySpan<byte>(dataPtr + dataOffset, (int)Math.Min(int.MaxValue, st.ActiveBytes - dataOffset)));
 			}
 		}
-		catch (Exception value2)
+		catch (Exception ex)
 		{
 			if (tap != null && _tap == tap)
 			{
 				_tap = null;
-				_log.Error($"host tap failed, world sync stops forwarding state (game unaffected): {value2}");
+				_log.Error($"host tap failed, world sync stops forwarding state (game unaffected): {ex}");
 			}
 			else
 			{
 				_classify = false;
-				_log.Error($"probe: command classification failed, per-signal totals only from now on: {value2}");
+				_log.Error($"probe: command classification failed, per-signal totals only from now on: {ex}");
 			}
 		}
-		if (((tap != null && AudioGate.Enabled) & flag3) && dir == Direction.S2C && AudioGate.Mute(num, cb, dataPtr + dataOffset, st.ActiveBytes - dataOffset, injected: false, s2c: true))
+		if (tap != null && AudioGate.Enabled && known && dir == Direction.S2C && AudioGate.Mute(stub, cb, dataPtr + dataOffset, st.ActiveBytes - dataOffset, injected: false, s2c: true))
 		{
 			AudioGate.Enter();
 			try
 			{
-				obj(context, ref st, callback, cb);
+				original(context, ref st, callback, cb);
 			}
 			finally
 			{
@@ -505,11 +468,11 @@ internal static class ReplicationProbe
 		}
 		else
 		{
-			obj(context, ref st, callback, cb);
+			original(context, ref st, callback, cb);
 		}
-		if (flag3 && _report)
+		if (known && _report)
 		{
-			Record(dir, kind2, num, intKey, key, (long)(st.DataOffset - dataOffset) + 8L, payloadBytes);
+			Record(dir, kind, stub, intKey, key, (long)(st.DataOffset - dataOffset) + 8L, payloadBytes);
 		}
 	}
 
@@ -519,20 +482,20 @@ internal static class ReplicationProbe
 		{
 		case StubKind.PostData:
 		{
-			int num = ReadInt(payload, available, 4);
+			int sourceRef = ReadInt(payload, available, 4);
 			if (typeId >= 0 && length >= 0 && (nint)16 + (nint)length <= available)
 			{
-				Entity source = ((num >= 0) ? (cb.ReadObject(num) as Entity) : null);
+				Entity? source = sourceRef >= 0 ? cb.ReadObject(sourceRef) as Entity : null;
 				tap.OnPostData(source, typeId, new ReadOnlySpan<byte>(payload + 16, length), cb);
 			}
 			break;
 		}
 		case StubKind.RemoveData:
 		{
-			int num2 = ReadInt(payload, available, 4);
+			int sourceRef = ReadInt(payload, available, 4);
 			if (typeId >= 0)
 			{
-				tap.OnRemoveData((num2 >= 0) ? (cb.ReadObject(num2) as Entity) : null, typeId);
+				tap.OnRemoveData(sourceRef >= 0 ? cb.ReadObject(sourceRef) as Entity : null, typeId);
 			}
 			break;
 		}
@@ -547,12 +510,12 @@ internal static class ReplicationProbe
 
 	private static bool TryDirection(object context, out Direction dir)
 	{
-		if (_serverCtx != null && _serverCtx.TryGetTarget(out object target) && target == context)
+		if (_serverCtx != null && _serverCtx.TryGetTarget(out object server) && server == context)
 		{
 			dir = Direction.C2S;
 			return true;
 		}
-		if (_clientCtx != null && _clientCtx.TryGetTarget(out object target2) && target2 == context)
+		if (_clientCtx != null && _clientCtx.TryGetTarget(out object client) && client == context)
 		{
 			dir = Direction.S2C;
 			return true;
@@ -563,47 +526,45 @@ internal static class ReplicationProbe
 
 	private unsafe static StubInfo[] BuildStubInfo(nint[] readers)
 	{
-		ReplicationCommandBufferIndexer.CommandBufferCommand[] array;
+		ReplicationCommandBufferIndexer.CommandBufferCommand[] table;
 		try
 		{
-			array = MetadataIndexerBase<ReplicationCommandBufferIndexer>.Instance.Table;
+			table = MetadataIndexerBase<ReplicationCommandBufferIndexer>.Instance.Table;
 		}
 		catch (Exception ex)
 		{
 			_log.Warn($"probe: command indexer unavailable ({ex.GetType().Name}: {ex.Message}); commands reported by stub index only");
-			array = Array.Empty<ReplicationCommandBufferIndexer.CommandBufferCommand>();
+			table = Array.Empty<ReplicationCommandBufferIndexer.CommandBufferCommand>();
 		}
-		StubInfo[] array2 = new StubInfo[readers.Length];
-		bool flag = array.Length == readers.Length;
-		int num = 0;
+		var infos = new StubInfo[readers.Length];
+		bool aligned = table.Length == readers.Length;
+		int mismatches = 0;
 		for (int i = 0; i < readers.Length; i++)
 		{
-			if (flag && array[i].Reader.Reader != (delegate*<object, ref CommandBufferState, IntPtr, ReplicationCommandBuffer, void>)readers[i])
+			if (aligned && table[i].Reader.Reader != (delegate*<object, ref CommandBufferState, IntPtr, ReplicationCommandBuffer, void>)readers[i])
 			{
-				num++;
+				mismatches++;
 			}
-			Type type = (flag ? array[i].SignalType : null);
-			string text = type?.FullName ?? $"stub#{i}";
-			StubInfo[] array3 = array2;
-			int num2 = i;
-			StubInfo stubInfo = new StubInfo();
-			stubInfo.Name = ((type != null) ? Names.Short(text) : text);
-			stubInfo.Detail = (flag ? WriterParams(array[i].WriterInfo) : "");
-			StubInfo stubInfo2 = stubInfo;
-			stubInfo2.Kind = text switch
+			Type? signalType = aligned ? table[i].SignalType : null;
+			string fullName = signalType?.FullName ?? $"stub#{i}";
+			infos[i] = new StubInfo
 			{
-				"Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent+PostInvokeInternalSignal" => StubKind.PostInvoke, 
-				"Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent+PostDataSignal" => StubKind.PostData, 
-				"Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent+RemoveDataSignal" => StubKind.RemoveData, 
-				_ => StubKind.Signal, 
+				Name = signalType != null ? Names.Short(fullName) : fullName,
+				Detail = aligned ? WriterParams(table[i].WriterInfo) : "",
+				Kind = fullName switch
+				{
+					PostInvokeSignal => StubKind.PostInvoke,
+					PostDataSignal => StubKind.PostData,
+					RemoveDataSignal => StubKind.RemoveData,
+					_ => StubKind.Signal,
+				}
 			};
-			array3[num2] = stubInfo;
 		}
-		if (!flag || num > 0)
+		if (!aligned || mismatches > 0)
 		{
-			_log.Warn($"probe: replay table ({readers.Length}) and command indexer ({array.Length}) disagree ({num} reader mismatches); signal names may be wrong");
+			_log.Warn($"probe: replay table ({readers.Length}) and command indexer ({table.Length}) disagree ({mismatches} reader mismatches); signal names may be wrong");
 		}
-		return array2;
+		return infos;
 	}
 
 	private static string WriterParams(MethodInfo? writer)
@@ -612,9 +573,9 @@ internal static class ReplicationProbe
 		{
 			return "";
 		}
-		IEnumerable<string> values = from p in writer.GetParameters().Skip(1)
-			select Names.Short(p.ParameterType.FullName ?? p.ParameterType.Name) + " " + p.Name;
-		return "(" + string.Join(", ", values) + ")";
+		IEnumerable<string> parameters = writer.GetParameters().Skip(1)
+			.Select(p => Names.Short(p.ParameterType.FullName ?? p.ParameterType.Name) + " " + p.Name);
+		return "(" + string.Join(", ", parameters) + ")";
 	}
 
 	private unsafe static int ReadInt(byte* payload, nint available, int offset)
@@ -642,8 +603,8 @@ internal static class ReplicationProbe
 		{
 		case StubKind.PostInvoke:
 		{
-			int num2 = ReadInt(payload, available, 4);
-			key = ((num2 >= 0) ? cb.ReadObject(num2) : null);
+			int delegateRef = ReadInt(payload, available, 4);
+			key = delegateRef >= 0 ? cb.ReadObject(delegateRef) : null;
 			break;
 		}
 		case StubKind.PostData:
@@ -679,11 +640,11 @@ internal static class ReplicationProbe
 
 	private static Counter Get<TKey>(Dictionary<TKey, Counter> d, TKey k) where TKey : notnull
 	{
-		if (!d.TryGetValue(k, out Counter value))
+		if (!d.TryGetValue(k, out Counter counter))
 		{
-			value = (d[k] = new Counter());
+			counter = d[k] = new Counter();
 		}
-		return value;
+		return counter;
 	}
 
 	private static void Record(Direction dir, StubKind kind, int num, int intKey, object? key, long bytes, int payload)
@@ -692,47 +653,47 @@ internal static class ReplicationProbe
 		{
 			lock (Sync)
 			{
-				DirAcc dirAcc = _window.Dir[(int)dir];
-				dirAcc.Totals.Commands++;
+				DirAcc acc = _window.Dir[(int)dir];
+				acc.Totals.Commands++;
 				_measuredCommands++;
-				Counter counter = Get(dirAcc.Stubs, num);
-				counter.Count++;
-				counter.Bytes += bytes;
+				Counter stub = Get(acc.Stubs, num);
+				stub.Count++;
+				stub.Bytes += bytes;
 				switch (kind)
 				{
 				case StubKind.PostData:
 				{
-					Counter counter3 = Get(dirAcc.Data, intKey);
-					counter3.Count++;
-					counter3.Bytes += bytes;
-					counter3.Payload += Math.Max(0, payload);
-					dirAcc.Totals.DataPayloadBytes += Math.Max(0, payload);
+					Counter data = Get(acc.Data, intKey);
+					data.Count++;
+					data.Bytes += bytes;
+					data.Payload += Math.Max(0, payload);
+					acc.Totals.DataPayloadBytes += Math.Max(0, payload);
 					break;
 				}
 				case StubKind.RemoveData:
 				{
-					Counter counter4 = Get(dirAcc.DataRemove, intKey);
-					counter4.Count++;
-					counter4.Bytes += bytes;
+					Counter removal = Get(acc.DataRemove, intKey);
+					removal.Count++;
+					removal.Bytes += bytes;
 					break;
 				}
 				case StubKind.PostInvoke:
 					if (key is Delegate d)
 					{
-						Counter counter2 = ClassifyInvoke(dirAcc, d);
-						counter2.Count++;
-						counter2.Bytes += bytes;
+						Counter invoke = ClassifyInvoke(acc, d);
+						invoke.Count++;
+						invoke.Bytes += bytes;
 					}
 					break;
 				}
 			}
 		}
-		catch (Exception value)
+		catch (Exception ex)
 		{
 			if (_classify)
 			{
 				_classify = false;
-				_log.Error($"probe: recording failed, classification off: {value}");
+				_log.Error($"probe: recording failed, classification off: {ex}");
 			}
 		}
 	}
@@ -742,7 +703,10 @@ internal static class ReplicationProbe
 		MethodInfo method = d.Method;
 		if (method.Name.Contains("MoveNextRemotely", StringComparison.Ordinal) && d.Target != null)
 		{
-			return Get(k: (StoryField.GetOrAdd(d.Target.GetType(), (Type t) => t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).FirstOrDefault((FieldInfo f) => typeof(IAsyncStateMachine).IsAssignableFrom(f.FieldType)))?.GetValue(d.Target))?.GetType() ?? typeof(IAsyncStateMachine), d: acc.Stories);
+			// A network story's MoveNextRemotely delegate targets the builder box; the state machine is one of its fields.
+			Type stateMachine = (StoryField.GetOrAdd(d.Target.GetType(), (Type t) => t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).FirstOrDefault(f => typeof(IAsyncStateMachine).IsAssignableFrom(f.FieldType)))
+				?.GetValue(d.Target))?.GetType() ?? typeof(IAsyncStateMachine);
+			return Get(acc.Stories, stateMachine);
 		}
 		if (method.Name.Contains("FinishNetworkStory", StringComparison.Ordinal))
 		{
@@ -775,10 +739,10 @@ internal static class ReplicationProbe
 		}
 		try
 		{
-			bool flag = __instance == _serverComp || (__instance != _clientComp && Attach(__instance));
+			bool isServer = __instance == _serverComp || (__instance != _clientComp && Attach(__instance));
 			lock (Sync)
 			{
-				if (flag)
+				if (isServer)
 				{
 					_window.ServerTicks++;
 					_totalServerTicks++;
@@ -790,7 +754,7 @@ internal static class ReplicationProbe
 			}
 			if (__state != null && _report)
 			{
-				MeasureBuffer(__state, (!flag) ? Direction.C2S : Direction.S2C);
+				MeasureBuffer(__state, !isServer ? Direction.C2S : Direction.S2C);
 			}
 		}
 		catch (Exception e)
@@ -801,56 +765,51 @@ internal static class ReplicationProbe
 
 	private static bool Attach(object component)
 	{
-		//IL_004a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ab: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00df: Unknown result type (might be due to invalid IL or missing references)
-		bool flag = _isServer(component);
-		object target = _replayContext(component);
-		if (flag)
+		bool isServer = _isServer(component);
+		object replayContext = _replayContext(component);
+		if (isServer)
 		{
 			_serverComp = component;
-			_serverCtx = new WeakReference<object>(target);
+			_serverCtx = new WeakReference<object>(replayContext);
 		}
 		else
 		{
 			_clientComp = component;
-			_clientCtx = new WeakReference<object>(target);
+			_clientCtx = new WeakReference<object>(replayContext);
 		}
-		Keen.VRage.Multiplayer.Sessions.ReplicationCommandBuffer.ReplayTable val = (Keen.VRage.Multiplayer.Sessions.ReplicationCommandBuffer.ReplayTable)_replayTableField.GetValue(component);
-		_log.Info($"{(_report ? "probe" : "tap")}: {(flag ? "server" : "client")} scene replication component attached (replay table {val.Stubs?.Length ?? 0} entries)");
-		if (val.Stubs != null)
+		var table = (ReplicationCommandBuffer.ReplayTable)_replayTableField.GetValue(component);
+		_log.Info($"{(_report ? "probe" : "tap")}: {(isServer ? "server" : "client")} scene replication component attached (replay table {table.Stubs?.Length ?? 0} entries)");
+		if (table.Stubs != null)
 		{
-			InstrumentTable(val.Stubs);
+			InstrumentTable(table.Stubs);
 		}
-		return flag;
+		return isServer;
 	}
 
 	private static void MeasureBuffer(ReplicationCommandBuffer cb, Direction dir)
 	{
-		List<byte[]> list = _committedBuffers(cb);
-		long num = 0L;
-		for (int i = 0; i < list.Count; i++)
+		List<byte[]> buffers = _committedBuffers(cb);
+		long inlineBytes = 0L;
+		for (int i = 0; i < buffers.Count; i++)
 		{
 			_readBuffer(cb, i, out var offset, out var activeBytes);
-			num += activeBytes - offset;
+			inlineBytes += activeBytes - offset;
 		}
-		List<ValueTuple<object>> list2 = _objects(cb);
-		int count = list2.Count;
+		List<ValueTuple<object>> objects = _objects(cb);
+		int objectCount = objects.Count;
 		lock (Sync)
 		{
-			DirAcc dirAcc = _window.Dir[(int)dir];
-			DirectionTotals totals = dirAcc.Totals;
+			DirAcc acc = _window.Dir[(int)dir];
+			DirectionTotals totals = acc.Totals;
 			totals.Buffers++;
-			totals.InlineBytes += num;
-			totals.ObjectRefs += count;
-			totals.MaxTickBytes = Math.Max(totals.MaxTickBytes, num);
-			totals.TickBytes.Add((int)Math.Min(2147483647L, num));
-			TotalBytes[(int)dir] += num;
-			for (int j = 0; j < count; j++)
+			totals.InlineBytes += inlineBytes;
+			totals.ObjectRefs += objectCount;
+			totals.MaxTickBytes = Math.Max(totals.MaxTickBytes, inlineBytes);
+			totals.TickBytes.Add((int)Math.Min(int.MaxValue, inlineBytes));
+			TotalBytes[(int)dir] += inlineBytes;
+			for (int j = 0; j < objectCount; j++)
 			{
-				Get(dirAcc.ObjRefs, list2[j].Item1?.GetType() ?? typeof(void)).Count++;
+				Get(acc.ObjRefs, objects[j].Item1?.GetType() ?? typeof(void)).Count++;
 			}
 		}
 	}
@@ -863,40 +822,42 @@ internal static class ReplicationProbe
 		}
 		try
 		{
-			int num = _bundleCount(__result);
-			int num2 = (_bundleSkipped(__result) as IReadOnlyCollection<Entity>)?.Count ?? 0;
-			int num3 = (_bundleStaged(__result) as IReadOnlyCollection<Entity>)?.Count ?? 0;
-			long num4 = -1L;
+			int entities = _bundleCount(__result);
+			int skipped = (_bundleSkipped(__result) as IReadOnlyCollection<Entity>)?.Count ?? 0;
+			int staged = (_bundleStaged(__result) as IReadOnlyCollection<Entity>)?.Count ?? 0;
+			long bytes = -1L;
 			double ms = 0.0;
-			if (_sizeBundles && num > 0 && _bundleServer(__result) is EntityBundle bundle)
+			if (_sizeBundles && entities > 0 && _bundleServer(__result) is EntityBundle bundle)
 			{
-				num4 = SizeOf(bundle, out ms);
+				bytes = SizeOf(bundle, out ms);
 			}
-			long num5 = Interlocked.Increment(ref _bundleNo);
+			long bundleNo = Interlocked.Increment(ref _bundleNo);
 			lock (Sync)
 			{
 				BundleTotals bundles = _window.Bundles;
 				bundles.Bundles++;
-				bundles.Entities += num;
-				bundles.Skipped += num2;
-				bundles.Staged += num3;
-				bundles.MaxBundleEntities = Math.Max(bundles.MaxBundleEntities, num);
+				bundles.Entities += entities;
+				bundles.Skipped += skipped;
+				bundles.Staged += staged;
+				bundles.MaxBundleEntities = Math.Max(bundles.MaxBundleEntities, entities);
 				bundles.SerializeMs += ms;
-				if (num4 >= 0)
+				if (bytes >= 0)
 				{
 					bundles.SizedBundles++;
-					bundles.SerializedBytes += num4;
-					bundles.MaxBundleBytes = Math.Max(bundles.MaxBundleBytes, num4);
+					bundles.SerializedBytes += bytes;
+					bundles.MaxBundleBytes = Math.Max(bundles.MaxBundleBytes, bytes);
 				}
-				else if (_sizeBundles && num > 0)
+				else if (_sizeBundles && entities > 0)
 				{
 					bundles.SizeFailures++;
 				}
-				Surface.Add("bundle", "entity spawn bundle", "", 1L, Math.Max(0L, num4));
+				Surface.Add("bundle", "entity spawn bundle", "", 1L, Math.Max(0L, bytes));
 			}
-			if (num5 == 1 || num >= 50)
+			if (bundleNo == 1 || entities >= 50)
 			{
-				_log.Info($"probe: entity bundle #{num5}: {num} entities (+{num2} skipped, {num3} staged)" + ((num4 >= 0) ? $", {MpLogExtensions.Bytes(num4)} serialized in {ms:0} ms" : "") + ((num5 == 1) ? "  <- first bundle after load = join-time world sync estimate" : ""));
+				_log.Info($"probe: entity bundle #{bundleNo}: {entities} entities (+{skipped} skipped, {staged} staged)"
+					+ (bytes >= 0 ? $", {MpLogExtensions.Bytes(bytes)} serialized in {ms:0} ms" : "")
+					+ (bundleNo == 1 ? "  <- first bundle after load = join-time world sync estimate" : ""));
 			}
 		}
 		catch (Exception e)
@@ -907,15 +868,15 @@ internal static class ReplicationProbe
 
 	private static long SizeOf(EntityBundle bundle, out double ms)
 	{
-		Stopwatch stopwatch = Stopwatch.StartNew();
+		var stopwatch = Stopwatch.StartNew();
 		try
 		{
-			using MemoryStream memoryStream = new MemoryStream();
-			using (SerializationContext context = new SerializationContext(memoryStream, "y51online-probe.vrb", new EntityProxySerializationContext(), new DefinitionManagerDefinitionSerializationContext(Singleton<DefinitionManager>.Instance)))
+			using var stream = new MemoryStream();
+			using (var context = new SerializationContext(stream, "y51online-probe.vrb", new EntityProxySerializationContext(), new DefinitionManagerDefinitionSerializationContext(Singleton<DefinitionManager>.Instance)))
 			{
 				SerializationHelper.Serialize(context, in bundle, SerializerFormat.Binary);
 			}
-			return memoryStream.ToArray().LongLength;
+			return stream.ToArray().LongLength;
 		}
 		catch (Exception ex)
 		{
@@ -952,20 +913,11 @@ internal static class ReplicationProbe
 		}
 	}
 
-	internal static void InstrumentForTest(ReplicationCommandBuffer.Stub[] stubs)
-	{
-		InstrumentTable(stubs);
-	}
+	internal static void InstrumentForTest(ReplicationCommandBuffer.Stub[] stubs) => InstrumentTable(stubs);
 
-	internal static void MeasureBufferForTest(ReplicationCommandBuffer cb, bool server)
-	{
-		MeasureBuffer(cb, (!server) ? Direction.C2S : Direction.S2C);
-	}
+	internal static void MeasureBufferForTest(ReplicationCommandBuffer cb, bool server) => MeasureBuffer(cb, !server ? Direction.C2S : Direction.S2C);
 
-	internal static void FlushForTest()
-	{
-		Flush();
-	}
+	internal static void FlushForTest() => Flush();
 
 	private static void Flush()
 	{
@@ -981,22 +933,23 @@ internal static class ReplicationProbe
 				window = _window;
 				_window = new Window();
 			}
-			ProbeWindow probeWindow = Resolve(window);
-			if (probeWindow.ServerTicks == 0L && probeWindow.ClientTicks == 0L && probeWindow.Bundles.Bundles == 0L && probeWindow.Dir.All((DirectionTotals d) => d.Buffers == 0L && d.Commands == 0))
+			ProbeWindow pw = Resolve(window);
+			if (pw.ServerTicks == 0L && pw.ClientTicks == 0L && pw.Bundles.Bundles == 0L && pw.Dir.All(d => d.Buffers == 0L && d.Commands == 0))
 			{
 				return;
 			}
-			GameLog.Instance.Info(probeWindow.Summary());
+			GameLog.Instance.Info(pw.Summary());
 			if (_csvPath != null)
 			{
-				File.AppendAllLines(_csvPath, probeWindow.ToCsvRows());
+				File.AppendAllLines(_csvPath, pw.ToCsvRows());
 			}
 			if (_typesPath != null)
 			{
 				string header;
 				lock (Sync)
 				{
-					header = $"Y51_SE2Online replication probe, game {"2.4.0.95"}, written {DateTime.Now:yyyy-MM-dd HH:mm:ss}; server ticks so far {_totalServerTicks}, S2C {TotalBytes[0] / 1024} KiB, C2S {TotalBytes[1] / 1024} KiB inline.\n" + "Columns: count x inline-bytes  key  :: detail (signal args / data size / story fields). Every key below needs a wire codec.";
+					header = $"Y51_SE2Online replication probe, game {HookTargets.GameBuild}, written {DateTime.Now:yyyy-MM-dd HH:mm:ss}; server ticks so far {_totalServerTicks}, S2C {TotalBytes[0] / 1024} KiB, C2S {TotalBytes[1] / 1024} KiB inline.\n"
+						+ "Columns: count x inline-bytes  key  :: detail (signal args / data size / story fields). Every key below needs a wire codec.";
 				}
 				string contents;
 				lock (Sync)
@@ -1006,106 +959,104 @@ internal static class ReplicationProbe
 				File.WriteAllText(_typesPath, contents);
 			}
 		}
-		catch (Exception value)
+		catch (Exception ex)
 		{
-			_log.WarnOnce("probe-flush", $"probe: flush failed (will keep trying): {value}");
+			_log.WarnOnce("probe-flush", $"probe: flush failed (will keep trying): {ex}");
 		}
 	}
 
 	private static ProbeWindow Resolve(Window w)
 	{
-		ProbeWindow probeWindow = new ProbeWindow
+		var pw = new ProbeWindow
 		{
 			StartUtc = w.StartUtc,
-			Seconds = (double)(MpClock.NowMs() - w.StartMs) / 1000.0,
+			Seconds = (MpClock.NowMs() - w.StartMs) / 1000.0,
 			ServerTicks = w.ServerTicks,
 			ClientTicks = w.ClientTicks
 		};
-		BundleTotals bundles = w.Bundles;
-		BundleTotals bundles2 = probeWindow.Bundles;
-		bundles2.Bundles = bundles.Bundles;
-		bundles2.Entities = bundles.Entities;
-		bundles2.Skipped = bundles.Skipped;
-		bundles2.Staged = bundles.Staged;
-		bundles2.SerializedBytes = bundles.SerializedBytes;
-		bundles2.MaxBundleBytes = bundles.MaxBundleBytes;
-		bundles2.MaxBundleEntities = bundles.MaxBundleEntities;
-		bundles2.SizedBundles = bundles.SizedBundles;
-		bundles2.SizeFailures = bundles.SizeFailures;
-		bundles2.SerializeMs = bundles.SerializeMs;
+		BundleTotals src = w.Bundles;
+		BundleTotals dst = pw.Bundles;
+		dst.Bundles = src.Bundles;
+		dst.Entities = src.Entities;
+		dst.Skipped = src.Skipped;
+		dst.Staged = src.Staged;
+		dst.SerializedBytes = src.SerializedBytes;
+		dst.MaxBundleBytes = src.MaxBundleBytes;
+		dst.MaxBundleEntities = src.MaxBundleEntities;
+		dst.SizedBundles = src.SizedBundles;
+		dst.SizeFailures = src.SizeFailures;
+		dst.SerializeMs = src.SerializeMs;
 		StubInfo[] stubs = _stubs;
 		lock (Sync)
 		{
 			for (int i = 0; i < 2; i++)
 			{
-				DirAcc dirAcc = w.Dir[i];
+				DirAcc acc = w.Dir[i];
 				Direction dir = (Direction)i;
-				DirectionTotals obj = probeWindow.Dir[i];
-				obj.Buffers = dirAcc.Totals.Buffers;
-				obj.InlineBytes = dirAcc.Totals.InlineBytes;
-				obj.Commands = dirAcc.Totals.Commands;
-				obj.ObjectRefs = dirAcc.Totals.ObjectRefs;
-				obj.DataPayloadBytes = dirAcc.Totals.DataPayloadBytes;
-				obj.MaxTickBytes = dirAcc.Totals.MaxTickBytes;
-				obj.TickBytes.AddRange(dirAcc.Totals.TickBytes);
-				foreach (KeyValuePair<int, Counter> stub in dirAcc.Stubs)
+				DirectionTotals totals = pw.Dir[i];
+				totals.Buffers = acc.Totals.Buffers;
+				totals.InlineBytes = acc.Totals.InlineBytes;
+				totals.Commands = acc.Totals.Commands;
+				totals.ObjectRefs = acc.Totals.ObjectRefs;
+				totals.DataPayloadBytes = acc.Totals.DataPayloadBytes;
+				totals.MaxTickBytes = acc.Totals.MaxTickBytes;
+				totals.TickBytes.AddRange(acc.Totals.TickBytes);
+				foreach (var stub in acc.Stubs)
 				{
-					StubInfo stubInfo = (((uint)stub.Key < (uint)stubs.Length) ? stubs[stub.Key] : null);
-					if (stubInfo == null || stubInfo.Kind == StubKind.Signal)
+					StubInfo? info = (uint)stub.Key < (uint)stubs.Length ? stubs[stub.Key] : null;
+					if (info == null || info.Kind == StubKind.Signal)
 					{
-						string key = stubInfo?.Name ?? $"stub#{stub.Key}";
-						Add(probeWindow, dir, "signal", key, stubInfo?.Detail ?? "", stub.Value);
+						string key = info?.Name ?? $"stub#{stub.Key}";
+						Add(pw, dir, "signal", key, info?.Detail ?? "", stub.Value);
 					}
 				}
-				foreach (KeyValuePair<int, Counter> datum in dirAcc.Data)
+				foreach (var data in acc.Data)
 				{
-					int value2;
-					string key2;
-					if (!DataTypes.TryGetValue(datum.Key, out (string, int) value))
+					string name;
+					int size;
+					if (!DataTypes.TryGetValue(data.Key, out var dataType))
 					{
-						string text = $"typeId#{datum.Key}";
-						value2 = 0;
-						key2 = text;
+						(name, size) = ($"typeId#{data.Key}", 0);
 					}
 					else
 					{
-						(key2, value2) = value;
+						(name, size) = dataType;
 					}
-					Add(probeWindow, dir, "data", key2, $"{value2} B unmanaged, TypeId {datum.Key} (process-local, remap by name)", datum.Value);
+					Add(pw, dir, "data", name, $"{size} B unmanaged, TypeId {data.Key} (process-local, remap by name)", data.Value);
 				}
-				foreach (KeyValuePair<int, Counter> item in dirAcc.DataRemove)
+				foreach (var removal in acc.DataRemove)
 				{
-					string key3;
-					if (!DataTypes.TryGetValue(item.Key, out (string, int) value3))
+					string name;
+					if (!DataTypes.TryGetValue(removal.Key, out var dataType))
 					{
-						key3 = $"typeId#{item.Key}";
+						name = $"typeId#{removal.Key}";
 					}
 					else
 					{
-						(key3, _) = value3;
+						(name, _) = dataType;
 					}
-					Add(probeWindow, dir, "data-remove", key3, "", item.Value);
+					Add(pw, dir, "data-remove", name, "", removal.Value);
 				}
-				foreach (KeyValuePair<MethodInfo, Counter> invoke in dirAcc.Invokes)
+				foreach (var invoke in acc.Invokes)
 				{
-					Add(probeWindow, dir, "invoke", InvokeName(invoke.Key), "closure fields: " + ClosureFields(invoke.Key.DeclaringType), invoke.Value);
+					Add(pw, dir, "invoke", InvokeName(invoke.Key), "closure fields: " + ClosureFields(invoke.Key.DeclaringType), invoke.Value);
 				}
-				foreach (KeyValuePair<Type, Counter> story in dirAcc.Stories)
+				foreach (var story in acc.Stories)
 				{
-					Add(probeWindow, dir, "story", Names.GeneratedType(story.Key.FullName), StoryFields(story.Key), story.Value);
+					Add(pw, dir, "story", Names.GeneratedType(story.Key.FullName), StoryFields(story.Key), story.Value);
 				}
-				foreach (KeyValuePair<Type, Counter> item2 in dirAcc.StoryFinish)
+				foreach (var finish in acc.StoryFinish)
 				{
-					Type[] array = (item2.Key.IsGenericType ? item2.Key.GetGenericArguments() : Type.EmptyTypes);
-					string text2 = ((array.Length != 0) ? Names.Short(array[^1].FullName ?? array[^1].Name) : "?");
-					Add(probeWindow, dir, "story-finish", "result " + text2, "", item2.Value);
+					Type[] typeArgs = finish.Key.IsGenericType ? finish.Key.GetGenericArguments() : Type.EmptyTypes;
+					string result = typeArgs.Length != 0 ? Names.Short(typeArgs[^1].FullName ?? typeArgs[^1].Name) : "?";
+					Add(pw, dir, "story-finish", "result " + result, "", finish.Value);
 				}
-				foreach (KeyValuePair<Type, Counter> objRef in dirAcc.ObjRefs)
+				foreach (var objRef in acc.ObjRefs)
 				{
-					Add(probeWindow, dir, "objref", (objRef.Key == typeof(void)) ? "null" : Names.Short(objRef.Key.FullName ?? objRef.Key.Name), "", objRef.Value);
+					Add(pw, dir, "objref", objRef.Key == typeof(void) ? "null" : Names.Short(objRef.Key.FullName ?? objRef.Key.Name), "", objRef.Value);
 				}
 			}
-			return probeWindow;
+			return pw;
 		}
 	}
 
@@ -1115,10 +1066,7 @@ internal static class ReplicationProbe
 		Surface.Add(category, $"{dir} {key}", detail, c.Count, c.Bytes);
 	}
 
-	private static string InvokeName(MethodInfo m)
-	{
-		return Names.GeneratedType(m.DeclaringType?.FullName) + "." + Names.Member(m.Name);
-	}
+	private static string InvokeName(MethodInfo m) => Names.GeneratedType(m.DeclaringType?.FullName) + "." + Names.Member(m.Name);
 
 	private static string ClosureFields(Type? t)
 	{
@@ -1126,41 +1074,41 @@ internal static class ReplicationProbe
 		{
 			return "";
 		}
-		IEnumerable<string> values = from f in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-			select Names.Short(f.FieldType.FullName ?? f.FieldType.Name) + " " + Names.Member(f.Name);
-		return string.Join(", ", values);
+		IEnumerable<string> fields = t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+			.Select(f => Names.Short(f.FieldType.FullName ?? f.FieldType.Name) + " " + Names.Member(f.Name));
+		return string.Join(", ", fields);
 	}
 
 	private static string StoryFields(Type sm)
 	{
-		return StoryFieldsText.GetOrAdd(sm, (Type t) =>
+		return StoryFieldsText.GetOrAdd(sm, t =>
 		{
-			IEnumerable<string> values = from f in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-				where !f.Name.StartsWith("<>", StringComparison.Ordinal)
-				select Names.Short(f.FieldType.FullName ?? f.FieldType.Name) + " " + Names.Member(f.Name);
-			return "state machine fields: " + string.Join(", ", values);
+			IEnumerable<string> fields = t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+				.Where(f => !f.Name.StartsWith("<>", StringComparison.Ordinal))
+				.Select(f => Names.Short(f.FieldType.FullName ?? f.FieldType.Name) + " " + Names.Member(f.Name));
+			return "state machine fields: " + string.Join(", ", fields);
 		});
 	}
 
 	public static void Stop()
 	{
 		_tap = null;
-		_commitActive = (_bundleActive = (_measure = false));
-		Timer timer = Interlocked.Exchange(ref _timer, null);
+		_commitActive = _bundleActive = _measure = false;
+		Timer? timer = Interlocked.Exchange(ref _timer, null);
 		if (timer != null)
 		{
 			timer.Dispose();
 			Flush();
-			long totalServerTicks;
-			long b;
-			long b2;
+			long ticks;
+			long s2c;
+			long c2s;
 			lock (Sync)
 			{
-				totalServerTicks = _totalServerTicks;
-				b = TotalBytes[0];
-				b2 = TotalBytes[1];
+				ticks = _totalServerTicks;
+				s2c = TotalBytes[0];
+				c2s = TotalBytes[1];
 			}
-			_log.Info($"probe: stopped after {totalServerTicks} server ticks; S2C {MpLogExtensions.Bytes(b)}, C2S {MpLogExtensions.Bytes(b2)} inline command bytes; {_measuredCommands} commands metered; {_bundleNo} entity bundles");
+			_log.Info($"probe: stopped after {ticks} server ticks; S2C {MpLogExtensions.Bytes(s2c)}, C2S {MpLogExtensions.Bytes(c2s)} inline command bytes; {_measuredCommands} commands metered; {_bundleNo} entity bundles");
 		}
 	}
 }

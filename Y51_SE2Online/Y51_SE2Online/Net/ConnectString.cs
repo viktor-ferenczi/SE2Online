@@ -9,12 +9,12 @@ public static class ConnectString
 {
 	public static string Build(ulong hostSteamId, int virtualPort)
 	{
-		string text = "-y51online:join:" + hostSteamId.ToString(CultureInfo.InvariantCulture);
+		string args = "-y51online:join:" + hostSteamId.ToString(CultureInfo.InvariantCulture);
 		if (virtualPort != 7742)
 		{
-			text = text + " -y51online:vport:" + virtualPort.ToString(CultureInfo.InvariantCulture);
+			args += " -y51online:vport:" + virtualPort.ToString(CultureInfo.InvariantCulture);
 		}
-		return text;
+		return args;
 	}
 
 	/// <summary>"Join Game" on a friend playing on a dedicated server.</summary>
@@ -35,30 +35,28 @@ public static class ConnectString
 		{
 			return false;
 		}
-		string text2 = "-y51online:";
-		string[] array = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-		for (int i = 0; i < array.Length; i++)
+		string prefix = "-y51online:";
+		foreach (string token in text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
 		{
-			string text3 = array[i].Trim().Trim(new char[2] { '"', '\'' });
-			if (!text3.StartsWith(text2, StringComparison.OrdinalIgnoreCase))
+			string arg = token.Trim().Trim('"', '\'');
+			if (!arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
 			{
 				continue;
 			}
-			string text4 = text3.Substring(text2.Length);
-			int result;
-			if (text4.StartsWith("join:", StringComparison.OrdinalIgnoreCase))
+			string option = arg.Substring(prefix.Length);
+			if (option.StartsWith("join:", StringComparison.OrdinalIgnoreCase))
 			{
 				try
 				{
-					hostSteamId = MpOptions.ParseSteamId(text4.Substring(5));
+					hostSteamId = MpOptions.ParseSteamId(option.Substring(5));
 				}
 				catch (FormatException)
 				{
 				}
 			}
-			else if (text4.StartsWith("vport:", StringComparison.OrdinalIgnoreCase) && int.TryParse(text4.Substring(6), NumberStyles.None, CultureInfo.InvariantCulture, out result) && result <= 65535)
+			else if (option.StartsWith("vport:", StringComparison.OrdinalIgnoreCase) && int.TryParse(option.Substring(6), NumberStyles.None, CultureInfo.InvariantCulture, out int port) && port <= 65535)
 			{
-				virtualPort = result;
+				virtualPort = port;
 			}
 		}
 		return hostSteamId != 0;

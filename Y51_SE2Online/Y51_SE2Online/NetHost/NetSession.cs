@@ -28,7 +28,7 @@ internal sealed class NetSession
 
 	private readonly string _gameVersion;
 
-	private readonly ManualResetEventSlim _steamReady = new ManualResetEventSlim(initialState: false);
+	private readonly ManualResetEventSlim _steamReady = new(initialState: false);
 
 	private readonly Thread _thread;
 
@@ -255,13 +255,13 @@ internal sealed class NetSession
 
 	private void Run()
 	{
-		bool flag = false;
+		bool timerRaised = false;
 		try
 		{
 			if (OperatingSystem.IsWindows())
 			{
-				flag = TimeBeginPeriod(1u) == 0;
-				_log.Info("net: timer resolution 1 ms " + (flag ? "requested" : "refused") + " for the net loop");
+				timerRaised = TimeBeginPeriod(1u) == 0;
+				_log.Info("net: timer resolution 1 ms " + (timerRaised ? "requested" : "refused") + " for the net loop");
 			}
 		}
 		catch (Exception ex)
@@ -272,10 +272,10 @@ internal sealed class NetSession
 		{
 			RunCore();
 		}
-		catch (Exception value)
+		catch (Exception ex)
 		{
-			Failure = value.Message;
-			_log.Error($"net: thread crashed, networking disabled (game unaffected): {value}");
+			Failure = ex.Message;
+			_log.Error($"net: thread crashed, networking disabled (game unaffected): {ex}");
 		}
 		finally
 		{
@@ -283,7 +283,7 @@ internal sealed class NetSession
 			_client?.Detach();
 			try
 			{
-				if (flag)
+				if (timerRaised)
 				{
 					TimeEndPeriod(1u);
 				}
@@ -302,13 +302,13 @@ internal sealed class NetSession
 
 	private bool WaitForSteam()
 	{
-		long num = MpClock.NowMs();
-		bool flag = false;
+		long start = MpClock.NowMs();
+		bool warned = false;
 		while (!_steamReady.Wait(1000))
 		{
-			if (!flag && MpClock.NowMs() - num > 120000)
+			if (!warned && MpClock.NowMs() - start > 120000)
 			{
-				flag = true;
+				warned = true;
 				_log.Warn("net: still waiting for Steam after 2 min (is Steam running and the game launched through Steam?)");
 			}
 		}
@@ -321,23 +321,23 @@ internal sealed class NetSession
 		{
 			if (_steamReady.IsSet)
 			{
-				return (Id: SteamUser.GetSteamID().m_SteamID, Name: SteamFriends.GetPersonaName());
+				return (SteamUser.GetSteamID().m_SteamID, SteamFriends.GetPersonaName());
 			}
 		}
 		catch (Exception)
 		{
 		}
-		return (Id: 0uL, Name: Environment.UserName);
+		return (0uL, Environment.UserName);
 	}
 
 	private void RunCore()
 	{
-		SteamLink steamLink = null;
+		SteamLink? steamLink = null;
 		using var dedicatedSteam = _o.Dedicated ? new SteamDedicatedSession() : null;
-		TcpLink tcpLink = null;
-		ulong num;
-		string text;
-		IPacketLink packetLink;
+		TcpLink? tcpLink = null;
+		ulong localId;
+		string name;
+		IPacketLink link;
 		if (_o.NeedsSteam)
 		{
 			if (!_o.Dedicated && !WaitForSteam())
@@ -348,38 +348,43 @@ internal sealed class NetSession
 			if (_o.Dedicated)
 			{
 				dedicatedSteam.Initialize(_o, _gameVersion, () => _stop);
-				num = dedicatedSteam.SteamId;
-				text = _o.SessionName;
+				localId = dedicatedSteam.SteamId;
+				name = _o.SessionName;
 			}
-			else try
+			else
 			{
-				num = SteamUser.GetSteamID().m_SteamID;
-				text = SteamFriends.GetPersonaName();
+				try
+				{
+					localId = SteamUser.GetSteamID().m_SteamID;
+					name = SteamFriends.GetPersonaName();
+				}
+				catch (InvalidOperationException ex)
+				{
+					_log.Error("net: Steam API not available (" + ex.Message + "); networking disabled");
+					return;
+				}
 			}
-			catch (InvalidOperationException ex)
-			{
-				_log.Error("net: Steam API not available (" + ex.Message + "); networking disabled");
-				return;
-			}
-			_log.Info($"net: Steam user '{text}' SteamID64={num}");
+			_log.Info($"net: Steam user '{name}' SteamID64={localId}");
 			if (_o.HostSteam && !_o.Dedicated)
 			{
-				_log.Info($"HOST READY: join through Multiplayer using Steam identity {num} or the advertised listing.");
+				_log.Info($"HOST READY: join through Multiplayer using Steam identity {localId} or the advertised listing.");
 			}
 			if (!_o.Dedicated) SteamNetworkingUtils.InitRelayNetworkAccess();
 			_log.Info("net: relay network init requested; " + SteamLink.RelayStatus(_o.Dedicated));
-			steamLink = new SteamLink(_log, _o.VirtualPort, _o.SendRateMinBytes, _o.SendRateMaxBytes, (ulong id) => (_o.Allow.Count == 0 || _o.Allow.Contains(id)) && (!_o.FriendsOnly || SteamFriends.GetFriendRelationship(new CSteamID(id)) == EFriendRelationship.k_EFriendRelationshipFriend), _o.SteamListenIp, _o.Dedicated);
+			steamLink = new SteamLink(_log, _o.VirtualPort, _o.SendRateMinBytes, _o.SendRateMaxBytes,
+				id => (_o.Allow.Count == 0 || _o.Allow.Contains(id)) && (!_o.FriendsOnly || SteamFriends.GetFriendRelationship(new CSteamID(id)) == EFriendRelationship.k_EFriendRelationshipFriend),
+				_o.SteamListenIp, _o.Dedicated);
 			steamLink.Start(_o.Host);
-			packetLink = steamLink;
-			SteamJoinStart(num, text);
+			link = steamLink;
+			SteamJoinStart(localId, name);
 			if (_o.Host && _o.Advertise) _directory = new DirectoryPublisher(new DirectoryClient(_o.Dedicated ? _o.ServersDirectory : _o.SessionsDirectory), message => _log.WarnOnce("directory-publish", message));
 		}
 		else
 		{
-			(num, text) = Identity();
+			(localId, name) = Identity();
 			if (_o.Join)
 			{
-				text += " (tcp)";
+				name += " (tcp)";
 			}
 			tcpLink = new TcpLink("tcp", _log);
 			if (_o.HostIp != null)
@@ -387,33 +392,33 @@ internal sealed class NetSession
 				tcpLink.Listen(_o.HostIp);
 				_log.Info("HOST READY (local sandbox): join through Multiplayer using Join local test.");
 			}
-			packetLink = tcpLink;
+			link = tcpLink;
 		}
 		if (_o.PlayerName != null)
 		{
-			text = _o.PlayerName;
-			_log.Info("net: player name '" + text + "'");
+			name = _o.PlayerName;
+			_log.Info("net: player name '" + name + "'");
 		}
-		_localIdentity = num;
-		MpTransport mpTransport = null;
+		_localIdentity = localId;
+		MpTransport? transport = null;
 		try
 		{
-			mpTransport = new MpTransport(packetLink, new TransportOptions
+			transport = new MpTransport(link, new TransportOptions
 			{
-				LocalId = num,
-				Role = ((!_o.Host) ? ((byte)1) : ((byte)0)),
-				LocalName = text,
+				LocalId = localId,
+				Role = !_o.Host ? (byte)1 : (byte)0,
+				LocalName = name,
 				PluginVersion = _pluginVersion,
 				GameVersion = _gameVersion
 			}, _log);
-			SpikeDriver spike = (_o.Spike ? new SpikeDriver(mpTransport, _log, MpClock.NowMs, _o.BlobBytes, num) : null);
-			HostSession host = null;
-			ClientSession clientSession = null;
+			SpikeDriver? spike = _o.Spike ? new SpikeDriver(transport, _log, MpClock.NowMs, _o.BlobBytes, localId) : null;
+			HostSession? host = null;
+			ClientSession? client = null;
 			if (_o.Sync)
 			{
 				if (_o.Host && HostWorld.Current != null)
 				{
-					host = new HostSession(mpTransport, _log, HostWorld.Current, HostWorld.Current.Keys, new HostSyncOptions
+					host = new HostSession(transport, _log, HostWorld.Current, HostWorld.Current.Keys, new HostSyncOptions
 					{
 						PluginVersion = _pluginVersion,
 						GameVersion = _gameVersion,
@@ -422,7 +427,7 @@ internal sealed class NetSession
 						ResolveType = EngineCodec.ResolveType,
 						CheckSignal = CommandLayouts.Check,
 						Settings = new HostSettings(_o.Identities, _o.Grids, _o.Research),
-						HostName = text,
+						HostName = name,
 						LookTotals = _o.Predict,
 						MaxPlayers = _o.MaxPlayers,
 						HostCountsAsPlayer = !_o.Dedicated,
@@ -430,7 +435,7 @@ internal sealed class NetSession
 						Password = _o.Password ?? "",
 						SessionName = _o.SessionName,
 						Dedicated = _o.Dedicated,
-						HostSteamId = _o.Dedicated ? 0 : num,
+						HostSteamId = _o.Dedicated ? 0 : localId,
 						HostIdentity = PlayerIdentities.HotfixIdentity,
 						FactionTagOf = HostWorld.Current.FactionTagOf,
 						SafeZones = () => HostWorld.Current?.SafeZones,
@@ -449,12 +454,12 @@ internal sealed class NetSession
 				}
 				else if (_o.Join && ClientWorld.Current != null)
 				{
-					_playerName = text;
-					clientSession = NewClientSession(mpTransport);
-					_log.Info("net: remote motion smoothing " + ((_o.InterpMs > 0) ? $"on, {_o.InterpMs} ms playout delay" : "off (-y51online:interp:0)"));
+					_playerName = name;
+					client = NewClientSession(transport);
+					_log.Info("net: remote motion smoothing " + (_o.InterpMs > 0 ? $"on, {_o.InterpMs} ms playout delay" : "off (-y51online:interp:0)"));
 					_log.Info("net: look prediction " + (_o.Predict ? "on: the own character turns locally the same frame, the host's orientation only corrects it" : "off (-y51online:predict:off): the own character turns when the host's state comes back"));
 					_log.Info(_o.Rejoin ? "net: rejoin without restarting: on (lost connection: back to the main menu and join again by itself; after leaving: F3 at the main menu or 'Join Game' in Steam)" : "net: rejoin without restarting: off (-y51online:rejoin:off): restart the game to join again");
-					ClientWorld.Current.Bind(clientSession);
+					ClientWorld.Current.Bind(client);
 					_rejoinHandler = why => _rejoinWhy = why;
 					ClientWorld.RejoinRequested += _rejoinHandler;
 				}
@@ -465,16 +470,16 @@ internal sealed class NetSession
 			}
 			if (host != null && _o.Nametags)
 			{
-				_names = new PlayerNamesPublisher(mpTransport, _log, HostNametags.Roster, (PeerId p) => host.StatusOf(p) == HostSession.ClientStatus.Synced);
+				_names = new PlayerNamesPublisher(transport, _log, HostNametags.Roster, p => host.StatusOf(p) == HostSession.ClientStatus.Synced);
 			}
 			if (_o.Host)
 			{
-				HostNametags.HostName = text;
+				HostNametags.HostName = name;
 			}
-			_client = clientSession;
+			_client = client;
 			_host = host;
-			_transport = mpTransport;
-			Loop(steamLink, tcpLink, mpTransport, spike, host);
+			_transport = transport;
+			Loop(steamLink, tcpLink, transport, spike, host);
 		}
 		finally
 		{
@@ -489,19 +494,20 @@ internal sealed class NetSession
 			}
 			try
 			{
-				bool num2 = mpTransport != null && mpTransport.Peers.Count > 0;
-				mpTransport?.DisconnectAll(1004, _stopReason);
-				mpTransport?.Poll();
-				if (num2)
+				bool hadPeers = transport != null && transport.Peers.Count > 0;
+				transport?.DisconnectAll(1004, _stopReason);
+				transport?.Poll();
+				if (hadPeers)
 				{
+					// Give the disconnect frames a moment to leave before the link is torn down.
 					Thread.Sleep(500);
 				}
 			}
-			catch (Exception ex4)
+			catch (Exception ex)
 			{
-				_log.Warn("net: error while disconnecting: " + ex4.Message);
+				_log.Warn("net: error while disconnecting: " + ex.Message);
 			}
-			packetLink.Dispose();
+			link.Dispose();
 			_log.Info("net: stopped (" + _stopReason + ")");
 		}
 	}
@@ -528,7 +534,7 @@ internal sealed class NetSession
 
 	private ClientSession NewClientSession(MpTransport transport)
 	{
-		ClientSession clientSession = new ClientSession(transport, _log, new ClientSyncOptions
+		var session = new ClientSession(transport, _log, new ClientSyncOptions
 		{
 			PluginVersion = _pluginVersion,
 			GameVersion = _gameVersion,
@@ -537,82 +543,79 @@ internal sealed class NetSession
 			CheckSignal = CommandLayouts.Check,
 			Progress = ClientWorld.Progress
 		}, EngineCodec.ResolveType);
-		clientSession.Smoother.DelayMs = _o.InterpMs;
-		clientSession.Smoother.Adaptive = _o.AdaptiveInterp;
-		return clientSession;
+		session.Smoother.DelayMs = _o.InterpMs;
+		session.Smoother.Adaptive = _o.AdaptiveInterp;
+		return session;
 	}
 
 	private void Loop(SteamLink? steam, TcpLink? tcp, MpTransport transport, SpikeDriver? spike, HostSession? host)
 	{
-		Dictionary<PeerId, long> connectedAt = new Dictionary<PeerId, long>();
-		HashSet<PeerId> detailedDone = new HashSet<PeerId>();
-		transport.PeerConnected += (PeerId p) =>
-		{
-			connectedAt[p] = MpClock.NowMs();
-		};
-		transport.PeerDisconnected += (PeerId p, DisconnectInfo info) =>
+		var connectedAt = new Dictionary<PeerId, long>();
+		var detailedDone = new HashSet<PeerId>();
+		transport.PeerConnected += p => connectedAt[p] = MpClock.NowMs();
+		transport.PeerDisconnected += (p, info) =>
 		{
 			connectedAt.Remove(p);
 			detailedDone.Remove(p);
 			_lastLoss = DescribeLoss(info);
 		};
-		long num = MpClock.NowMs();
-		long num2 = 0L;
-		string text = "";
-		uint num3 = 0u;
+		long lastStatusMs = MpClock.NowMs();
+		long lastRelayCheckMs = 0L;
+		string lastRelayStatus = "";
+		uint conn = 0u;
 		if (steam == null)
 		{
 			_joinTarget = 0uL;
 		}
-		long num4 = MpClock.NowMs() + ((steam != null) ? 2000 : 500);
-		int num5 = 0;
-		int num6 = ((steam != null) ? 20 : 400);
-		int num7 = ((steam != null) ? 15000 : 3000);
-		long num8 = MpClock.NowMs();
-		Stopwatch stopwatch = new Stopwatch();
-		long val = 0L;
-		bool flag = false;
-		bool flag2 = false;
-		Stopwatch iteration = new Stopwatch();
+		long nextAttemptMs = MpClock.NowMs() + (steam != null ? 2000 : 500);
+		int attempts = 0;
+		int maxAttempts = steam != null ? 20 : 400;
+		int retryMs = steam != null ? 15000 : 3000;
+		long waitStartMs = MpClock.NowMs();
+		var tickWatch = new Stopwatch();
+		long slowestTickMs = 0L;
+		bool wasConnected = false;
+		bool lossHandled = false;
+		var iteration = new Stopwatch();
 		while (!_stop)
 		{
 			iteration.Restart();
-			long num9 = MpClock.NowMs();
-			if (steam != null && num9 - num2 >= 2000)
+			long now = MpClock.NowMs();
+			if (steam != null && now - lastRelayCheckMs >= 2000)
 			{
-				num2 = num9;
-				string text2 = SteamLink.RelayStatus(_o.Dedicated);
-				if (text2 != text)
+				lastRelayCheckMs = now;
+				string relay = SteamLink.RelayStatus(_o.Dedicated);
+				if (relay != lastRelayStatus)
 				{
-					_log.Info("net: " + text2);
-					text = text2;
+					_log.Info("net: " + relay);
+					lastRelayStatus = relay;
 				}
 			}
-			ClientSession clientSession = _client;
-			bool flag3 = transport.Peers.Count > 0;
-			bool flag4 = num3 != 0 && (steam?.HasConnection(num3) ?? tcp.HasConnection(num3));
-			string rejoinWhy = _rejoinWhy;
-			if (rejoinWhy != null && clientSession != null)
+			ClientSession? client = _client;
+			bool hasPeers = transport.Peers.Count > 0;
+			bool linkOpen = conn != 0 && (steam?.HasConnection(conn) ?? tcp.HasConnection(conn));
+			string? rejoinWhy = _rejoinWhy;
+			if (rejoinWhy != null && client != null)
 			{
-				if ((flag3 | flag4) && num9 - _rejoinSinceMs < 5000)
+				if ((hasPeers || linkOpen) && now - _rejoinSinceMs < RejoinCloseTimeoutMs)
 				{
 					if (!_rejoinClosing)
 					{
 						_rejoinClosing = true;
-						_rejoinSinceMs = num9;
+						_rejoinSinceMs = now;
 						foreach (PeerId peer in transport.Peers)
 						{
 							transport.Disconnect(peer, 1000, "joining again");
 						}
-						if (!flag3 & flag4)
+						if (!hasPeers && linkOpen)
 						{
 							if (steam != null)
 							{
-								steam.Close(num3, 1000, "joining again", linger: false);
+								steam.Close(conn, 1000, "joining again", linger: false);
 							}
 							else
 							{
-								tcp.Close(num3, 1000, "joining again", linger: false);
+								tcp.Close(conn, 1000, "joining again", linger: false);
 							}
 						}
 						_log.Info("net: fresh join requested (" + rejoinWhy + "); closing the previous connection first");
@@ -620,14 +623,14 @@ internal sealed class NetSession
 				}
 				else
 				{
-					clientSession.Detach();
-					clientSession = (_client = NewClientSession(transport));
-					ClientWorld.Current?.Bind(clientSession);
-					flag = (flag2 = false);
-					num3 = 0u;
-					num5 = 0;
-					num8 = num9;
-					num4 = num9 + 2000;
+					client.Detach();
+					client = _client = NewClientSession(transport);
+					ClientWorld.Current?.Bind(client);
+					wasConnected = lossHandled = false;
+					conn = 0u;
+					attempts = 0;
+					waitStartMs = now;
+					nextAttemptMs = now + RejoinFirstAttemptMs;
 					if (steam != null && !_joinTargetLocked)
 					{
 						SetJoinTarget(0uL, "", locked: false);
@@ -635,35 +638,27 @@ internal sealed class NetSession
 					}
 					_rejoinWhy = null;
 					_rejoinClosing = false;
-					IMpLog log = _log;
-					string text3 = $"net: FRESH JOIN #{ClientWorld.Progress.JoinNumber} ({rejoinWhy}): new world sync session; ";
-					string? text4;
-					if (steam == null)
-					{
-						text4 = $"connecting to TCP host {_o.JoinIp} in {2} s";
-					}
-					else
-					{
-						text4 = ((_joinTarget != 0L) ? $"connecting to host {_joinTarget} in {2} s" : "looking for a hosting friend");
-					}
-					log.Info(text3 + text4);
+					_log.Info($"net: FRESH JOIN #{ClientWorld.Progress.JoinNumber} ({rejoinWhy}): new world sync session; "
+						+ (steam == null
+							? $"connecting to TCP host {_o.JoinIp} in {RejoinFirstAttemptMs / 1000} s"
+							: _joinTarget != 0 ? $"connecting to host {_joinTarget} in {RejoinFirstAttemptMs / 1000} s" : "looking for a hosting friend"));
 				}
-				flag3 = transport.Peers.Count > 0;
-				flag4 = num3 != 0 && (steam?.HasConnection(num3) ?? tcp.HasConnection(num3));
+				hasPeers = transport.Peers.Count > 0;
+				linkOpen = conn != 0 && (steam?.HasConnection(conn) ?? tcp.HasConnection(conn));
 			}
-			if (flag3)
+			if (hasPeers)
 			{
-				flag = true;
+				wasConnected = true;
 			}
-			if ((_o.Join & flag) && !flag3 && !flag4 && clientSession != null && !flag2 && _rejoinWhy == null)
+			if (_o.Join && wasConnected && !hasPeers && !linkOpen && client != null && !lossHandled && _rejoinWhy == null)
 			{
-				flag2 = true;
-				num4 = long.MaxValue;
-				if (clientSession.LeftOnPurpose)
+				lossHandled = true;
+				nextAttemptMs = long.MaxValue;
+				if (client.LeftOnPurpose)
 				{
 					_log.Info("net: left the host (quit to the main menu); " + (_o.Rejoin ? "F3 at the main menu (or 'Join Game' in Steam) joins again" : "restart the game to join again"));
 				}
-				else if (clientSession.CurrentPhase == ClientSession.Phase.Rejected)
+				else if (client.CurrentPhase == ClientSession.Phase.Rejected)
 				{
 					_log.Info("net: the host refused this join and closed the connection; " + (_o.Rejoin ? "F3 at the main menu tries again" : "restart the game to try again"));
 				}
@@ -675,93 +670,93 @@ internal sealed class NetSession
 				{
 					_log.Warn("net: lost the host after joining (" + _lastLoss + "); not reconnecting automatically (-y51online:rejoin:off). Quit to the main menu and restart the game to rejoin.");
 				}
-				if (!clientSession.LeftOnPurpose)
+				if (!client.LeftOnPurpose)
 				{
-					ClientWorld.ConnectionLost(clientSession, _lastLoss);
+					ClientWorld.ConnectionLost(client, _lastLoss);
 				}
 			}
 			if (steam != null && !_o.UseSteamIp)
 			{
-				ulong joinTarget = _joinTarget;
-				SteamJoinTick(num9, flag3 | flag4 | flag, host);
-				if (_joinTarget != joinTarget && !flag3 && !flag4)
+				ulong previousTarget = _joinTarget;
+				SteamJoinTick(now, hasPeers || linkOpen || wasConnected, host);
+				if (_joinTarget != previousTarget && !hasPeers && !linkOpen)
 				{
-					num5 = 0;
-					num4 = num9;
+					attempts = 0;
+					nextAttemptMs = now;
 				}
 			}
 			_names?.Tick();
-			if (_o.Join && !flag3 && !flag4 && num9 >= num4 && (clientSession == null || clientSession.CurrentPhase != ClientSession.Phase.Rejected) && (steam == null || _joinTarget != 0L || _o.UseSteamIp))
+			if (_o.Join && !hasPeers && !linkOpen && now >= nextAttemptMs && (client == null || client.CurrentPhase != ClientSession.Phase.Rejected) && (steam == null || _joinTarget != 0 || _o.UseSteamIp))
 			{
-				bool flag5 = steam == null || (_o.UseSteamIp ? SteamLink.NetworkConfigReady() : SteamLink.RelayReady());
-				if (flag5 || num9 - num8 > 20000)
+				bool networkReady = steam == null || (_o.UseSteamIp ? SteamLink.NetworkConfigReady() : SteamLink.RelayReady());
+				if (networkReady || now - waitStartMs > 20000)
 				{
-					if (num5 >= num6)
+					if (attempts >= maxAttempts)
 					{
-						if (num5 == num6)
+						if (attempts == maxAttempts)
 						{
-							_log.Error($"net: giving up after {num6} connection attempts; " + (_o.Rejoin ? "F3 at the main menu tries again" : "restart the game to retry"));
-							ClientWorld.Progress.SetAttempt(num6, num6);
-							ClientWorld.Progress.Set(JoinStage.GaveUp, num9);
+							_log.Error($"net: giving up after {maxAttempts} connection attempts; " + (_o.Rejoin ? "F3 at the main menu tries again" : "restart the game to retry"));
+							ClientWorld.Progress.SetAttempt(maxAttempts, maxAttempts);
+							ClientWorld.Progress.Set(JoinStage.GaveUp, now);
 						}
-						num5++;
-						num4 = long.MaxValue;
+						attempts++;
+						nextAttemptMs = long.MaxValue;
 					}
 					else
 					{
-						num5++;
-						ClientWorld.Progress.SetAttempt(num5, num6);
+						attempts++;
+						ClientWorld.Progress.SetAttempt(attempts, maxAttempts);
 						JoinStage stage = ClientWorld.Progress.Stage;
-						if ((stage <= JoinStage.LookingForHost || stage == JoinStage.GaveUp) ? true : false)
+						if (stage <= JoinStage.LookingForHost || stage == JoinStage.GaveUp)
 						{
-							ClientWorld.Progress.Set(JoinStage.Connecting, num9, flag5 ? null : (_o.UseSteamIp ? "Steam authentication configuration loading" : "relay starting"));
+							ClientWorld.Progress.Set(JoinStage.Connecting, now, networkReady ? null : _o.UseSteamIp ? "Steam authentication configuration loading" : "relay starting");
 						}
 						if (steam != null)
 						{
-							ulong num10 = JoinTargetRule.SteamConnectId(_joinTarget, _o);
-							_log.Info($"net: connect attempt {num5} to host {num10}{(flag5 ? "" : " (relay network not ready yet)")}");
-							num3 = _o.UseSteamIp ? steam.Connect(_o.JoinIp) : steam.Connect(num10);
+							ulong hostId = JoinTargetRule.SteamConnectId(_joinTarget, _o);
+							_log.Info($"net: connect attempt {attempts} to host {hostId}{(networkReady ? "" : " (relay network not ready yet)")}");
+							conn = _o.UseSteamIp ? steam.Connect(_o.JoinIp) : steam.Connect(hostId);
 						}
 						else
 						{
-							if (num5 == 1 || num5 % 10 == 0)
+							if (attempts == 1 || attempts % 10 == 0)
 							{
-								_log.Info($"net: connect attempt {num5} to TCP host {_o.JoinIp}");
+								_log.Info($"net: connect attempt {attempts} to TCP host {_o.JoinIp}");
 							}
-							num3 = tcp.Connect(_o.JoinIp);
+							conn = tcp.Connect(_o.JoinIp);
 						}
-						num4 = num9 + num7;
+						nextAttemptMs = now + retryMs;
 					}
 				}
 			}
 			long beforePoll = iteration.ElapsedMilliseconds;
-			stopwatch.Restart();
+			tickWatch.Restart();
 			transport.Poll();
 			if (_o.Dedicated) GameServer.RunCallbacks();
-			UpdateDirectory(num9);
-			long elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+			UpdateDirectory(now);
+			long pollMs = tickWatch.ElapsedMilliseconds;
 			host?.Tick();
 			_client?.Tick();
-			ClientWorld.Current?.NetTick(num9);
+			ClientWorld.Current?.NetTick(now);
 			spike?.Tick();
-			long elapsedMilliseconds2 = stopwatch.ElapsedMilliseconds;
-			if (elapsedMilliseconds2 > 250)
+			long tickMs = tickWatch.ElapsedMilliseconds;
+			if (tickMs > 250)
 			{
-				val = Math.Max(val, elapsedMilliseconds2);
-				_log.Warn($"net: loop iteration took {elapsedMilliseconds2} ms (transport.Poll {elapsedMilliseconds} ms incl. the link's Pump); timestamps taken before it would be stale");
+				slowestTickMs = Math.Max(slowestTickMs, tickMs);
+				_log.Warn($"net: loop iteration took {tickMs} ms (transport.Poll {pollMs} ms incl. the link's Pump); timestamps taken before it would be stale");
 			}
-			foreach (KeyValuePair<PeerId, long> item in connectedAt)
+			foreach (var entry in connectedAt)
 			{
-				if (steam != null && !detailedDone.Contains(item.Key) && num9 - item.Value >= 3000)
+				if (steam != null && !detailedDone.Contains(entry.Key) && now - entry.Value >= 3000)
 				{
-					detailedDone.Add(item.Key);
-					LogDetailed(steam, item.Key);
+					detailedDone.Add(entry.Key);
+					LogDetailed(steam, entry.Key);
 				}
 			}
-			if (num9 - num >= 10000)
+			if (now - lastStatusMs >= 10000)
 			{
-				num = num9;
-				LogStatus(steam, tcp, transport, num9);
+				lastStatusMs = now;
+				LogStatus(steam, tcp, transport, now);
 				if (HostWorld.Current != null && _o.Host)
 				{
 					_log.Info($"net status: host world sync {HostWorld.Current.Stats()}; world ready={HostWorld.Current.WorldReady}");
@@ -773,7 +768,7 @@ internal sealed class NetSession
 			}
 			if (iteration.ElapsedMilliseconds > 150)
 			{
-				_log.Warn($"net: whole loop iteration took {iteration.ElapsedMilliseconds} ms (before the poll {beforePoll} ms, poll and ticks {elapsedMilliseconds2} ms, status logging and the rest {iteration.ElapsedMilliseconds - beforePoll - elapsedMilliseconds2} ms)");
+				_log.Warn($"net: whole loop iteration took {iteration.ElapsedMilliseconds} ms (before the poll {beforePoll} ms, poll and ticks {tickMs} ms, status logging and the rest {iteration.ElapsedMilliseconds - beforePoll - tickMs} ms)");
 			}
 			Thread.Sleep(1);
 		}
@@ -781,7 +776,7 @@ internal sealed class NetSession
 
 	internal static string DescribeLoss(DisconnectInfo info)
 	{
-		string text = (string.IsNullOrWhiteSpace(info.Reason) ? $"code {info.Code}" : info.Reason.Trim());
+		string reason = string.IsNullOrWhiteSpace(info.Reason) ? $"code {info.Code}" : info.Reason.Trim();
 		switch (info.Code)
 		{
 		case 1003:
@@ -789,76 +784,74 @@ internal sealed class NetSession
 		case 1004:
 			if (info.ByPeer)
 			{
-				return "the host closed the game (" + text + ")";
+				return "the host closed the game (" + reason + ")";
 			}
 			break;
 		case 1000:
 			if (info.ByPeer)
 			{
-				return "the host ended the session: " + text;
+				return "the host ended the session: " + reason;
 			}
 			break;
 		}
-		return info.ByPeer ? ("closed by the host: " + text) : text;
+		return info.ByPeer ? "closed by the host: " + reason : reason;
 	}
 
 	private void LogStatus(SteamLink? steam, TcpLink? tcp, MpTransport transport, long now)
 	{
-		bool flag = false;
-		foreach (var item8 in (steam != null) ? Steam(steam) : Tcp(tcp))
+		bool any = false;
+		foreach (var (conn, remote, connected, quickStatus) in steam != null ? Steam(steam) : Tcp(tcp))
 		{
-			uint item = item8.Item1;
-			ulong item2 = item8.Item2;
-			bool item3 = item8.Item3;
-			string item4 = item8.Item4;
-			flag = true;
-			string value = "";
-			if (transport.TryGetStats(new PeerId(item2), out PeerStats stats))
+			any = true;
+			string app = "";
+			if (transport.TryGetStats(new PeerId(remote), out PeerStats stats))
 			{
 				ChannelStats[] channels = stats.Channels;
-				value = $" | app rtt={stats.LastRttMs:0} ms (avg {stats.AvgRttMs:0.0}, max {stats.MaxRttMs:0}, pongs {stats.PongsReceived}/{stats.PingsSent}) ctl {channels[0].FramesSent}/{channels[0].FramesReceived} fr, bulk {channels[1].BytesSent / 1024}/{channels[1].BytesReceived / 1024} KiB tx/rx, state {channels[2].FramesSent}/{channels[2].FramesReceived} fr {channels[2].BytesSent / 1024}/{channels[2].BytesReceived / 1024} KiB, queued {MpLogExtensions.Bytes(stats.BulkQueuedBytes)}, reasm {stats.ReassemblyInProgress}, seqGaps {stats.SeqGaps} protoErr {stats.ProtocolErrors} busy {stats.SendBusy}";
+				app = $" | app rtt={stats.LastRttMs:0} ms (avg {stats.AvgRttMs:0.0}, max {stats.MaxRttMs:0}, pongs {stats.PongsReceived}/{stats.PingsSent}) ctl {channels[0].FramesSent}/{channels[0].FramesReceived} fr, bulk {channels[1].BytesSent / 1024}/{channels[1].BytesReceived / 1024} KiB tx/rx, state {channels[2].FramesSent}/{channels[2].FramesReceived} fr {channels[2].BytesSent / 1024}/{channels[2].BytesReceived / 1024} KiB, queued {MpLogExtensions.Bytes(stats.BulkQueuedBytes)}, reasm {stats.ReassemblyInProgress}, seqGaps {stats.SeqGaps} protoErr {stats.ProtocolErrors} busy {stats.SendBusy}";
 			}
-			_log.Info($"net status {item2} conn {item} {(item3 ? "connected" : "pending")}: {item4}{value}");
+			_log.Info($"net status {remote} conn {conn} {(connected ? "connected" : "pending")}: {quickStatus}{app}");
 		}
-		if (((steam != null) & flag) && now - _lastDetailedMs >= 60000)
+		if (steam != null && any && now - _lastDetailedMs >= 60000)
 		{
 			_lastDetailedMs = now;
-			foreach (var item9 in steam.Connections())
+			foreach (var c in steam.Connections())
 			{
-				ulong item5 = item9.Remote;
-				if (item9.Connected)
+				ulong remote = c.Remote;
+				if (c.Connected)
 				{
-					LogDetailed(steam, new PeerId(item5));
+					LogDetailed(steam, new PeerId(remote));
 				}
 			}
 		}
-		if (!flag)
+		if (!any)
 		{
 			_log.Info(_o.Host ? "net status: no clients connected (waiting)" : "net status: not connected");
 		}
+
 		static IEnumerable<(uint, ulong, bool, string)> Steam(SteamLink l)
 		{
-			foreach (var (num, item6, item7) in l.Connections())
+			foreach (var (conn, remote, connected) in l.Connections())
 			{
-				yield return (num, item6, item7, l.QuickStatus(num));
+				yield return (conn, remote, connected, l.QuickStatus(conn));
 			}
 		}
+
 		static IEnumerable<(uint, ulong, bool, string)> Tcp(TcpLink l)
 		{
-			foreach (var (num, _, item6) in l.Connections())
+			foreach (var (conn, _, connected) in l.Connections())
 			{
-				yield return (num, TcpLink.SyntheticId(num), item6, l.QuickStatus(num));
+				yield return (conn, TcpLink.SyntheticId(conn), connected, l.QuickStatus(conn));
 			}
 		}
 	}
 
 	private void LogDetailed(SteamLink link, PeerId peer)
 	{
-		foreach (var (conn, num, flag) in link.Connections())
+		foreach (var (conn, remote, connected) in link.Connections())
 		{
-			if ((num == peer.Value) & flag)
+			if (remote == peer.Value && connected)
 			{
-				_log.Info($"net detailed status {num}:\n{link.DetailedStatus(conn).TrimEnd()}");
+				_log.Info($"net detailed status {remote}:\n{link.DetailedStatus(conn).TrimEnd()}");
 			}
 		}
 	}
@@ -883,18 +876,18 @@ internal sealed class NetSession
 				SetJoinTarget(_o.JoinSteamId, "command line (-y51online:join:<id>, also what Steam's 'Join Game' passes)", locked: true);
 				return;
 			}
-			string text = _friends.LaunchCommandLine();
-			if (text.Length > 0)
+			string launch = _friends.LaunchCommandLine();
+			if (launch.Length > 0)
 			{
-				_log.Info("steam friends: Steam launch command line: '" + text + "'");
+				_log.Info("steam friends: Steam launch command line: '" + launch + "'");
 			}
-			if (ConnectString.TryParse(text, out var hostSteamId, out var _))
+			if (ConnectString.TryParse(launch, out var hostSteamId, out _))
 			{
 				SetJoinTarget(hostSteamId, "Steam launch command line", locked: true);
 			}
 			else if (_o.JoinFriends)
 			{
-				_log.Info("steam friends: looking for a Steam friend who hosts SE2 multiplayer" + ((_o.JoinFriendFilter != null) ? (" (name contains '" + _o.JoinFriendFilter + "')") : "") + "; a 'Join Game' click in Steam works too");
+				_log.Info("steam friends: looking for a Steam friend who hosts SE2 multiplayer" + (_o.JoinFriendFilter != null ? " (name contains '" + _o.JoinFriendFilter + "')" : "") + "; a 'Join Game' click in Steam works too");
 				ClientWorld.Progress.Set(JoinStage.LookingForHost, MpClock.NowMs(), "Looking for a friend who is hosting...");
 			}
 			else if (_o.JoinWait)
@@ -904,7 +897,7 @@ internal sealed class NetSession
 		}
 		catch (Exception ex)
 		{
-			_log.Error($"steam friends: setting up rich presence / friend join failed ({ex.GetType().Name}: {ex.Message}); " + ((_o.JoinSteamId != 0L) ? "joining the given SteamID64 still works" : "use -y51online:join:<host SteamID64> instead"));
+			_log.Error($"steam friends: setting up rich presence / friend join failed ({ex.GetType().Name}: {ex.Message}); " + (_o.JoinSteamId != 0L ? "joining the given SteamID64 still works" : "use -y51online:join:<host SteamID64> instead"));
 			_friends = null;
 			if (_o.JoinSteamId != 0L)
 			{
@@ -942,8 +935,8 @@ internal sealed class NetSession
 			{
 				return null;
 			}
-			string friendPersonaName = SteamFriends.GetFriendPersonaName(new CSteamID(id));
-			return (string.IsNullOrWhiteSpace(friendPersonaName) || friendPersonaName == "[unknown]") ? null : friendPersonaName;
+			string name = SteamFriends.GetFriendPersonaName(new CSteamID(id));
+			return string.IsNullOrWhiteSpace(name) || name == "[unknown]" ? null : name;
 		}
 		catch (Exception)
 		{
@@ -957,10 +950,10 @@ internal sealed class NetSession
 		{
 			if (_advertiser != null && now >= _nextPresenceMs)
 			{
-				_nextPresenceMs = now + 2000;
-				HostWorld current = HostWorld.Current;
-				bool worldLoaded = current?.WorldLoaded ?? true;
-				_advertiser.Update(worldLoaded, current?.WorldName ?? "?");
+				_nextPresenceMs = now + PresenceUpdateMs;
+				HostWorld world = HostWorld.Current;
+				bool worldLoaded = world?.WorldLoaded ?? true;
+				_advertiser.Update(worldLoaded, world?.WorldName ?? "?");
 			}
 			FriendFinder friends = _friends;
 			if (friends == null)
@@ -982,11 +975,11 @@ internal sealed class NetSession
 				}
 				if (joined)
 				{
-					ClientWorld current2 = ClientWorld.Current;
-					if (current2 != null && current2.IdleAfterJoin)
+					ClientWorld client = ClientWorld.Current;
+					if (client != null && client.IdleAfterJoin)
 					{
 						SetJoinTarget(hostSteamId, "Steam 'Join Game' / invite after the last join ended (connect '" + connect + "')", locked: true);
-						current2.AskRejoin($"Steam 'Join Game' for host {hostSteamId}");
+						client.AskRejoin($"Steam 'Join Game' for host {hostSteamId}");
 						continue;
 					}
 				}
@@ -1012,36 +1005,37 @@ internal sealed class NetSession
 				}
 				return;
 			}
-			bool flag = friends.TakePresenceChanged();
-			if (now < _nextFriendScanMs && (!flag || now < _nextFriendScanMs - 10000 + 1000))
+			// A presence change rescans early, but at most once a second.
+			bool presenceChanged = friends.TakePresenceChanged();
+			if (now < _nextFriendScanMs && (!presenceChanged || now < _nextFriendScanMs - FriendScanMs + 1000))
 			{
 				return;
 			}
-			_nextFriendScanMs = now + 10000;
-			List<FriendHost> friends2 = friends.Scan(now, out var friendsTotal, out var inGame);
-			FriendPicker.Choice choice = FriendPicker.Pick(friends2, _o.JoinFriendFilter, SyncProtocol.Version);
-			string text = ((choice.Hosting.Count == 0) ? $"no friend is hosting SE2 multiplayer right now ({friendsTotal} friends, {inGame} in Space Engineers 2{InGameNames(friends2)}); retrying every {10} s" : $"found {choice.Hosting.Count} friend(s) hosting: {string.Join("; ", choice.Hosting.Select((FriendHost h) => h.Describe()))}");
-			if (text != _lastFriendsLine || (choice.Friend == null && now - _lastNoHostLogMs >= 60000))
+			_nextFriendScanMs = now + FriendScanMs;
+			List<FriendHost> found = friends.Scan(now, out var friendsTotal, out var inGame);
+			FriendPicker.Choice choice = FriendPicker.Pick(found, _o.JoinFriendFilter, SyncProtocol.Version);
+			string line = choice.Hosting.Count == 0
+				? $"no friend is hosting SE2 multiplayer right now ({friendsTotal} friends, {inGame} in Space Engineers 2{InGameNames(found)}); retrying every {FriendScanMs / 1000} s"
+				: $"found {choice.Hosting.Count} friend(s) hosting: {string.Join("; ", choice.Hosting.Select(h => h.Describe()))}";
+			if (line != _lastFriendsLine || (choice.Friend == null && now - _lastNoHostLogMs >= 60000))
 			{
-				_lastFriendsLine = text;
+				_lastFriendsLine = line;
 				_lastNoHostLogMs = now;
-				_log.Info("steam friends: " + text);
+				_log.Info("steam friends: " + line);
 			}
-			bool flag2 = choice.Friend == null;
-			if (flag2)
+			bool showNoHost = choice.Friend == null;
+			if (showNoHost)
 			{
-				JoinStage stage = ClientWorld.Progress.Stage;
-				bool flag3 = stage - 1 <= JoinStage.LookingForHost;
-				flag2 = flag3;
+				showNoHost = ClientWorld.Progress.Stage is JoinStage.WaitingForSteam or JoinStage.LookingForHost or JoinStage.Connecting;
 			}
-			if (flag2)
+			if (showNoHost)
 			{
-				string detail = ScreenTexts.NoFriendHosting(_o.JoinFriendFilter, 10, (choice.Hosting.Count == 0) ? null : choice.Reason);
+				string detail = ScreenTexts.NoFriendHosting(_o.JoinFriendFilter, FriendScanMs / 1000, choice.Hosting.Count == 0 ? null : choice.Reason);
 				ClientWorld.Progress.Set(JoinStage.LookingForHost, now, detail);
 			}
 			if (_joinTarget != 0L)
 			{
-				if (choice.Hosting.Any((FriendHost h) => h.SteamId == _joinTarget))
+				if (choice.Hosting.Any(h => h.SteamId == _joinTarget))
 				{
 					return;
 				}
@@ -1060,7 +1054,7 @@ internal sealed class NetSession
 			}
 			else if (choice.Hosting.Count > 0)
 			{
-				_log.Info($"steam friends: {choice.Reason}; retrying every {10} s");
+				_log.Info($"steam friends: {choice.Reason}; retrying every {FriendScanMs / 1000} s");
 			}
 		}
 		catch (Exception ex)
@@ -1068,12 +1062,13 @@ internal sealed class NetSession
 			_log.Error($"steam friends: friend join failed and is switched off ({ex.GetType().Name}: {ex.Message}); use -y51online:join:<host SteamID64>");
 			_friends = null;
 		}
+
 		static string InGameNames(List<FriendHost> list)
 		{
 			if (list.Count != 0)
 			{
-				return ": " + string.Join(", ", from x in list.Take(8)
-					select (x.RawPresence != null) ? (x.Name + " [unreadable presence '" + x.RawPresence + "']") : x.Name);
+				return ": " + string.Join(", ", list.Take(8)
+					.Select(x => x.RawPresence != null ? x.Name + " [unreadable presence '" + x.RawPresence + "']" : x.Name));
 			}
 			return "";
 		}
