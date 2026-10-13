@@ -41,21 +41,21 @@ internal sealed class HostObservables
 
 	private readonly IMpLog _log;
 
-	private readonly object _sync = new object();
+	private readonly object _sync = new();
 
-	private readonly ConcurrentDictionary<object, Entry> _byReplica = new ConcurrentDictionary<object, Entry>(ReferenceEqualityComparer.Instance);
+	private readonly ConcurrentDictionary<object, Entry> _byReplica = new(ReferenceEqualityComparer.Instance);
 
-	private readonly ConcurrentDictionary<uint, Entry> _byOid = new ConcurrentDictionary<uint, Entry>();
+	private readonly ConcurrentDictionary<uint, Entry> _byOid = new();
 
 	private readonly ObservableRelevance<PeerId> _relevance;
 
-	private readonly ConcurrentQueue<(PeerId Peer, uint Oid)> _roots = new ConcurrentQueue<(PeerId, uint)>();
+	private readonly ConcurrentQueue<(PeerId Peer, uint Oid)> _roots = new();
 
-	private readonly ConcurrentQueue<(PeerId Peer, ushort ClientId, IReadOnlyList<MemberEdit> Edits)> _edits = new ConcurrentQueue<(PeerId, ushort, IReadOnlyList<MemberEdit>)>();
+	private readonly ConcurrentQueue<(PeerId Peer, ushort ClientId, IReadOnlyList<MemberEdit> Edits)> _edits = new();
 
-	private readonly ConcurrentQueue<PeerId> _forget = new ConcurrentQueue<PeerId>();
+	private readonly ConcurrentQueue<PeerId> _forget = new();
 
-	private readonly ConcurrentDictionary<string, long> _counts = new ConcurrentDictionary<string, long>();
+	private readonly ConcurrentDictionary<string, long> _counts = new();
 
 	private readonly ObjectSpace _encode;
 
@@ -90,92 +90,89 @@ internal sealed class HostObservables
 		_encode = new ObjectSpace
 		{
 			Name = "host-observables",
-			IdOf = (Entity _) => (uint?)null,
-			Resolve = (uint _, bool _) => (Entity?)null,
-			ObservableId = (object o) => GetOrAdd(o, isList: false).Oid,
-			ListId = (IList l) => GetOrAdd(l, isList: true).Oid,
+			IdOf = _ => null,
+			Resolve = (_, _) => null,
+			ObservableId = o => GetOrAdd(o, isList: false).Oid,
+			ListId = l => GetOrAdd(l, isList: true).Oid,
 			OpaqueHandles = true
 		};
 	}
 
-	private void Note(string what)
-	{
-		_counts.AddOrUpdate(what, 1L, (string _, long c) => c + 1);
-	}
+	private void Note(string what) => _counts.AddOrUpdate(what, 1L, (string _, long c) => c + 1);
 
 	private Entry GetOrAdd(object replica, bool isList)
 	{
-		if (_byReplica.TryGetValue(replica, out Entry value))
+		if (_byReplica.TryGetValue(replica, out var existing))
 		{
-			return value;
+			return existing;
 		}
-		Entry entry = new Entry
+		var entry = new Entry
 		{
 			Oid = (uint)Interlocked.Increment(ref _nextOid),
 			Replica = replica,
 			IsList = isList,
-			Info = (isList ? null : (replica as IAccessible)?.GetTypeInfo())
+			Info = isList ? null : (replica as IAccessible)?.GetTypeInfo()
 		};
-        if (HeadlessReplication.Active && replica is ObservableObject model)
-        {
-            var type = ObservableObjectReplicationServerSessionComponent.ObservedHierarchy.TryGetObservableObjectReplicatedType(model);
-            if (type == null || !MetadataIndexerBase<AccessibleTypeIndexer>.Instance.TryGetAccessibleTypeInfo(type, out var info))
-                throw new InvalidOperationException("No native replicated model schema for " + replica.GetType().FullName);
-            entry.Info = info;
-        }
-		value = _byReplica.GetOrAdd(replica, entry);
-		if (value == entry)
+		if (HeadlessReplication.Active && replica is ObservableObject model)
 		{
-			_byOid[value.Oid] = value;
+			var type = ObservableObjectReplicationServerSessionComponent.ObservedHierarchy.TryGetObservableObjectReplicatedType(model);
+			if (type == null || !MetadataIndexerBase<AccessibleTypeIndexer>.Instance.TryGetAccessibleTypeInfo(type, out var info))
+				throw new InvalidOperationException("No native replicated model schema for " + replica.GetType().FullName);
+			entry.Info = info;
+		}
+		existing = _byReplica.GetOrAdd(replica, entry);
+		if (existing == entry)
+		{
+			_byOid[existing.Oid] = existing;
 			Interlocked.Increment(ref Created);
 		}
-		return value;
+		return existing;
 	}
 
 	public uint? OidOnServer(object model, ReplayContext server)
 	{
 		if (HeadlessReplication.Active && model is ObservableObject) return GetOrAdd(model, isList: false).Oid;
-		if (_byReplica.TryGetValue(model, out Entry value))
+		if (_byReplica.TryGetValue(model, out var known))
 		{
-			return value.Oid;
+			return known.Oid;
 		}
-		object obj = null;
+		object? remote = null;
 		if (server.HasPairingRemote(model))
 		{
-			obj = model;
+			remote = model;
 		}
 		else if (server.HasPairingLocal(model))
 		{
-			obj = server.TranslateLocalToRemote(model);
+			remote = server.TranslateLocalToRemote(model);
 		}
-		if (!(obj is ObservableObject))
+		if (remote is not ObservableObject)
 		{
 			return null;
 		}
-		return GetOrAdd(obj, isList: false).Oid;
+		return GetOrAdd(remote, isList: false).Oid;
 	}
 
 	public object? ResolveOnServer(uint oid, bool inCollection, ReplayContext server)
 	{
-		if (!_byOid.TryGetValue(oid, out Entry value))
+		if (!_byOid.TryGetValue(oid, out var entry))
 		{
 			return null;
 		}
-		if (value.IsList)
+		if (entry.IsList)
 		{
 			if (!inCollection)
 			{
 				return null;
 			}
-			return value.Replica;
+			return entry.Replica;
 		}
 		if (inCollection)
 		{
-			return value.Replica;
+			return entry.Replica;
 		}
-		if (HeadlessReplication.Active) return value.Replica;
+		if (HeadlessReplication.Active) return entry.Replica;
 		bool skip = false;
-		return server.TranslateObject(value.Replica, ReplicationFailureStrategy.NullOnAnyFail, ref skip);
+		return server.TranslateObject(entry.Replica, ReplicationFailureStrategy.NullOnAnyFail, ref skip);
 	}
 
 	public void AddRoots(PeerId peer, IReadOnlyList<uint> oids)
@@ -186,15 +183,9 @@ internal sealed class HostObservables
 		}
 	}
 
-	public void QueueEdits(PeerId peer, ushort clientId, IReadOnlyList<MemberEdit> edits)
-	{
-		_edits.Enqueue((peer, clientId, edits));
-	}
+	public void QueueEdits(PeerId peer, ushort clientId, IReadOnlyList<MemberEdit> edits) => _edits.Enqueue((peer, clientId, edits));
 
-	public void Forget(PeerId peer)
-	{
-		_forget.Enqueue(peer);
-	}
+	public void Forget(PeerId peer) => _forget.Enqueue(peer);
 
 	public void OnRelease(object? serverKey, bool list, ReplayContext? hostClient)
 	{
@@ -205,20 +196,22 @@ internal sealed class HostObservables
 		try
 		{
 			bool skip = false;
-			object obj = HeadlessReplication.Active ? (list ? serverKey.GetType().GetProperty("Source")?.GetValue(serverKey) : serverKey) : hostClient.TranslateObject(serverKey, ReplicationFailureStrategy.NullOnAnyFail, ref skip);
-			if (list && obj is ObservableObjectReplicationSessionComponent.ClientObservedCollection clientObservedCollection)
+			object? replica = HeadlessReplication.Active
+				? (list ? serverKey.GetType().GetProperty("Source")?.GetValue(serverKey) : serverKey)
+				: hostClient.TranslateObject(serverKey, ReplicationFailureStrategy.NullOnAnyFail, ref skip);
+			if (list && replica is ObservableObjectReplicationSessionComponent.ClientObservedCollection observed)
 			{
-				obj = clientObservedCollection.Source;
+				replica = observed.Source;
 			}
-			if (obj == null || !_byReplica.TryRemove(obj, out Entry value))
+			if (replica == null || !_byReplica.TryRemove(replica, out var entry))
 			{
 				return;
 			}
 			lock (_sync)
 			{
-				Unsubscribe(value);
-				_byOid.TryRemove(value.Oid, out Entry _);
-				_relevance.OnRelease(value.Oid);
+				Unsubscribe(entry);
+				_byOid.TryRemove(entry.Oid, out _);
+				_relevance.OnRelease(entry.Oid);
 				Released++;
 			}
 		}
@@ -237,34 +230,28 @@ internal sealed class HostObservables
 		e.Subscribed = true;
 		if (e.IsList)
 		{
-			if (e.Replica is INotifyCollectionChanged notifyCollectionChanged)
+			if (e.Replica is INotifyCollectionChanged collection)
 			{
-				e.OnList = (object? _, NotifyCollectionChangedEventArgs a) =>
-				{
-					OnListChanged(e, a);
-				};
-				notifyCollectionChanged.CollectionChanged += e.OnList;
+				e.OnList = (object? _, NotifyCollectionChangedEventArgs a) => OnListChanged(e, a);
+				collection.CollectionChanged += e.OnList;
 			}
 		}
-		else if (e.Replica is INotifyPropertyChanged notifyPropertyChanged)
+		else if (e.Replica is INotifyPropertyChanged model)
 		{
-			e.OnProperty = (object? _, PropertyChangedEventArgs a) =>
-			{
-				OnPropertyChanged(e, a);
-			};
-			notifyPropertyChanged.PropertyChanged += e.OnProperty;
+			e.OnProperty = (object? _, PropertyChangedEventArgs a) => OnPropertyChanged(e, a);
+			model.PropertyChanged += e.OnProperty;
 		}
 	}
 
 	private static void Unsubscribe(Entry e)
 	{
-		if (e.OnList != null && e.Replica is INotifyCollectionChanged notifyCollectionChanged)
+		if (e.OnList != null && e.Replica is INotifyCollectionChanged collection)
 		{
-			notifyCollectionChanged.CollectionChanged -= e.OnList;
+			collection.CollectionChanged -= e.OnList;
 		}
-		if (e.OnProperty != null && e.Replica is INotifyPropertyChanged notifyPropertyChanged)
+		if (e.OnProperty != null && e.Replica is INotifyPropertyChanged model)
 		{
-			notifyPropertyChanged.PropertyChanged -= e.OnProperty;
+			model.PropertyChanged -= e.OnProperty;
 		}
 		e.OnList = null;
 		e.OnProperty = null;
@@ -272,7 +259,7 @@ internal sealed class HostObservables
 
 	private void OnPropertyChanged(Entry e, PropertyChangedEventArgs a)
 	{
-		string propertyName = a.PropertyName;
+		string? propertyName = a.PropertyName;
 		if (string.IsNullOrEmpty(propertyName) || e.Info == null)
 		{
 			return;
@@ -283,7 +270,7 @@ internal sealed class HostObservables
 			{
 				if (_relevance.AnyHas(e.Oid) && ObservableRules.TryReplicating(e.Info, propertyName, out var member))
 				{
-					WireValue value = EncodeValue(member.Get(e.Replica), member.Type, e.Info.Type.Name + "." + propertyName);
+					var value = EncodeValue(member.Get(e.Replica), member.Type, e.Info.Type.Name + "." + propertyName);
 					_relevance.OnChange(ObservableOp.Member(e.Oid, propertyName, value), _origin.GetValueOrDefault(), _origin.HasValue);
 					ChangesSent++;
 				}
@@ -310,36 +297,36 @@ internal sealed class HostObservables
 				}
 				list = (IList)e.Replica;
 				et = ObservableRules.ElementType(list.GetType());
-				List<ObservableOp> list2 = new List<ObservableOp>(2);
+				var ops = new List<ObservableOp>(2);
 				switch (a.Action)
 				{
 				case NotifyCollectionChangedAction.Add:
-					list2.Add((a.NewStartingIndex < 0) ? Reset() : ObservableOp.ListChange(e.Oid, 0, a.NewStartingIndex, 0, Items(a.NewItems)));
+					ops.Add(a.NewStartingIndex < 0 ? Reset() : ObservableOp.ListChange(e.Oid, 0, a.NewStartingIndex, 0, Items(a.NewItems)));
 					break;
 				case NotifyCollectionChangedAction.Remove:
-					list2.Add((a.OldStartingIndex < 0) ? Reset() : ObservableOp.ListChange(e.Oid, 1, a.OldStartingIndex, a.OldItems?.Count ?? 1, null));
+					ops.Add(a.OldStartingIndex < 0 ? Reset() : ObservableOp.ListChange(e.Oid, 1, a.OldStartingIndex, a.OldItems?.Count ?? 1, null));
 					break;
 				case NotifyCollectionChangedAction.Replace:
-					list2.Add((a.NewStartingIndex < 0) ? Reset() : ObservableOp.ListChange(e.Oid, 2, a.NewStartingIndex, 0, Items(a.NewItems)));
+					ops.Add(a.NewStartingIndex < 0 ? Reset() : ObservableOp.ListChange(e.Oid, 2, a.NewStartingIndex, 0, Items(a.NewItems)));
 					break;
 				case NotifyCollectionChangedAction.Move:
 					if (a.OldStartingIndex < 0 || a.NewStartingIndex < 0)
 					{
-						list2.Add(Reset());
+						ops.Add(Reset());
 						break;
 					}
-					list2.Add(ObservableOp.ListChange(e.Oid, 1, a.OldStartingIndex, a.OldItems?.Count ?? 1, null));
-					list2.Add(ObservableOp.ListChange(e.Oid, 0, a.NewStartingIndex, 0, Items(a.NewItems)));
+					ops.Add(ObservableOp.ListChange(e.Oid, 1, a.OldStartingIndex, a.OldItems?.Count ?? 1, null));
+					ops.Add(ObservableOp.ListChange(e.Oid, 0, a.NewStartingIndex, 0, Items(a.NewItems)));
 					break;
 				default:
-					list2.Add(Reset());
+					ops.Add(Reset());
 					break;
 				}
-				foreach (ObservableOp item in list2)
+				foreach (var op in ops)
 				{
-					_relevance.OnChange(item);
+					_relevance.OnChange(op);
 				}
-				ChangesSent += list2.Count;
+				ChangesSent += ops.Count;
 			}
 		}
 		catch (Exception ex)
@@ -347,24 +334,23 @@ internal sealed class HostObservables
 			Note("list change failed: " + ex.GetType().Name);
 			_log.WarnOnce("obs-list-" + e.Replica.GetType().Name, $"host observables: forwarding a change of a {e.Replica.GetType().Name} failed ({ex.GetType().Name}: {ex.Message})");
 		}
+
 		List<WireValue> Items(IList? items)
 		{
 			if (items != null)
 			{
-				return (from object i in items
-					select EncodeValue(i, et, "list item")).ToList();
+				return items.Cast<object>().Select(i => EncodeValue(i, et, "list item")).ToList();
 			}
 			return new List<WireValue>();
 		}
-		ObservableOp Reset()
-		{
-			return ObservableOp.ListChange(e.Oid, 3, 0, 0, Items(list));
-		}
+
+		// A change without an index cannot be replayed step by step, so resend the whole list.
+		ObservableOp Reset() => ObservableOp.ListChange(e.Oid, 3, 0, 0, Items(list));
 	}
 
 	private WireValue EncodeValue(object? value, Type declared, string what)
 	{
-		if (value is IList list && !(list is INotifyCollectionChanged) && ObservableRules.ElementType(value.GetType()).Name == "AttachObservablePropertyBindingOp")
+		if (value is IList list && list is not INotifyCollectionChanged && ObservableRules.ElementType(value.GetType()).Name == "AttachObservablePropertyBindingOp")
 		{
 			return WireValue.NullValue;
 		}
@@ -372,10 +358,10 @@ internal sealed class HostObservables
 		{
 			return WireValue.NullValue;
 		}
-		string fail = null;
+		string? fail = null;
 		_encode.ClearLocalIds();
 		_encode.Observed.Clear();
-		WireValue result = ObjectCodec.Encode(value, declared, _encode, ref fail);
+		var result = ObjectCodec.Encode(value, declared, _encode, ref fail);
 		if (fail == null && _encode.LocalIds.Count > 0)
 		{
 			fail = "refers to an entity (Keen never replicates those)";
@@ -392,60 +378,60 @@ internal sealed class HostObservables
 
 	private (ObservableOp Op, IReadOnlyList<uint> Children)? Snapshot(uint oid)
 	{
-		if (!_byOid.TryGetValue(oid, out Entry value))
+		if (!_byOid.TryGetValue(oid, out var entry))
 		{
 			return null;
 		}
 		try
 		{
-			Subscribe(value);
-			ObservableOp observableOp;
-			if (value.IsList)
+			Subscribe(entry);
+			ObservableOp op;
+			if (entry.IsList)
 			{
-				IList list = (IList)value.Replica;
-				Type declared = ObservableRules.ElementType(list.GetType());
-				List<WireValue> list2 = new List<WireValue>(list.Count);
+				var list = (IList)entry.Replica;
+				var elementType = ObservableRules.ElementType(list.GetType());
+				var items = new List<WireValue>(list.Count);
 				foreach (object item in list)
 				{
-					list2.Add(EncodeValue(item, declared, "list item"));
+					items.Add(EncodeValue(item, elementType, "list item"));
 				}
-				observableOp = ObservableOp.NewList(oid, ObjectCodec.TypeName(list.GetType()), list2);
+				op = ObservableOp.NewList(oid, ObjectCodec.TypeName(list.GetType()), items);
 			}
 			else
 			{
-				AccessibleTypeInfo accessibleTypeInfo = value.Info ?? throw new InvalidOperationException(value.Replica.GetType().Name + " is not IAccessible");
-				List<(string, WireValue)> list3 = new List<(string, WireValue)>();
-				foreach (AccessibleTypeInfo.MemberInfo orderedMember in accessibleTypeInfo.OrderedMembers)
+				var info = entry.Info ?? throw new InvalidOperationException(entry.Replica.GetType().Name + " is not IAccessible");
+				var members = new List<(string, WireValue)>();
+				foreach (var member in info.OrderedMembers)
 				{
-					if (!ObservableRules.IsNoReplicate(orderedMember))
+					if (!ObservableRules.IsNoReplicate(member))
 					{
-						object obj;
+						object value;
 						try
 						{
-							obj = orderedMember.Get(value.Replica);
+							value = member.Get(entry.Replica);
 						}
-						catch (Exception) when (!orderedMember.CanWrite)
+						catch (Exception) when (!member.CanWrite)
 						{
 							continue;
 						}
-						if (ObservableRules.IsObservedList(obj))
+						if (ObservableRules.IsObservedList(value))
 						{
-							list3.Add((orderedMember.Accessor.Name, WireValue.List(GetOrAdd(obj, isList: true).Oid)));
+							members.Add((member.Accessor.Name, WireValue.List(GetOrAdd(value, isList: true).Oid)));
 						}
-						else if (orderedMember.CanWrite)
+						else if (member.CanWrite)
 						{
-							list3.Add((orderedMember.Accessor.Name, EncodeValue(obj, orderedMember.Type, accessibleTypeInfo.Type.Name + "." + orderedMember.Accessor.Name)));
+							members.Add((member.Accessor.Name, EncodeValue(value, member.Type, info.Type.Name + "." + member.Accessor.Name)));
 						}
 					}
 				}
-				observableOp = ObservableOp.NewObject(oid, ObjectCodec.TypeName(accessibleTypeInfo.Type), list3);
+				op = ObservableOp.NewObject(oid, ObjectCodec.TypeName(info.Type), members);
 			}
-			return (observableOp, observableOp.Refs());
+			return (op, op.Refs());
 		}
-		catch (Exception ex2)
+		catch (Exception ex)
 		{
-			Note("snapshot failed: " + ex2.GetType().Name);
-			_log.WarnOnce("obs-snap-" + value.Replica.GetType().Name, $"host observables: cannot snapshot a {value.Replica.GetType().Name} ({ex2.GetType().Name}: {ex2.Message}); joiners do not get it");
+			Note("snapshot failed: " + ex.GetType().Name);
+			_log.WarnOnce("obs-snap-" + entry.Replica.GetType().Name, $"host observables: cannot snapshot a {entry.Replica.GetType().Name} ({ex.GetType().Name}: {ex.Message}); joiners do not get it");
 			return null;
 		}
 	}
@@ -456,19 +442,19 @@ internal sealed class HostObservables
 		{
 			return;
 		}
-		List<(PeerId, List<ObservableOp>)> list;
+		List<(PeerId, List<ObservableOp>)> output;
 		lock (_sync)
 		{
-			PeerId result;
-			while (_forget.TryDequeue(out result))
+			PeerId gone;
+			while (_forget.TryDequeue(out gone))
 			{
-				_relevance.Forget(result);
+				_relevance.Forget(gone);
 			}
 			long nowMs = MpClock.NowMs();
-			(PeerId, uint) result2;
-			while (_roots.TryDequeue(out result2))
+			(PeerId Peer, uint Oid) root;
+			while (_roots.TryDequeue(out root))
 			{
-				_relevance.AddRoot(result2.Item1, result2.Item2, nowMs);
+				_relevance.AddRoot(root.Peer, root.Oid, nowMs);
 			}
 			_relevance.ProcessPendingRoots(nowMs);
 			if (!_edits.IsEmpty)
@@ -485,98 +471,94 @@ internal sealed class HostObservables
 					ApplyEdits();
 				}
 			}
-			list = _relevance.TakeOutput();
+			output = _relevance.TakeOutput();
 		}
-		foreach (var item3 in list)
+		foreach (var (peer, ops) in output)
 		{
-			PeerId item = item3.Item1;
-			List<ObservableOp> item2 = item3.Item2;
-			byte[] array = ObservableBatchMessage.Encode(0u, item2);
-			if (!publish(item, array))
+			byte[] batch = ObservableBatchMessage.Encode(0u, ops);
+			if (!publish(peer, batch))
 			{
-				_forget.Enqueue(item);
+				_forget.Enqueue(peer);
 				continue;
 			}
 			Batches++;
-			BatchOps += item2.Count;
-			BatchBytes += array.Length;
-			if (Batches <= 3 || item2.Count >= 200)
+			BatchOps += ops.Count;
+			BatchBytes += batch.Length;
+			if (Batches <= 3 || ops.Count >= 200)
 			{
-				_log.Info($"host observables: batch for {item}: {item2.Count} step(s), {MpLogExtensions.Bytes(array.Length)} ({Summary(item2)})");
+				_log.Info($"host observables: batch for {peer}: {ops.Count} step(s), {MpLogExtensions.Bytes(batch.Length)} ({Summary(ops)})");
 			}
 		}
 	}
 
 	private static string Summary(List<ObservableOp> ops)
 	{
-		string text = string.Join(", ", from o in ops
-			group o by o.Kind into g
-			select $"{g.Count()} {g.Key}");
-		ObservableOp observableOp = ops.FirstOrDefault((ObservableOp o) => o.Kind == ObservableOpKind.NewObject);
-		return text + ((observableOp != null) ? ("; first new: " + ObservableOp.ShortType(observableOp.Text)) : "");
+		string counts = string.Join(", ", ops.GroupBy(o => o.Kind).Select(g => $"{g.Count()} {g.Key}"));
+		var firstNew = ops.FirstOrDefault(o => o.Kind == ObservableOpKind.NewObject);
+		return counts + (firstNew != null ? "; first new: " + ObservableOp.ShortType(firstNew.Text) : "");
 	}
 
 	private void ApplyEdits()
 	{
-		ObjectSpace sp = new ObjectSpace
+		var sp = new ObjectSpace
 		{
 			Name = "host-edit",
-			IdOf = (Entity _) => (uint?)null,
-			Resolve = (uint _, bool _) => (Entity?)null
+			IdOf = _ => null,
+			Resolve = (_, _) => null
 		};
-		(PeerId, ushort, IReadOnlyList<MemberEdit>) result;
-		while (_edits.TryDequeue(out result))
+		(PeerId Peer, ushort ClientId, IReadOnlyList<MemberEdit> Edits) batch;
+		while (_edits.TryDequeue(out batch))
 		{
-			foreach (MemberEdit item in result.Item3)
+			foreach (var edit in batch.Edits)
 			{
-				string text = null;
+				string? refused = null;
 				AccessibleTypeInfo.MemberInfo member;
-				if (!_byOid.TryGetValue(item.Oid, out Entry value) || value.IsList || value.Info == null)
+				if (!_byOid.TryGetValue(edit.Oid, out var entry) || entry.IsList || entry.Info == null)
 				{
-					text = "unknown model";
+					refused = "unknown model";
 				}
-				else if (!_relevance.Has(result.Item1, item.Oid))
+				else if (!_relevance.Has(batch.Peer, edit.Oid))
 				{
-					text = "not one of this player's models";
+					refused = "not one of this player's models";
 				}
-				else if (HostWorld.Current?.IdentityOf(result.Item2) is long actor && actor != 0 && SocialGuard.CheckObject(value.Replica, actor) is string denied)
+				else if (HostWorld.Current?.IdentityOf(batch.ClientId) is long actor && actor != 0 && SocialGuard.CheckObject(entry.Replica, actor) is string denied)
 				{
-					text = denied;
+					refused = denied;
 				}
-				else if (!ObservableRules.TryReplicating(value.Info, item.Name, out member) || !ObservableRules.IsSyncFromClients(member))
+				else if (!ObservableRules.TryReplicating(entry.Info, edit.Name, out member) || !ObservableRules.IsSyncFromClients(member))
 				{
-					text = value.Info.Type.Name + "." + item.Name + " is not a [SyncFromClients] member";
+					refused = entry.Info.Type.Name + "." + edit.Name + " is not a [SyncFromClients] member";
 				}
 				else
 				{
-					WireKind kind = item.Value.Kind;
-					if ((kind - 2 <= WireKind.Bytes || kind - 14 <= WireKind.Bytes) ? true : false)
+					var kind = edit.Value.Kind;
+					if (kind is WireKind.Entity or WireKind.Component or WireKind.Observable or WireKind.ObservedList)
 					{
-						text = "clients only send constants (Keen's ClientObservedObject.EnsureMemberValueCanReplicate)";
+						refused = "clients only send constants (Keen's ClientObservedObject.EnsureMemberValueCanReplicate)";
 					}
 					else
 					{
-						string fail = null;
-						object obj = ObjectCodec.Decode(item.Value, member.Type, sp, translated: false, ref fail);
+						string? fail = null;
+						object value = ObjectCodec.Decode(edit.Value, member.Type, sp, translated: false, ref fail);
 						if (fail != null)
 						{
-							text = fail;
+							refused = fail;
 						}
 						else
 						{
-							_origin = result.Item1;
+							_origin = batch.Peer;
 							try
 							{
-								member.Set(value.Replica, obj);
+								member.Set(entry.Replica, value);
 								EditsApplied++;
 								if (EditsApplied <= 20)
 								{
-									_log.Info($"host observables: ClientId {result.Item2} set {value.Info.Type.Name}.{item.Name} = {obj ?? "null"} (observable #{item.Oid}); the server applies it like the host's own edit");
+									_log.Info($"host observables: ClientId {batch.ClientId} set {entry.Info.Type.Name}.{edit.Name} = {value ?? "null"} (observable #{edit.Oid}); the server applies it like the host's own edit");
 								}
 							}
 							catch (Exception ex)
 							{
-								text = ex.GetType().Name + ": " + ex.Message;
+								refused = ex.GetType().Name + ": " + ex.Message;
 							}
 							finally
 							{
@@ -585,11 +567,11 @@ internal sealed class HostObservables
 						}
 					}
 				}
-				if (text != null)
+				if (refused != null)
 				{
 					EditsRefused++;
-					Note("edit refused: " + text);
-					_log.WarnOnce("obs-edit-" + text, $"host observables: ClientId {result.Item2}: edit of {item.Name} on observable #{item.Oid} refused ({text})");
+					Note("edit refused: " + refused);
+					_log.WarnOnce("obs-edit-" + refused, $"host observables: ClientId {batch.ClientId}: edit of {edit.Name} on observable #{edit.Oid} refused ({refused})");
 				}
 			}
 		}
@@ -597,12 +579,12 @@ internal sealed class HostObservables
 
 	public string Describe()
 	{
-		string value;
+		string relevance;
 		lock (_sync)
 		{
-			value = _relevance.Describe();
+			relevance = _relevance.Describe();
 		}
-		return $"observables: {_byOid.Count} known (created {Created}, released {Released}); {value}; changes {ChangesSent}, batches {Batches} ({BatchOps} steps, {MpLogExtensions.Bytes(BatchBytes)}), edits applied {EditsApplied} refused {EditsRefused}, encode failures {EncodeFailures}" + (_counts.IsEmpty ? "" : ("; " + string.Join(", ", from kv in _counts.OrderByDescending((KeyValuePair<string, long> kv) => kv.Value).Take(6)
-			select $"{kv.Key} x{kv.Value}")));
+		return $"observables: {_byOid.Count} known (created {Created}, released {Released}); {relevance}; changes {ChangesSent}, batches {Batches} ({BatchOps} steps, {MpLogExtensions.Bytes(BatchBytes)}), edits applied {EditsApplied} refused {EditsRefused}, encode failures {EncodeFailures}"
+			+ (_counts.IsEmpty ? "" : "; " + string.Join(", ", from kv in _counts.OrderByDescending(kv => kv.Value).Take(6) select $"{kv.Key} x{kv.Value}"));
 	}
 }

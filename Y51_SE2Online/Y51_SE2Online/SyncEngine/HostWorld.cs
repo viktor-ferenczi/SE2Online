@@ -80,13 +80,13 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 		public bool SeatLogged;
 
-		public readonly ConcurrentQueue<uint> Candidates = new ConcurrentQueue<uint>();
+		public readonly ConcurrentQueue<uint> Candidates = new();
 
 		public Entity? Seat;
 
 		public bool SeatMismatchLogged;
 
-		public readonly Dictionary<Entity, long> ScannedRoots = new Dictionary<Entity, long>(ReferenceEqualityComparer.Instance);
+		public readonly Dictionary<Entity, long> ScannedRoots = new(ReferenceEqualityComparer.Instance);
 
 		public Entity? SeatRoot;
 
@@ -105,20 +105,20 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	private sealed class Part
 	{
-		public readonly EntityBundle Bundle = new EntityBundle();
+		public readonly EntityBundle Bundle = new();
 
-		public readonly Dictionary<Entity, EntityObjectBuilder> Eobs = new Dictionary<Entity, EntityObjectBuilder>();
+		public readonly Dictionary<Entity, EntityObjectBuilder> Eobs = new();
 
 		public int Roots;
 	}
 
 	private readonly IMpLog _log;
 
-	private readonly NetIdRegistry<Entity> _ids = new NetIdRegistry<Entity>();
+	private readonly NetIdRegistry<Entity> _ids = new();
 
-	private readonly ConcurrentQueue<PeerId> _captureRequests = new ConcurrentQueue<PeerId>();
+	private readonly ConcurrentQueue<PeerId> _captureRequests = new();
 
-	private readonly HashSet<PeerId> _cancelled = new HashSet<PeerId>();
+	private readonly HashSet<PeerId> _cancelled = new();
 
 	private volatile HostSession? _host;
 
@@ -132,48 +132,48 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	private bool _disabled;
 
-	private readonly ConcurrentDictionary<Type, FieldInfo?> _closureEntityField = new ConcurrentDictionary<Type, FieldInfo>();
+	private readonly ConcurrentDictionary<Type, FieldInfo?> _closureEntityField = new();
 
 	private volatile IReadOnlyDataOffloading? _offloading;
 
-	private readonly ConcurrentDictionary<ushort, Joiner> _joiners = new ConcurrentDictionary<ushort, Joiner>();
+	private readonly ConcurrentDictionary<ushort, Joiner> _joiners = new();
 
-	private readonly ConcurrentDictionary<ushort, HashSet<uint>> _allowed = new ConcurrentDictionary<ushort, HashSet<uint>>();
+	private readonly ConcurrentDictionary<ushort, HashSet<uint>> _allowed = new();
 
-	private readonly ConcurrentQueue<Joiner> _spawnRequests = new ConcurrentQueue<Joiner>();
+	private readonly ConcurrentQueue<Joiner> _spawnRequests = new();
 
-	private readonly ConcurrentQueue<Joiner> _releaseRequests = new ConcurrentQueue<Joiner>();
+	private readonly ConcurrentQueue<Joiner> _releaseRequests = new();
 	private int _pendingReleases;
 
-	private volatile Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent? _hostClientComp;
+	private volatile InProcessReplicationSessionComponent? _hostClientComp;
 
 	private bool _upstreamFailed;
 
-	private readonly List<(int, Segment)> _scratch = new List<(int, Segment)>();
+	private readonly List<(int, Segment)> _scratch = new();
 
-	private readonly List<(int, Segment)> _tapScratch = new List<(int, Segment)>();
+	private readonly List<(int, Segment)> _tapScratch = new();
 
-	private readonly object _signalSync = new object();
+	private readonly object _signalSync = new();
 
 	private static readonly FieldInfo? HashToStringField = typeof(StringHash).GetField(Name("sh-hash2str"), BindingFlags.Static | BindingFlags.NonPublic);
 
 	private static readonly FieldInfo? HashLockField = typeof(StringHash).GetField(Name("sh-lock"), BindingFlags.Static | BindingFlags.NonPublic);
 
-	private readonly HashSet<int> _sentHashes = new HashSet<int>();
+	private readonly HashSet<int> _sentHashes = new();
 
 	private int _lastHashCount = -1;
 
 	private bool _namesFailed;
 
-	private List<WireCommand> _pendingSignals = new List<WireCommand>();
+	private List<WireCommand> _pendingSignals = new();
 
-	private readonly ConcurrentDictionary<string, long> _s2cDrops = new ConcurrentDictionary<string, long>();
+	private readonly ConcurrentDictionary<string, long> _s2cDrops = new();
 
-	private readonly ConcurrentDictionary<string, long> _c2sDrops = new ConcurrentDictionary<string, long>();
+	private readonly ConcurrentDictionary<string, long> _c2sDrops = new();
 
-	private readonly ConcurrentDictionary<string, long> _s2cSent = new ConcurrentDictionary<string, long>();
+	private readonly ConcurrentDictionary<string, long> _s2cSent = new();
 
-	private readonly ConcurrentDictionary<string, long> _c2sApplied = new ConcurrentDictionary<string, long>();
+	private readonly ConcurrentDictionary<string, long> _c2sApplied = new();
 
 	private HostStories? _stories;
 
@@ -217,7 +217,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	public long InputRemovals;
 
-	private readonly HashSet<int> _removalLogged = new HashSet<int>();
+	private readonly HashSet<int> _removalLogged = new();
 
 	private static readonly TimeSpan BlobLoadTimeout = TimeSpan.FromSeconds(60L);
 
@@ -351,11 +351,11 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 	}
 
-	private readonly ConcurrentQueue<Registration> _registrations = new ConcurrentQueue<Registration>();
+	private readonly ConcurrentQueue<Registration> _registrations = new();
 
-	private readonly ConcurrentDictionary<PeerId, (long Since, ushort ClientId)> _pendingRegistration = new ConcurrentDictionary<PeerId, (long, ushort)>();
+	private readonly ConcurrentDictionary<PeerId, (long Since, ushort ClientId)> _pendingRegistration = new();
 
-	private readonly ConcurrentDictionary<ushort, long> _identityOf = new ConcurrentDictionary<ushort, long>();
+	private readonly ConcurrentDictionary<ushort, long> _identityOf = new();
 
 	private long _lastStatusMs;
 
@@ -365,15 +365,15 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	public const int WorldPartEntities = 1500;
 
-	private static readonly HashSet<string> ShipActionStories = new HashSet<string>(StringComparer.Ordinal) { "CubeGridComponent.TogglePower", "CubeGridComponent.ToggleDampeners", "CubeGridComponent.ToggleLights", "CubeGridComponent.ToggleParkingBrakes", "GridSpeedLimitComponent.SetBoost" };
+	private static readonly HashSet<string> ShipActionStories = new(StringComparer.Ordinal) { "CubeGridComponent.TogglePower", "CubeGridComponent.ToggleDampeners", "CubeGridComponent.ToggleLights", "CubeGridComponent.ToggleParkingBrakes", "GridSpeedLimitComponent.SetBoost" };
 
 	public long PassengerActionsRefused;
 
-	private readonly Dictionary<Entity, long> _hostSeatedSince = new Dictionary<Entity, long>(ReferenceEqualityComparer.Instance);
+	private readonly Dictionary<Entity, long> _hostSeatedSince = new(ReferenceEqualityComparer.Instance);
 
-	private readonly HashSet<Entity> _hostDriveLogged = new HashSet<Entity>(ReferenceEqualityComparer.Instance);
+	private readonly HashSet<Entity> _hostDriveLogged = new(ReferenceEqualityComparer.Instance);
 
-	private readonly Dictionary<Entity, (long Ms, bool HostPilots)> _hostPilotScan = new Dictionary<Entity, (long, bool)>(ReferenceEqualityComparer.Instance);
+	private readonly Dictionary<Entity, (long Ms, bool HostPilots)> _hostPilotScan = new(ReferenceEqualityComparer.Instance);
 
 	private bool _menuPauseOff;
 
@@ -383,15 +383,15 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	private int _joinerCharCount = -1;
 
-	private readonly ConcurrentDictionary<string, long> _echoedProps = new ConcurrentDictionary<string, long>();
+	private readonly ConcurrentDictionary<string, long> _echoedProps = new();
 
-	private static readonly ConcurrentDictionary<Type, bool> ClientSettable = new ConcurrentDictionary<Type, bool>();
+	private static readonly ConcurrentDictionary<Type, bool> ClientSettable = new();
 
-	private static readonly int[] DataRefOffsets = new int[2] { 0, 4 };
+	private static readonly int[] DataRefOffsets = { 0, 4 };
 
 	private static readonly MethodInfo? CreateCharacterMethod = typeof(RespawnSessionComponent).GetMethod("CreateCharacter", BindingFlags.Instance | BindingFlags.NonPublic);
 
-	private readonly ConditionalWeakTable<ReplicationCommandBuffer, StrongBox<uint>> _bufferStamp = new ConditionalWeakTable<ReplicationCommandBuffer, StrongBox<uint>>();
+	private readonly ConditionalWeakTable<ReplicationCommandBuffer, StrongBox<uint>> _bufferStamp = new();
 
 	private double _lastStampMs = -1.0;
 
@@ -399,23 +399,23 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	public long UnstampedPostData;
 
-	private readonly StringIdTable _sids = new StringIdTable();
+	private readonly StringIdTable _sids = new();
 
 	public const int ContactCapMs = 100;
 
-	private readonly Dictionary<(int Stub, object Target), long> _contactLast = new Dictionary<(int, object), long>();
+	private readonly Dictionary<(int Stub, object Target), long> _contactLast = new();
 
 	public long ContactCapped;
 
-	private static readonly string[] HostPlayerEventPrefixes = new string[10] { "ClientRespawnSessionComponent+", "ClientPlayersSessionComponent+", "CameraAnalyticsSessionComponent+", "SessionInGameUISessionComponent+", "DatapadClientSessionComponent+", "FastTravelClientSessionComponent+", "TradeNotificationsSessionComponent+", "TargetingSessionComponent+", "PlayersSessionComponent+PropagateCreatedPlayerSignal", "Streamed" };
+	private static readonly string[] HostPlayerEventPrefixes = { "ClientRespawnSessionComponent+", "ClientPlayersSessionComponent+", "CameraAnalyticsSessionComponent+", "SessionInGameUISessionComponent+", "DatapadClientSessionComponent+", "FastTravelClientSessionComponent+", "TradeNotificationsSessionComponent+", "TargetingSessionComponent+", "PlayersSessionComponent+PropagateCreatedPlayerSignal", "Streamed" };
 
 	private ObjectSpace? _tapSpace;
 
-	private readonly object _despawnSync = new object();
+	private readonly object _despawnSync = new();
 
-	private List<(uint Id, byte Mode, Entity? Forgotten)> _pendingDespawns = new List<(uint, byte, Entity)>();
+	private List<(uint Id, byte Mode, Entity? Forgotten)> _pendingDespawns = new();
 
-	private readonly Dictionary<uint, (long Ms, string What)> _forgotten = new Dictionary<uint, (long, string)>();
+	private readonly Dictionary<uint, (long Ms, string What)> _forgotten = new();
 
 	private const int RosterIntervalMs = 500;
 
@@ -429,7 +429,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	private int _hostTagTick;
 
-	private readonly List<(ushort ClientId, string Name, Entity? Target)> _hostTagList = new List<(ushort, string, Entity)>();
+	private readonly List<(ushort ClientId, string Name, Entity? Target)> _hostTagList = new();
 
 	private volatile Entity? _hostCharacterServer;
 
@@ -437,19 +437,9 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	public static HostWorld? Current { get; private set; }
 
-	public TypeKeyTable Keys { get; } = new TypeKeyTable();
+	public TypeKeyTable Keys { get; } = new();
 
-	public bool WorldReady
-	{
-		get
-		{
-			if (!_disabled && Volatile.Read(in _serverComp) != null)
-			{
-				return MpClock.NowMs() - Volatile.Read(in _lastServerTickMs) < 3000;
-			}
-			return false;
-		}
-	}
+	public bool WorldReady => !_disabled && Volatile.Read(ref _serverComp) != null && MpClock.NowMs() - Volatile.Read(ref _lastServerTickMs) < 3000;
 
 	public string WorldName
 	{
@@ -468,22 +458,9 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	internal Session? HostClientSession => _hostClientComp?.Session;
 
-	public bool WorldLoaded
-	{
-		get
-		{
-			if (!_disabled && Volatile.Read(in _serverComp) is Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent inProcessReplicationSessionComponent)
-			{
-				return !inProcessReplicationSessionComponent.IsUnloading;
-			}
-			return false;
-		}
-	}
+	public bool WorldLoaded => !_disabled && Volatile.Read(ref _serverComp) is InProcessReplicationSessionComponent server && !server.IsUnloading;
 
-	private static string Name(string id)
-	{
-		return HookTargets.Reflected.Single((EngineMember m) => m.Id == id).Name;
-	}
+	private static string Name(string id) => HookTargets.Reflected.Single(m => m.Id == id).Name;
 
 	private HostWorld(IMpLog log)
 	{
@@ -528,21 +505,14 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	private IdentityId IdentityFor(ushort clientId)
 	{
-		if (!_identityOf.TryGetValue(clientId, out var value))
+		if (!_identityOf.TryGetValue(clientId, out var identity))
 		{
 			return InProcessPerPlayerDataSessionComponent.HotfixIdentity;
 		}
-		return new IdentityId(value);
+		return new IdentityId(identity);
 	}
 
-	private ushort SourceFor(ushort clientId)
-	{
-		if (!_identityOf.ContainsKey(clientId))
-		{
-			return 1;
-		}
-		return clientId;
-	}
+	private ushort SourceFor(ushort clientId) => _identityOf.ContainsKey(clientId) ? clientId : (ushort)1;
 
 	public void RegisterPlayer(PeerId client, ushort clientId, string identityKey, string name)
 	{
@@ -553,9 +523,9 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 	}
 
-	private void ServerRegister(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent server, Registration r)
+	private void ServerRegister(InProcessReplicationSessionComponent server, Registration r)
 	{
-		HostSession host = _host;
+		var host = _host;
 		try
 		{
 			if (_identities != null && host != null)
@@ -565,42 +535,42 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 					_log.Warn($"host world sync: registration of ClientId {r.ClientId} '{r.Name}' came after its world capture; it plays as the host's identity until it rejoins");
 					return;
 				}
-				HostIdentities.Result result = _identities.Register(server.Session, r.ClientId, r.Key, r.Name);
+				var result = _identities.Register(server.Session, r.ClientId, r.Key, r.Name);
 				_identityOf[r.ClientId] = result.Identity;
 				_log.Info($"host world sync: PLAYER REGISTERED: ClientId {r.ClientId} '{r.Name}' -> IdentityId {result.Identity} (PlayerIdentity {result.Player}, key {r.Key}; {(result.NewPlayer ? "new in this world session" : "already known in this world session")}; {result.Detail})");
 				host.PlayerIdentified(r.ClientId, result.Identity, result.Player);
 			}
 		}
-		catch (Exception value)
+		catch (Exception ex)
 		{
-			_identityOf.TryRemove(r.ClientId, out var _);
-			_log.Error($"host world sync: registering ClientId {r.ClientId} '{r.Name}' as its own player failed; it plays as the host's identity (as in 0.5): {value}");
+			_identityOf.TryRemove(r.ClientId, out _);
+			_log.Error($"host world sync: registering ClientId {r.ClientId} '{r.Name}' as its own player failed; it plays as the host's identity (as in 0.5): {ex}");
 			host?.PlayerIdentified(r.ClientId, 0L, 0L);
 		}
 		finally
 		{
-			_pendingRegistration.TryRemove(r.Peer, out (long, ushort) _);
+			_pendingRegistration.TryRemove(r.Peer, out _);
 		}
 	}
 
-	private void PublishPlayerStatus(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp)
+	private void PublishPlayerStatus(InProcessReplicationSessionComponent comp)
 	{
-		HostSession host = _host;
-		long num = MpClock.NowMs();
-		if (host == null || _identityOf.IsEmpty || num - _lastStatusMs < 1000)
+		var host = _host;
+		long now = MpClock.NowMs();
+		if (host == null || _identityOf.IsEmpty || now - _lastStatusMs < 1000)
 		{
 			return;
 		}
-		_lastStatusMs = num;
+		_lastStatusMs = now;
 		try
 		{
 			foreach (var (clientId, identity) in _identityOf)
 			{
-				(int, int)? tuple = HostIdentities.ReadPcu(comp.Session, identity);
-				if (tuple.HasValue)
+				(int Pcu, int Max)? pcu = HostIdentities.ReadPcu(comp.Session, identity);
+				if (pcu.HasValue)
 				{
-					(int, int) valueOrDefault = tuple.GetValueOrDefault();
-					host.PublishPlayerStatus(clientId, valueOrDefault.Item1, valueOrDefault.Item2);
+					var value = pcu.GetValueOrDefault();
+					host.PublishPlayerStatus(clientId, value.Pcu, value.Max);
 				}
 			}
 		}
@@ -628,34 +598,29 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 		if (OnePilot)
 		{
-			string text = PassengerGate(clientId, box);
-			if (text != null)
+			string? passenger = PassengerGate(clientId, box);
+			if (passenger != null)
 			{
-				return text;
+				return passenger;
 			}
 		}
-		PermissionGate gate = _gate;
-		if (gate == null || server == null || !_identityOf.TryGetValue(clientId, out var value))
+		var gate = _gate;
+		if (gate == null || server == null || !_identityOf.TryGetValue(clientId, out var identity))
 		{
 			return null;
 		}
-		string text2 = gate.StoryValidator(box.GetType());
-		if (text2 == null)
+		string? validator = gate.StoryValidator(box.GetType());
+		if (validator == null)
 		{
 			return null;
 		}
-		return gate.Check(text2, (ObjectCodec.Fields(box.GetType()).FirstOrDefault((FieldInfo f) => f.Name == "<>4__this")?.GetValue(box) as Component)?.Entity, value, server.SessionComponents.TryGet<PermissionsSessionComponent>());
+		// Stories are compiler closures over their component; "<>4__this" is that captured component.
+		return gate.Check(validator, (ObjectCodec.Fields(box.GetType()).FirstOrDefault(f => f.Name == "<>4__this")?.GetValue(box) as Component)?.Entity, identity, server.SessionComponents.TryGet<PermissionsSessionComponent>());
 	}
 
-	public void Bind(HostSession host)
-	{
-		_host = host;
-	}
+	public void Bind(HostSession host) => _host = host;
 
-	public void SetWorldSession(WorldSessionComponent world)
-	{
-		_worldSession = world;
-	}
+	public void SetWorldSession(WorldSessionComponent world) => _worldSession = world;
 
 	public void RequestCapture(PeerId client)
 	{
@@ -682,19 +647,19 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	public static void CommitPostfix(object __instance)
 	{
-		HostWorld current = Current;
+		var current = Current;
 		if (current == null || current._disabled)
 		{
 			return;
 		}
 		try
 		{
-			Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent inProcessReplicationSessionComponent = (Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent)__instance;
-			if (inProcessReplicationSessionComponent.IsServer)
+			var comp = (InProcessReplicationSessionComponent)__instance;
+			if (comp.IsServer)
 			{
 				long started = Stopwatch.GetTimestamp();
 				current._socialMs = 0;
-				current.OnServerCommit(inProcessReplicationSessionComponent);
+				current.OnServerCommit(comp);
 				current.NoteFrameWork(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
 			}
 		}
@@ -717,7 +682,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		_log.Warn($"host world sync: slow frame work {ms:0} ms (factions/ownership refresh {_socialMs:0} ms)");
 	}
 
-	private void OnServerCommit(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp)
+	private void OnServerCommit(InProcessReplicationSessionComponent comp)
 	{
 		if (comp.IsUnloading)
 		{
@@ -731,7 +696,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 		if (_serverComp != comp)
 		{
-			bool flag = _serverComp != null;
+			bool hadWorld = _serverComp != null;
 			_identityOf.Clear();
 			_ids.Clear();
 			_ids.Bind(comp.Entity, 1u);
@@ -750,7 +715,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 			}
 			Volatile.Write(ref _serverComp, comp);
 			_log.Info($"host world sync: server scene attached (world '{WorldName}', data offloading {_offloading?.GetType().Name ?? "MISSING"}); friends can join now");
-			if (flag)
+			if (hadWorld)
 			{
 				_host?.WorldChanged("the host loaded another world");
 			}
@@ -767,10 +732,10 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 			{
 				UpdateJoiners(comp);
 			}
-			catch (Exception value)
+			catch (Exception ex)
 			{
 				_upstreamFailed = true;
-				_log.Error($"host world sync: joining players' characters failed and are switched off for this session (world sync continues): {value}");
+				_log.Error($"host world sync: joining players' characters failed and are switched off for this session (world sync continues): {ex}");
 			}
 		}
 		if (!_identityOf.IsEmpty)
@@ -778,86 +743,81 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 			PublishPlayerStatus(comp);
 		}
 		UpdateNametagRoster(comp);
-		List<PeerId> list = null;
-		PeerId result;
-		while (_captureRequests.TryDequeue(out result))
+		List<PeerId>? waiting = null;
+		PeerId peer;
+		while (_captureRequests.TryDequeue(out peer))
 		{
 			lock (_cancelled)
 			{
-				if (_cancelled.Remove(result))
+				if (_cancelled.Remove(peer))
 				{
 					continue;
 				}
 			}
-			if (_pendingRegistration.TryGetValue(result, out (long, ushort) value2))
+			if (_pendingRegistration.TryGetValue(peer, out var pending))
 			{
-				if (MpClock.NowMs() - value2.Item1 < 10000)
+				// Hold the capture until the player's identity exists, so the snapshot already carries it.
+				if (MpClock.NowMs() - pending.Since < RegistrationWaitMs)
 				{
-					(list ?? (list = new List<PeerId>())).Add(result);
+					(waiting ??= new List<PeerId>()).Add(peer);
 					continue;
 				}
-				_pendingRegistration.TryRemove(result, out (long, ushort) _);
-				_identityOf.TryRemove(value2.Item2, out var _);
-				_log.Warn($"host world sync: {result}'s player registration did not run within {10} s; capturing its world anyway (it plays as the host's identity)");
+				_pendingRegistration.TryRemove(peer, out _);
+				_identityOf.TryRemove(pending.ClientId, out _);
+				_log.Warn($"host world sync: {peer}'s player registration did not run within {RegistrationWaitMs / 1000} s; capturing its world anyway (it plays as the host's identity)");
 			}
-			Capture(comp, result);
+			Capture(comp, peer);
 		}
-		if (list == null)
+		if (waiting == null)
 		{
 			return;
 		}
-		foreach (PeerId item in list)
+		foreach (var later in waiting)
 		{
-			_captureRequests.Enqueue(item);
+			_captureRequests.Enqueue(later);
 		}
 	}
 
-	internal static bool HasMissions(SessionComponentsSnapshot snapshot)
-	{
-		return snapshot.Components?.Any((SessionComponentsSnapshot.ComponentInfo c) => c.Type?.Name == "MissionSessionComponent") ?? false;
-	}
+	internal static bool HasMissions(SessionComponentsSnapshot snapshot) => snapshot.Components?.Any(c => c.Type?.Name == "MissionSessionComponent") ?? false;
 
-	private void Capture(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp, PeerId peer)
+	private void Capture(InProcessReplicationSessionComponent comp, PeerId peer)
 	{
-		HostSession host = _host;
+		var host = _host;
 		if (host == null || !host.WantsCapture(peer))
 		{
 			return;
 		}
-		Stopwatch stopwatch = Stopwatch.StartNew();
+		var stopwatch = Stopwatch.StartNew();
 		try
 		{
-			Session session = comp.Session;
-			Keen.VRage.Multiplayer.Replications.InProcess.ServerSceneContext serverSceneContext = (Keen.VRage.Multiplayer.Replications.InProcess.ServerSceneContext)comp._context;
-			ReplicationStrategy replicationStrategy = ((Keen.VRage.Multiplayer.Replications.InProcess.SceneContext)serverSceneContext).Replication.ReplicationStrategy;
-			ReplayContext replayContext = comp.ReplayContext;
-			SessionComponentsSnapshot snapshot = SessionComponentsSnapshot.Capture(session, (Entity _, bool __) => false, null);
+			var session = comp.Session;
+			var context = (ServerSceneContext)comp._context;
+			var strategy = ((SceneContext)context).Replication.ReplicationStrategy;
+			var replay = comp.ReplayContext;
+			var snapshot = SessionComponentsSnapshot.Capture(session, (Entity _, bool _) => false, null);
 			bool missions = HasMissions(snapshot);
-			HashSet<Type> clientObTypes = null;
+			HashSet<Type>? clientObTypes = null;
 			try
 			{
-				Session session2 = ((Keen.VRage.Multiplayer.Replications.InProcess.SceneContext)serverSceneContext).Other?.SessionComponent?.Session;
-				if (session2 != null)
+				var clientSession = ((SceneContext)context).Other?.SessionComponent?.Session;
+				if (clientSession != null)
 				{
-					clientObTypes = EngineCodec.SessionObjectBuilderTypes(session2);
+					clientObTypes = EngineCodec.SessionObjectBuilderTypes(clientSession);
 				}
 			}
 			catch (Exception ex)
 			{
 				_log.Warn("host world sync: reading the local client's session components failed (" + ex.GetType().Name + "); sending every blob the snapshot references");
 			}
-			IReadOnlyDataOffloading offloading = _offloading;
-			List<Part> parts = new List<Part>
-			{
-				new Part()
-			};
-			int num = 0;
-			int num2 = 0;
-			int num3 = 0;
-			int num4 = 0;
-			int num5 = 0;
-			HashSet<Entity> hashSet = new HashSet<Entity>(ReferenceEqualityComparer.Instance);
-			foreach (Entity entity in session.Entities)
+			var offloading = _offloading;
+			var parts = new List<Part> { new Part() };
+			int roots = 0;
+			int notOnClient = 0;
+			int children = 0;
+			int failedRoots = 0;
+			int entities = 0;
+			var seen = new HashSet<Entity>(ReferenceEqualityComparer.Instance);
+			foreach (var entity in session.Entities)
 			{
 				if (entity == comp.Entity)
 				{
@@ -865,159 +825,158 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 				}
 				if (entity.Data.Has<ParentData>())
 				{
-					num3++;
+					children++;
 				}
-				else if (!replayContext.HasPairingLocal(entity))
+				else if (!replay.HasPairingLocal(entity))
 				{
-					num2++;
+					notOnClient++;
 				}
 				else
 				{
-					if (!hashSet.Add(entity))
+					if (!seen.Add(entity))
 					{
 						continue;
 					}
-					List<Part> list = parts;
-					Part part = list[list.Count - 1];
-					if (part.Eobs.Count >= 1500)
+					var part = parts[^1];
+					if (part.Eobs.Count >= WorldPartEntities)
 					{
 						parts.Add(part = new Part());
 					}
-					int count = part.Eobs.Count;
+					int before = part.Eobs.Count;
 					try
 					{
-						replicationStrategy.SerializeForClientAsBundle(entity, part.Bundle, part.Eobs);
+						strategy.SerializeForClientAsBundle(entity, part.Bundle, part.Eobs);
 						part.Roots++;
-						num++;
-						num5 += part.Eobs.Count - count;
+						roots++;
+						entities += part.Eobs.Count - before;
 					}
-					catch (Exception ex2)
+					catch (Exception ex)
 					{
-						if (++num4 <= 3)
+						if (++failedRoots <= 3)
 						{
-							_log.Warn($"host world sync: serializing root entity {entity} failed: {ex2.GetType().Name}: {ex2.Message}");
+							_log.Warn($"host world sync: serializing root entity {entity} failed: {ex.GetType().Name}: {ex.Message}");
 						}
 					}
 				}
 			}
-			List<Part> list2 = parts;
-			if (list2[list2.Count - 1].Eobs.Count == 0 && parts.Count > 1)
+			if (parts[^1].Eobs.Count == 0 && parts.Count > 1)
 			{
 				parts.RemoveAt(parts.Count - 1);
 			}
-			List<EntityBundleMessage> msgs = new List<EntityBundleMessage>(parts.Count);
-			int num6 = 0;
-			int num7 = 0;
-			foreach (Part item in parts)
+			var msgs = new List<EntityBundleMessage>(parts.Count);
+			int blobCount = 0;
+			int unlocatedCount = 0;
+			foreach (var part in parts)
 			{
-				foreach (Entity key in item.Eobs.Keys)
+				foreach (var key in part.Eobs.Keys)
 				{
 					_ids.GetOrAssign(key);
 				}
-				EntityBundleMessage entityBundleMessage = new EntityBundleMessage
+				var msg = new EntityBundleMessage
 				{
 					Kind = 0,
 					HostTick = _hostTick
 				};
-				foreach (KeyValuePair<Entity, EntityObjectBuilder> eob in item.Eobs)
+				foreach (var eob in part.Eobs)
 				{
 					DEntityBuilder dataStorage = default;
-					replicationStrategy.CaptureEntityData(eob.Key, eob.Value.Definition, ref dataStorage);
-					List<DataBlob> list3 = EngineCodec.Blobs(ref dataStorage, Keys);
-					if (list3.Count > 0)
+					strategy.CaptureEntityData(eob.Key, eob.Value.Definition, ref dataStorage);
+					var blobs = EngineCodec.Blobs(ref dataStorage, Keys);
+					if (blobs.Count > 0)
 					{
-						entityBundleMessage.Data.Add((_ids.GetOrAssign(eob.Key), list3));
-						num6 += list3.Count;
+						msg.Data.Add((_ids.GetOrAssign(eob.Key), blobs));
+						blobCount += blobs.Count;
 					}
 				}
-				entityBundleMessage.Entities = EngineCodec.Locate(item.Bundle, item.Eobs, (Entity e) => _ids.GetOrAssign(e), out var unlocated);
-				num7 += unlocated;
-				msgs.Add(entityBundleMessage);
+				msg.Entities = EngineCodec.Locate(part.Bundle, part.Eobs, e => _ids.GetOrAssign(e), out var unlocated);
+				unlocatedCount += unlocated;
+				msgs.Add(msg);
 			}
 			if (!host.BeginCapture(peer, msgs.Count, out var firstLifeSeq))
 			{
 				_log.Info($"host world sync: {peer} left before its world was captured");
 				return;
 			}
-			for (int num8 = 0; num8 < msgs.Count; num8++)
+			for (int i = 0; i < msgs.Count; i++)
 			{
-				msgs[num8].LifeSeq = firstLifeSeq + (uint)num8;
+				msgs[i].LifeSeq = firstLifeSeq + (uint)i;
 			}
-			double totalMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
-			string pre = $"captured on the server thread in {totalMilliseconds:0} ms: {num} roots / {num5} entities in {msgs.Count} part(s) ({num3} child entities in scene, {num2} roots not on the local client skipped, {num4} roots failed, {num7} unlocated), {num6} data blobs";
+			double captureMs = stopwatch.Elapsed.TotalMilliseconds;
+			string pre = $"captured on the server thread in {captureMs:0} ms: {roots} roots / {entities} entities in {msgs.Count} part(s) ({children} child entities in scene, {notOnClient} roots not on the local client skipped, {failedRoots} roots failed, {unlocatedCount} unlocated), {blobCount} data blobs";
 			_log.Info($"host world sync: world for {peer} {pre}");
+			// Serializing and loading offloaded blobs is slow; only the scene walk above needs the server thread.
 			Task.Run(() =>
 			{
-				Stopwatch stopwatch2 = Stopwatch.StartNew();
+				var serializeWatch = Stopwatch.StartNew();
 				try
 				{
-					NetIdProxyContext netIdProxyContext = new NetIdProxyContext((Entity e) => (int)_ids.GetOrAssign(e), null);
-					HashSet<Blob> hashSet2;
-					byte[] snapshot2;
-					string value;
+					var proxy = new NetIdProxyContext(e => (int)_ids.GetOrAssign(e), null);
+					HashSet<Blob> snapshotBlobs;
+					byte[] snapshotBytes;
+					string snapshotBlobInfo;
 					if (clientObTypes != null)
 					{
-						hashSet2 = EngineCodec.SnapshotBlobs(snapshot, (Type t) => clientObTypes.Contains(t), out int _, out List<string> owners);
-						snapshot2 = EngineCodec.SerializeSnapshot(snapshot, netIdProxyContext);
-						value = ((owners.Count == 0) ? "none" : string.Join(", ", owners));
+						snapshotBlobs = EngineCodec.SnapshotBlobs(snapshot, t => clientObTypes.Contains(t), out _, out var owners);
+						snapshotBytes = EngineCodec.SerializeSnapshot(snapshot, proxy);
+						snapshotBlobInfo = owners.Count == 0 ? "none" : string.Join(", ", owners);
 					}
 					else
 					{
-						hashSet2 = new HashSet<Blob>();
-						snapshot2 = EngineCodec.SerializeSnapshot(snapshot, netIdProxyContext, hashSet2);
-						value = $"{hashSet2.Count} (all components)";
+						snapshotBlobs = new HashSet<Blob>();
+						snapshotBytes = EngineCodec.SerializeSnapshot(snapshot, proxy, snapshotBlobs);
+						snapshotBlobInfo = $"{snapshotBlobs.Count} (all components)";
 					}
-					int written = netIdProxyContext.Written;
-					HashSet<Blob> hashSet3 = new HashSet<Blob>(hashSet2);
-					for (int num9 = 0; num9 < msgs.Count; num9++)
+					int snapshotRefs = proxy.Written;
+					var allBlobs = new HashSet<Blob>(snapshotBlobs);
+					for (int i = 0; i < msgs.Count; i++)
 					{
-						HashSet<Blob> hashSet4 = new HashSet<Blob>();
-						msgs[num9].Bundle = EngineCodec.SerializeBundle(parts[num9].Bundle, netIdProxyContext, hashSet4);
-						msgs[num9].RequiredBlobs = EngineCodec.Ids(hashSet4);
-						hashSet3.UnionWith(hashSet4);
+						var partBlobs = new HashSet<Blob>();
+						msgs[i].Bundle = EngineCodec.SerializeBundle(parts[i].Bundle, proxy, partBlobs);
+						msgs[i].RequiredBlobs = EngineCodec.Ids(partBlobs);
+						allBlobs.UnionWith(partBlobs);
 					}
-					double totalMilliseconds2 = stopwatch2.Elapsed.TotalMilliseconds;
-					CaptureBlobs captureBlobs = new CaptureBlobs
+					double serializeMs = serializeWatch.Elapsed.TotalMilliseconds;
+					var captureBlobs = new CaptureBlobs
 					{
-						Snapshot = EngineCodec.Ids(hashSet2)
+						Snapshot = EngineCodec.Ids(snapshotBlobs)
 					};
 					int failed = 0;
-					string firstError = null;
-					if (hashSet3.Count > 0)
+					string? firstError = null;
+					if (allBlobs.Count > 0)
 					{
 						if (offloading != null)
 						{
-							captureBlobs.Data = EngineCodec.LoadBlobs(offloading, hashSet3, BlobLoadTimeout, out failed, out firstError);
+							captureBlobs.Data = EngineCodec.LoadBlobs(offloading, allBlobs, BlobLoadTimeout, out failed, out firstError);
 						}
 						else
 						{
-							foreach (Blob item2 in hashSet3)
+							foreach (var blob in allBlobs)
 							{
-								captureBlobs.Data[EngineCodec.Id(item2)] = null;
+								captureBlobs.Data[EngineCodec.Id(blob)] = null;
 							}
-							failed = hashSet3.Count;
+							failed = allBlobs.Count;
 							firstError = "no data offloading service on the host";
 						}
 					}
-					string value2 = $"{captureBlobs.Data.Count} offloaded blobs {MpLogExtensions.Bytes(captureBlobs.Bytes)} (snapshot: {value}; parts: {string.Join("/", msgs.Select((EntityBundleMessage m) => m.RequiredBlobs.Count))}), loaded in {stopwatch2.Elapsed.TotalMilliseconds - totalMilliseconds2:0} ms";
-					_log.Info($"host world sync: world for {peer}: {value2}");
+					string blobSummary = $"{captureBlobs.Data.Count} offloaded blobs {MpLogExtensions.Bytes(captureBlobs.Bytes)} (snapshot: {snapshotBlobInfo}; parts: {string.Join("/", msgs.Select(m => m.RequiredBlobs.Count))}), loaded in {serializeWatch.Elapsed.TotalMilliseconds - serializeMs:0} ms";
+					_log.Info($"host world sync: world for {peer}: {blobSummary}");
 					if (failed > 0)
 					{
 						_log.Error($"host world sync: {failed} offloaded blob(s) could not be loaded on this PC (first: {firstError}); the entities using them will be missing on {peer}");
 					}
-					host.CompleteCapture(peer, snapshot2, msgs, $"{pre}; serialized in {totalMilliseconds2:0} ms ({written} entity refs in snapshot, {netIdProxyContext.Written - written} in bundles); {value2}; missions {(missions ? "on" : "off")}", missions, captureBlobs);
+					host.CompleteCapture(peer, snapshotBytes, msgs, $"{pre}; serialized in {serializeMs:0} ms ({snapshotRefs} entity refs in snapshot, {proxy.Written - snapshotRefs} in bundles); {blobSummary}; missions {(missions ? "on" : "off")}", missions, captureBlobs);
 				}
-				catch (Exception ex4)
+				catch (Exception ex)
 				{
-					_log.Error($"host world sync: serializing the world for {peer} failed: {ex4}");
-					host.FailCapture(peer, ex4.GetType().Name + ": " + ex4.Message);
+					_log.Error($"host world sync: serializing the world for {peer} failed: {ex}");
+					host.FailCapture(peer, ex.GetType().Name + ": " + ex.Message);
 				}
 			});
 		}
-		catch (Exception ex3)
+		catch (Exception ex)
 		{
-			_log.Error($"host world sync: capturing the world for {peer} failed: {ex3}");
-			host.FailCapture(peer, ex3.GetType().Name + ": " + ex3.Message);
+			_log.Error($"host world sync: capturing the world for {peer} failed: {ex}");
+			host.FailCapture(peer, ex.GetType().Name + ": " + ex.Message);
 		}
 	}
 
@@ -1031,60 +990,60 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		j.Character = entity2;
 		j.NetId = _ids.GetOrAssign(entity2);
 		CharactersSpawned++;
-		string text2 = "?";
+		string where = "?";
 		try
 		{
-			WorldTransform worldTransform = entity2.Data.GetWorldTransform();
-			text2 = $"at {worldTransform.Position.X:0.0}, {worldTransform.Position.Y:0.0}, {worldTransform.Position.Z:0.0}";
-			if (entity != null && entity.Data.TryGet<WorldTransform>(out var data2))
+			var spawned = entity2.Data.GetWorldTransform();
+			where = $"at {spawned.Position.X:0.0}, {spawned.Position.Y:0.0}, {spawned.Position.Z:0.0}";
+			if (entity != null && entity.Data.TryGet<WorldTransform>(out var hostTransform))
 			{
-				text2 += $", {Vector3D.Distance(in data2.Position, in worldTransform.Position):0.0} m from the host's character";
+				where += $", {Vector3D.Distance(in hostTransform.Position, in spawned.Position):0.0} m from the host's character";
 			}
 		}
 		catch (Exception)
 		{
 		}
-		_log.Info($"host world sync: SPAWNED character for ClientId {j.ClientId} '{j.Name}': NetworkId {j.NetId}, owner IdentityId {identityId}{(((long)identityId == -1559595548) ? " (the host's identity)" : "")}, via {text}, {text2}");
-		host.CharacterAssigned(j.Peer, j.NetId, "spawned via " + text + ", " + text2);
+		_log.Info($"host world sync: SPAWNED character for ClientId {j.ClientId} '{j.Name}': NetworkId {j.NetId}, owner IdentityId {identityId}{((long)identityId == PlayerIdentities.HotfixIdentity ? " (the host's identity)" : "")}, via {text}, {where}");
+		host.CharacterAssigned(j.Peer, j.NetId, "spawned via " + text + ", " + where);
 	}
 
 	public void RequestCharacter(PeerId client, ushort clientId, string name, int choice, bool respawn)
 	{
-		Joiner item = _joiners.AddOrUpdate(clientId, (ushort _) => new Joiner
+		var joiner = _joiners.AddOrUpdate(clientId, _ => new Joiner
 		{
 			Peer = client,
 			ClientId = clientId,
 			Name = name,
 			Choice = choice,
 			Respawn = respawn
-		}, (ushort _, Joiner old) =>
+		}, (_, old) =>
 		{
 			old.Peer = client;
 			old.Choice = choice;
 			old.Respawn = respawn;
 			return old;
 		});
-		_spawnRequests.Enqueue(item);
+		_spawnRequests.Enqueue(joiner);
 	}
 
 	public void ReleaseCharacter(PeerId client, ushort clientId)
 	{
 		_silentClients.TryRemove(clientId, out _);
-		if (_joiners.TryRemove(clientId, out Joiner value))
+		if (_joiners.TryRemove(clientId, out var joiner))
 		{
-			_allowed.TryRemove(clientId, out HashSet<uint> _);
+			_allowed.TryRemove(clientId, out _);
 			Interlocked.Increment(ref _pendingReleases);
-			_releaseRequests.Enqueue(value);
+			_releaseRequests.Enqueue(joiner);
 		}
 	}
 
 	internal string DescribeActor(Entity character)
 	{
-		foreach (Joiner value in _joiners.Values)
+		foreach (var joiner in _joiners.Values)
 		{
-			if (value.Character == character)
+			if (joiner.Character == character)
 			{
-				return $"ClientId {value.ClientId} '{value.Name}'";
+				return $"ClientId {joiner.ClientId} '{joiner.Name}'";
 			}
 		}
 		if (!_ids.TryGet(character, out var id))
@@ -1094,14 +1053,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		return $"the host's player (character NetworkId {id})";
 	}
 
-	internal string DescribeNetId(Entity e)
-	{
-		if (!_ids.TryGet(e, out var id))
-		{
-			return "(no NetworkId)";
-		}
-		return $"NetworkId {id}";
-	}
+	internal string DescribeNetId(Entity e) => _ids.TryGet(e, out var id) ? $"NetworkId {id}" : "(no NetworkId)";
 
 	internal bool IsJoinerCharacter(Entity? serverEntity)
 	{
@@ -1109,9 +1061,9 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		{
 			return false;
 		}
-		foreach (Joiner value in _joiners.Values)
+		foreach (var joiner in _joiners.Values)
 		{
-			if (value.Character == serverEntity)
+			if (joiner.Character == serverEntity)
 			{
 				return true;
 			}
@@ -1121,33 +1073,34 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	private string? PassengerGate(ushort clientId, object box)
 	{
-		Type type = box.GetType();
-		Type declaringType = type.DeclaringType;
-		int num = type.Name.IndexOf('<');
-		int num2 = type.Name.IndexOf('>');
-		if (declaringType == null || num != 0 || num2 < 2 || !ShipActionStories.Contains(declaringType.Name + "." + type.Name.Substring(1, num2 - 1)))
+		// Story closures are named "<Method>d__N" and nested in the component that declares the method.
+		var type = box.GetType();
+		var declaringType = type.DeclaringType;
+		int open = type.Name.IndexOf('<');
+		int close = type.Name.IndexOf('>');
+		if (declaringType == null || open != 0 || close < 2 || !ShipActionStories.Contains(declaringType.Name + "." + type.Name.Substring(1, close - 1)))
 		{
 			return null;
 		}
-		if (!_joiners.TryGetValue(clientId, out Joiner value) || value.Seat == null || value.SeatRoot == null || value.Driving)
+		if (!_joiners.TryGetValue(clientId, out var joiner) || joiner.Seat == null || joiner.SeatRoot == null || joiner.Driving)
 		{
 			return null;
 		}
-		Entity entity = (ObjectCodec.Fields(type).FirstOrDefault((FieldInfo f) => f.Name == "<>4__this")?.GetValue(box) as Component)?.Entity;
-		if (entity == null)
+		var root = (ObjectCodec.Fields(type).FirstOrDefault(f => f.Name == "<>4__this")?.GetValue(box) as Component)?.Entity;
+		if (root == null)
 		{
 			return null;
 		}
-		for (int num3 = 0; num3 < 16; num3++)
+		for (int depth = 0; depth < 16; depth++)
 		{
-			Entity entity2 = entity.TryGet<HierarchyComponent>()?.Parent;
-			if (entity2 == null)
+			var parent = root.TryGet<HierarchyComponent>()?.Parent;
+			if (parent == null)
 			{
 				break;
 			}
-			entity = entity2;
+			root = parent;
 		}
-		if (entity != value.SeatRoot)
+		if (root != joiner.SeatRoot)
 		{
 			return null;
 		}
@@ -1167,70 +1120,73 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		{
 			return true;
 		}
-		string text = null;
-		if (HostPilots(root, now) && _hostSeatedSince.TryGetValue(root, out var value) && value <= j.SeatedAtMs)
+		string? pilot = null;
+		if (HostPilots(root, now) && _hostSeatedSince.TryGetValue(root, out var hostSince) && hostSince <= j.SeatedAtMs)
 		{
-			text = "the host's player sat down first and flies it";
+			pilot = "the host's player sat down first and flies it";
 		}
 		else
 		{
-			foreach (Joiner value2 in _joiners.Values)
+			foreach (var other in _joiners.Values)
 			{
-				if (value2 != j && value2.Seat != null && value2.SeatRoot == root && (value2.SeatedAtMs < j.SeatedAtMs || (value2.SeatedAtMs == j.SeatedAtMs && value2.ClientId < j.ClientId)))
+				if (other != j && other.Seat != null && other.SeatRoot == root && (other.SeatedAtMs < j.SeatedAtMs || (other.SeatedAtMs == j.SeatedAtMs && other.ClientId < j.ClientId)))
 				{
-					text = $"ClientId {value2.ClientId} '{value2.Name}' sat down first and flies it";
+					pilot = $"ClientId {other.ClientId} '{other.Name}' sat down first and flies it";
 					break;
 				}
 			}
 		}
-		bool flag = text == null;
-		if (flag != j.Driving)
+		bool driving = pilot == null;
+		if (driving != j.Driving)
 		{
-			j.Driving = flag;
-			_log.Info(flag ? $"host world sync: ClientId {j.ClientId} '{j.Name}' now flies its ship (NetworkId {(_ids.TryGet(root, out var id) ? id : 0)})" : ($"host world sync: ClientId {j.ClientId} '{j.Name}' sits in another seat of ship NetworkId {(_ids.TryGet(root, out var id2) ? id2 : 0)}: {text}; " + "its flight input is ignored until then (two pilots made the ship swing between their inputs)"));
+			j.Driving = driving;
+			_log.Info(driving
+				? $"host world sync: ClientId {j.ClientId} '{j.Name}' now flies its ship (NetworkId {(_ids.TryGet(root, out var id) ? id : 0)})"
+				: $"host world sync: ClientId {j.ClientId} '{j.Name}' sits in another seat of ship NetworkId {(_ids.TryGet(root, out var otherId) ? otherId : 0)}: {pilot}; "
+					+ "its flight input is ignored until then (two pilots made the ship swing between their inputs)");
 		}
-		return flag;
+		return driving;
 	}
 
 	private bool HostPilots(Entity root, long now)
 	{
-		if (_hostPilotScan.TryGetValue(root, out (long, bool) value) && now - value.Item1 < 500)
+		if (_hostPilotScan.TryGetValue(root, out var scan) && now - scan.Ms < 500)
 		{
-			return value.Item2;
+			return scan.HostPilots;
 		}
-		bool flag = false;
-		Stack<Entity> stack = new Stack<Entity>();
+		bool hostPilots = false;
+		var stack = new Stack<Entity>();
 		stack.Push(root);
-		int num = 0;
-		while (stack.Count > 0 && num < 20000 && !flag)
+		int visited = 0;
+		while (stack.Count > 0 && visited < 20000 && !hostPilots)
 		{
-			Entity entity = stack.Pop();
-			num++;
-			SeatComponent seatComponent = entity.TryGet<SeatComponent>();
-			if (seatComponent != null)
+			var entity = stack.Pop();
+			visited++;
+			var seat = entity.TryGet<SeatComponent>();
+			if (seat != null)
 			{
-				Entity pilot = seatComponent.Pilot;
+				var pilot = seat.Pilot;
 				if (pilot != null && entity.TryGet<CockpitComponent>() != null && !IsJoinerCharacter(pilot))
 				{
-					flag = true;
+					hostPilots = true;
 				}
 			}
-			PooledList<Entity> pooledList = entity.TryGet<HierarchyComponent>()?.Children;
-			if (pooledList == null)
+			var children = entity.TryGet<HierarchyComponent>()?.Children;
+			if (children == null)
 			{
 				continue;
 			}
-			foreach (Entity item in pooledList)
+			foreach (var child in children)
 			{
-				stack.Push(item);
+				stack.Push(child);
 			}
 		}
 		if (_hostPilotScan.Count > 64)
 		{
 			_hostPilotScan.Clear();
 		}
-		_hostPilotScan[root] = (now, flag);
-		if (flag)
+		_hostPilotScan[root] = (now, hostPilots);
+		if (hostPilots)
 		{
 			_hostSeatedSince.TryAdd(root, now);
 		}
@@ -1242,56 +1198,44 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		{
 			_hostSeatedSince.Clear();
 		}
-		return flag;
+		return hostPilots;
 	}
 
 	private static Entity? FindPilotedSeat(Entity root, Entity pilot, out int scanned, out string seats)
 	{
 		scanned = 0;
-		List<string> list = new List<string>();
-		Stack<Entity> stack = new Stack<Entity>();
+		var others = new List<string>();
+		var stack = new Stack<Entity>();
 		stack.Push(root);
-		Entity entity = null;
+		Entity? found = null;
 		while (stack.Count > 0 && scanned < 20000)
 		{
-			Entity entity2 = stack.Pop();
+			var entity = stack.Pop();
 			scanned++;
-			SeatComponent seatComponent = entity2.TryGet<SeatComponent>();
-			if (seatComponent != null)
+			var seat = entity.TryGet<SeatComponent>();
+			if (seat != null)
 			{
-				if (seatComponent.Pilot == pilot)
+				if (seat.Pilot == pilot)
 				{
-					if (entity == null)
-					{
-						entity = entity2;
-					}
+					found ??= entity;
 				}
-				else if (list.Count < 4)
+				else if (others.Count < 4)
 				{
-					list.Add((seatComponent.Pilot == null) ? "empty" : "other pilot");
+					others.Add(seat.Pilot == null ? "empty" : "other pilot");
 				}
 			}
-			PooledList<Entity> pooledList = entity2.TryGet<HierarchyComponent>()?.Children;
-			if (pooledList == null)
+			var children = entity.TryGet<HierarchyComponent>()?.Children;
+			if (children == null)
 			{
 				continue;
 			}
-			foreach (Entity item in pooledList)
+			foreach (var child in children)
 			{
-				stack.Push(item);
+				stack.Push(child);
 			}
 		}
-		object obj;
-		if (list.Count != 0)
-		{
-			obj = string.Join(", ", list);
-		}
-		else
-		{
-			obj = ((entity != null) ? "ours" : "none");
-		}
-		seats = (string)obj;
-		return entity;
+		seats = others.Count != 0 ? string.Join(", ", others) : found != null ? "ours" : "none";
+		return found;
 	}
 
 	internal void SyncMenuPause()
@@ -1300,8 +1244,8 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		{
 			return;
 		}
-		bool flag = !_disabled;
-		if (flag == _menuPauseOff)
+		bool keepRunning = !_disabled;
+		if (keepRunning == _menuPauseOff)
 		{
 			return;
 		}
@@ -1309,9 +1253,9 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		{
 			var ticks = _worldSession?.Entity?.TryGet<Keen.Game2.WorldTickComponent>()?._tickManagement;
 			if (ticks == null) return;
-			ticks.PauseWhenInMenu = !flag;
-			_menuPauseOff = flag;
-			_log.Info(flag ? "host world sync: hosting keeps the world running while menus are open" : "host world sync: the ESC menu pauses the world again");
+			ticks.PauseWhenInMenu = !keepRunning;
+			_menuPauseOff = keepRunning;
+			_log.Info(keepRunning ? "host world sync: hosting keeps the world running while menus are open" : "host world sync: the ESC menu pauses the world again");
 		}
 		catch (Exception ex)
 		{
@@ -1320,169 +1264,170 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 	}
 
-	private void UpdateJoiners(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp)
+	private void UpdateJoiners(InProcessReplicationSessionComponent comp)
 	{
-		long num = MpClock.NowMs();
-		bool flag = num - _lastAllowedMs >= 250;
-		if (flag)
+		long now = MpClock.NowMs();
+		bool refresh = now - _lastAllowedMs >= 250;
+		if (refresh)
 		{
-			_lastAllowedMs = num;
+			_lastAllowedMs = now;
 		}
-		if (flag)
+		if (refresh)
 		{
 			SyncMenuPause();
 		}
-		foreach (Joiner value3 in _joiners.Values)
+		foreach (var joiner in _joiners.Values)
 		{
-			Entity character = value3.Character;
+			var character = joiner.Character;
 			if (character == null)
 			{
 				continue;
 			}
-			bool flag2 = EngineCodec.IsDead(character);
-			string text = "removed from the world";
-			if (!flag2)
+			bool lost = EngineCodec.IsDead(character);
+			string how = "removed from the world";
+			if (!lost)
 			{
 				try
 				{
-					CharacterLifeComponent characterLifeComponent = character.TryGet<CharacterLifeComponent>();
-					if (characterLifeComponent != null && !characterLifeComponent.IsAlive)
+					var life = character.TryGet<CharacterLifeComponent>();
+					if (life != null && !life.IsAlive)
 					{
-						flag2 = true;
-						text = "died";
+						lost = true;
+						how = "died";
 					}
 				}
 				catch (Exception)
 				{
 				}
 			}
-			if (flag2)
+			if (lost)
 			{
-				value3.Character = null;
-				value3.NetId = 0u;
-				_allowed.TryRemove(value3.ClientId, out HashSet<uint> _);
+				joiner.Character = null;
+				joiner.NetId = 0u;
+				_allowed.TryRemove(joiner.ClientId, out _);
 				CharactersLost++;
-				_log.Info($"host world sync: ClientId {value3.ClientId} '{value3.Name}': character {text}");
-				_host?.CharacterLost(value3.Peer, text);
+				_log.Info($"host world sync: ClientId {joiner.ClientId} '{joiner.Name}': character {how}");
+				_host?.CharacterLost(joiner.Peer, how);
 			}
 			else
 			{
-				if (!flag && _allowed.ContainsKey(value3.ClientId))
+				if (!refresh && _allowed.ContainsKey(joiner.ClientId))
 				{
 					continue;
 				}
-				HashSet<uint> hashSet = new HashSet<uint>();
-				Collect(character, hashSet, 0);
+				var allowed = new HashSet<uint>();
+				Collect(character, allowed, 0);
 				try
 				{
-					uint result;
-					while (value3.Candidates.TryDequeue(out result))
+					uint candidateId;
+					while (joiner.Candidates.TryDequeue(out candidateId))
 					{
-						if (value3.Seat != null || !_ids.TryGet(result, out Entity obj))
+						if (joiner.Seat != null || !_ids.TryGet(candidateId, out var candidate))
 						{
 							continue;
 						}
-						Entity entity = obj;
+						var root = candidate;
 						for (int i = 0; i < 16; i++)
 						{
-							Entity entity2 = entity.TryGet<HierarchyComponent>()?.Parent;
-							if (entity2 == null)
+							var parent = root.TryGet<HierarchyComponent>()?.Parent;
+							if (parent == null)
 							{
 								break;
 							}
-							entity = entity2;
+							root = parent;
 						}
-						long num2 = MpClock.NowMs();
-						if (!value3.ScannedRoots.TryGetValue(entity, out var value2) || num2 - value2 >= 2000)
+						long scanNow = MpClock.NowMs();
+						if (!joiner.ScannedRoots.TryGetValue(root, out var scannedAt) || scanNow - scannedAt >= 2000)
 						{
-							value3.ScannedRoots[entity] = num2;
-							Entity entity3 = FindPilotedSeat(entity, character, out int scanned, out string seats);
-							if (entity3 != null)
+							joiner.ScannedRoots[root] = scanNow;
+							var seatFound = FindPilotedSeat(root, character, out int scanned, out string seats);
+							if (seatFound != null)
 							{
-								value3.Seat = entity3;
-								_log.Info($"host world sync: ClientId {value3.ClientId} '{value3.Name}' is seated (seat {(_ids.TryGet(entity3, out var id) ? id : 0)}, grid scan {scanned} entities); its input may drive the seat and its grid");
+								joiner.Seat = seatFound;
+								_log.Info($"host world sync: ClientId {joiner.ClientId} '{joiner.Name}' is seated (seat {(_ids.TryGet(seatFound, out var id) ? id : 0)}, grid scan {scanned} entities); its input may drive the seat and its grid");
 							}
-							else if (!value3.SeatMismatchLogged)
+							else if (!joiner.SeatMismatchLogged)
 							{
-								value3.SeatMismatchLogged = true;
-								_log.Warn($"host world sync: ClientId {value3.ClientId} '{value3.Name}' sends input for NetworkId {result} ({obj.GetComposition()?.Guid}) but no seat in that grid ({scanned} entities scanned; seats: {seats}) is piloted by its character; refused");
+								joiner.SeatMismatchLogged = true;
+								_log.Warn($"host world sync: ClientId {joiner.ClientId} '{joiner.Name}' sends input for NetworkId {candidateId} ({candidate.GetComposition()?.Guid}) but no seat in that grid ({scanned} entities scanned; seats: {seats}) is piloted by its character; refused");
 							}
 						}
 					}
-					Entity seat = value3.Seat;
+					var seat = joiner.Seat;
 					if (seat != null)
 					{
 						if (EngineCodec.IsDead(seat) || seat.TryGet<SeatComponent>()?.Pilot != character)
 						{
-							_log.Info($"host world sync: ClientId {value3.ClientId} '{value3.Name}' left its seat");
-							if (value3.Driving && value3.SeatRoot != null)
+							_log.Info($"host world sync: ClientId {joiner.ClientId} '{joiner.Name}' left its seat");
+							if (joiner.Driving && joiner.SeatRoot != null)
 							{
-								List<uint> list = new List<uint>();
-								if (_ids.TryGet(value3.SeatRoot, out var id2))
+								var leftIds = new List<uint>();
+								if (_ids.TryGet(joiner.SeatRoot, out var rootId))
 								{
-									list.Add(id2);
+									leftIds.Add(rootId);
 								}
-								Entity entity4 = seat.TryGet<CubeBlockComponent>()?.Grid?.Entity;
-								if (entity4 != null && _ids.TryGet(entity4, out var id3))
+								var grid = seat.TryGet<CubeBlockComponent>()?.Grid?.Entity;
+								if (grid != null && _ids.TryGet(grid, out var gridId))
 								{
-									list.Add(id3);
-									value3.StopGridId = id3;
+									leftIds.Add(gridId);
+									joiner.StopGridId = gridId;
 								}
-								value3.LeftAtMs = num;
-								value3.LeftGridIds = list.ToArray();
+								joiner.LeftAtMs = now;
+								joiner.LeftGridIds = leftIds.ToArray();
 							}
-							value3.Seat = null;
-							value3.SeatRoot = null;
+							joiner.Seat = null;
+							joiner.SeatRoot = null;
 						}
 						else
 						{
-							Collect(seat, hashSet, 0);
-							Entity entity5 = seat;
+							Collect(seat, allowed, 0);
+							var seatRoot = seat;
 							for (int j = 0; j < 16; j++)
 							{
-								Entity entity6 = entity5.TryGet<HierarchyComponent>()?.Parent;
-								if (entity6 == null)
+								var parent = seatRoot.TryGet<HierarchyComponent>()?.Parent;
+								if (parent == null)
 								{
 									break;
 								}
-								entity5 = entity6;
+								seatRoot = parent;
 							}
-							if (MayDriveGrid(value3, entity5, num))
+							if (MayDriveGrid(joiner, seatRoot, now))
 							{
-								if (_ids.TryGet(entity5, out var id4))
+								if (_ids.TryGet(seatRoot, out var rootId))
 								{
-									hashSet.Add(id4);
+									allowed.Add(rootId);
 								}
-								Entity entity7 = seat.TryGet<CubeBlockComponent>()?.Grid?.Entity;
-								if (entity7 != null && _ids.TryGet(entity7, out var id5))
+								var grid = seat.TryGet<CubeBlockComponent>()?.Grid?.Entity;
+								if (grid != null && _ids.TryGet(grid, out var gridId))
 								{
-									hashSet.Add(id5);
+									allowed.Add(gridId);
 								}
 							}
 						}
 					}
 				}
-				catch (Exception ex2)
+				catch (Exception ex)
 				{
-					_log.WarnOnce("host-seat", $"host world sync: seat check failed ({ex2.GetType().Name}: {ex2.Message})");
+					_log.WarnOnce("host-seat", $"host world sync: seat check failed ({ex.GetType().Name}: {ex.Message})");
 				}
-				_allowed[value3.ClientId] = hashSet;
+				_allowed[joiner.ClientId] = allowed;
 			}
 		}
+
 		void Collect(Entity e, HashSet<uint> set, int depth)
 		{
-			if (_ids.TryGet(e, out var id6))
+			if (_ids.TryGet(e, out var id))
 			{
-				set.Add(id6);
+				set.Add(id);
 			}
 			if (depth <= 8)
 			{
-				PooledList<Entity> pooledList = e.TryGet<HierarchyComponent>()?.Children;
-				if (pooledList != null)
+				var children = e.TryGet<HierarchyComponent>()?.Children;
+				if (children != null)
 				{
-					foreach (Entity item in pooledList)
+					foreach (var child in children)
 					{
-						Collect(item, set, depth + 1);
+						Collect(child, set, depth + 1);
 					}
 				}
 			}
@@ -1491,18 +1436,18 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	public static void CommitPrefix(object __instance)
 	{
-		HostWorld current = Current;
-		if (current == null || current._disabled || !(__instance is Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent inProcessReplicationSessionComponent))
+		var current = Current;
+		if (current == null || current._disabled || __instance is not InProcessReplicationSessionComponent comp)
 		{
 			return;
 		}
-		if (inProcessReplicationSessionComponent.IsServer)
+		if (comp.IsServer)
 		{
 			try
 			{
-				if (inProcessReplicationSessionComponent == Volatile.Read(in current._serverComp))
+				if (comp == Volatile.Read(ref current._serverComp))
 				{
-					current.StampServerBuffer(inProcessReplicationSessionComponent);
+					current.StampServerBuffer(comp);
 				}
 				return;
 			}
@@ -1518,12 +1463,12 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 		try
 		{
-			current.OnHostClientCommit(inProcessReplicationSessionComponent);
+			current.OnHostClientCommit(comp);
 		}
-		catch (Exception value)
+		catch (Exception ex)
 		{
 			current._upstreamFailed = true;
-			current._log.Error($"host world sync: joining players' input/characters failed and are switched off for this session (world sync continues): {value}");
+			current._log.Error($"host world sync: joining players' input/characters failed and are switched off for this session (world sync continues): {ex}");
 		}
 	}
 
@@ -1535,30 +1480,30 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 		try
 		{
-			if (HashToStringField?.GetValue(null) is Dictionary<StringHash, string> dictionary)
+			if (HashToStringField?.GetValue(null) is Dictionary<StringHash, string> names)
 			{
-				object obj = HashLockField?.GetValue(null);
-				if (obj != null)
+				object? hashLock = HashLockField?.GetValue(null);
+				if (hashLock != null)
 				{
-					List<string> list = null;
-					lock (obj)
+					List<string>? added = null;
+					lock (hashLock)
 					{
-						if (dictionary.Count == _lastHashCount)
+						if (names.Count == _lastHashCount)
 						{
 							return;
 						}
-						_lastHashCount = dictionary.Count;
-						foreach (KeyValuePair<StringHash, string> item in dictionary)
+						_lastHashCount = names.Count;
+						foreach (var entry in names)
 						{
-							if (_sentHashes.Add(item.Key.Hash))
+							if (_sentHashes.Add(entry.Key.Hash))
 							{
-								(list ?? (list = new List<string>())).Add(item.Value);
+								(added ??= new List<string>()).Add(entry.Value);
 							}
 						}
 					}
-					if (list != null)
+					if (added != null)
 					{
-						host.AddHostStrings(list);
+						host.AddHostStrings(added);
 					}
 					return;
 				}
@@ -1572,9 +1517,9 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 	}
 
-	private void OnHostClientCommit(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp)
+	private void OnHostClientCommit(InProcessReplicationSessionComponent comp)
 	{
-		Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent server = Volatile.Read(in _serverComp) as Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent;
+		var server = Volatile.Read(ref _serverComp) as InProcessReplicationSessionComponent;
 		if (server == null || comp._context.Other?.SessionComponent != server)
 		{
 			return;
@@ -1585,7 +1530,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		DrainHostWork(comp, server, false);
 	}
 
-	internal void HeadlessServerWork(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent server)
+	internal void HeadlessServerWork(InProcessReplicationSessionComponent server)
 	{
 		if (!HeadlessReplication.Active || _disabled || _upstreamFailed || server.IsUnloading || _serverComp != server) return;
 		try { DrainHostWork(server, server, true); }
@@ -1597,8 +1542,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 	}
 
-	private void DrainHostWork(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp,
-		Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent server, bool headless)
+	private void DrainHostWork(InProcessReplicationSessionComponent comp, InProcessReplicationSessionComponent server, bool headless)
 	{
 		void OnServer(Action action)
 		{
@@ -1607,39 +1551,36 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 		OnServer(() => UpdateSocial(server.Session));
 		OnServer(() => UpdateAdmin(server.Session));
-		Registration result;
-		while (_registrations.TryDequeue(out result))
+		Registration next;
+		while (_registrations.TryDequeue(out next))
 		{
-			Registration r = result;
-			OnServer(delegate
-			{
-				ServerRegister(server, r);
-			});
+			var r = next;
+			OnServer(() => ServerRegister(server, r));
 		}
-		List<WireCommand> list = null;
+		List<WireCommand>? signals = null;
 		lock (_signalSync)
 		{
 			if (_pendingSignals.Count > 0)
 			{
-				list = _pendingSignals;
+				signals = _pendingSignals;
 				_pendingSignals = new List<WireCommand>();
 			}
 		}
-		if (list != null && _host != null)
+		if (signals != null && _host != null)
 		{
 			CollectHostStrings(_host);
-			List<string> list2 = _sids.TakePending();
-			if (list2 != null)
+			var strings = _sids.TakePending();
+			if (strings != null)
 			{
-				_host.AddHostStrings(list2);
+				_host.AddHostStrings(strings);
 			}
-			_host.PublishSignals(_hostTick, list);
+			_host.PublishSignals(_hostTick, signals);
 		}
 		if (_host != null)
 		{
 			FlushDespawns(_host);
 		}
-		HostSession obsHost = _host;
+		var obsHost = _host;
 		if (obsHost != null)
 		{
 			try
@@ -1651,51 +1592,48 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 				_log.WarnOnce("host-observables-flush", $"host world sync: observables flush failed ({ex.GetType().Name}: {ex.Message}); joiners' screens may stop updating");
 			}
 		}
-		HostStories stories = _stories;
+		var stories = _stories;
 		if (stories != null && stories.Pending)
 		{
-			Session serverSession = server.Session;
+			var serverSession = server.Session;
 			stories.SourceFor = SourceFor;
 			stories.Gate = StoryGate;
 			stories.RootsFor = _observables.AddRoots;
 			stories.Drain(comp, () => _host, () => ServerSpace(server), serverSession, headless);
 		}
-		Joiner result2;
-		while (_releaseRequests.TryDequeue(out result2))
+		Joiner released;
+		while (_releaseRequests.TryDequeue(out released))
 		{
-			Joiner rel = result2;
-			OnServer(delegate
+			var rel = released;
+			OnServer(() =>
 			{
 				try { ServerRelease(server, rel); }
 				finally { Interlocked.Decrement(ref _pendingReleases); }
 			});
 		}
-		Joiner result3;
-		while (_spawnRequests.TryDequeue(out result3))
+		Joiner spawning;
+		while (_spawnRequests.TryDequeue(out spawning))
 		{
-			Joiner req = result3;
-			OnServer(delegate
-			{
-				ServerSpawn(server, req);
-			});
+			var req = spawning;
+			OnServer(() => ServerSpawn(server, req));
 		}
-		foreach (Joiner pending in _joiners.Values)
+		foreach (var pending in _joiners.Values)
 		{
 			if (!pending.ShipPending && pending.ShipSettle == null || pending.ShipQueued) continue;
 			pending.ShipQueued = true;
-			OnServer(delegate
+			OnServer(() =>
 			{
 				pending.ShipQueued = false;
 				ServerShip(server, pending);
 			});
 		}
-		HostSession host = _host;
+		var host = _host;
 		if (host == null || !host.AnySynced)
 		{
 			return;
 		}
-		List<ClientInputBatch> list3 = host.TakeInputs();
-		if (list3.Count == 0)
+		var inputs = host.TakeInputs();
+		if (inputs.Count == 0)
 		{
 			return;
 		}
@@ -1706,71 +1644,73 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 		lock (exchangeSync)
 		{
-			foreach (ClientInputBatch item in list3)
+			foreach (var batch in inputs)
 			{
-				Inject(comp, item, host);
+				Inject(comp, batch, host);
 			}
 		}
 	}
 
-	private void UpdateJoinerCharacters(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp)
+	private void UpdateJoinerCharacters(InProcessReplicationSessionComponent comp)
 	{
 		if (!ControlGuard.Enabled && !ControlGuard.HostFlightGate)
 		{
 			return;
 		}
-		int num = 0;
-		foreach (Joiner value in _joiners.Values)
+		int withCharacter = 0;
+		foreach (var joiner in _joiners.Values)
 		{
-			num += ((value.Character != null) ? 1 : 0);
+			withCharacter += joiner.Character != null ? 1 : 0;
 		}
-		if (_joinerCharTick++ % 5 != 0 && num == _joinerCharCount)
+		// Re-resolve every 5th frame, or at once when a character appears or goes.
+		if (_joinerCharTick++ % 5 != 0 && withCharacter == _joinerCharCount)
 		{
 			return;
 		}
-		_joinerCharCount = num;
+		_joinerCharCount = withCharacter;
 		try
 		{
-			List<Entity> list = new List<Entity>(num);
-			List<Entity> list2 = new List<Entity>();
-			foreach (Joiner value2 in _joiners.Values)
+			var characters = new List<Entity>(withCharacter);
+			var driven = new List<Entity>();
+			foreach (var joiner in _joiners.Values)
 			{
-				Entity entity = Local(value2.Character);
-				if (entity != null)
+				var character = Local(joiner.Character);
+				if (character != null)
 				{
-					list.Add(entity);
+					characters.Add(character);
 				}
 				if (!OnePilot)
 				{
 					continue;
 				}
-				Entity seat = value2.Seat;
-				if (seat != null && value2.Driving && value2.SeatRoot != null)
+				var seat = joiner.Seat;
+				if (seat != null && joiner.Driving && joiner.SeatRoot != null)
 				{
-					Entity entity2 = Local(value2.SeatRoot);
-					if (entity2 != null)
+					var root = Local(joiner.SeatRoot);
+					if (root != null)
 					{
-						list2.Add(entity2);
+						driven.Add(root);
 					}
-					Entity entity3 = Local(seat.TryGet<CubeBlockComponent>()?.Grid?.Entity);
-					if (entity3 != null && entity3 != list2.LastOrDefault())
+					var grid = Local(seat.TryGet<CubeBlockComponent>()?.Grid?.Entity);
+					if (grid != null && grid != driven.LastOrDefault())
 					{
-						list2.Add(entity3);
+						driven.Add(grid);
 					}
 				}
 			}
 			foreach (Entity parked in _parked.Keys)
 			{
 				if (EngineCodec.IsDead(parked)) _parked.TryRemove(parked, out _);
-				else if (Local(parked) is Entity local) list.Add(local);
+				else if (Local(parked) is Entity local) characters.Add(local);
 			}
-			ControlGuard.SetJoinerCharacters(list.ToArray());
-			ControlGuard.SetJoinerDriven(list2.ToArray());
+			ControlGuard.SetJoinerCharacters(characters.ToArray());
+			ControlGuard.SetJoinerDriven(driven.ToArray());
 		}
 		catch (Exception ex)
 		{
 			_log.WarnOnce("host-control-guard", $"host: resolving the joiners' characters / ships for the control guard failed ({ex.GetType().Name}: {ex.Message}); retrying");
 		}
+
 		Entity? Local(Entity? server)
 		{
 			if (server == null || EngineCodec.IsDead(server))
@@ -1784,8 +1724,8 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	private static bool IsClientSettableProperty(CommandLayout l)
 	{
-		Type signalType = l.SignalType;
-		if ((object)signalType != null)
+		var signalType = l.SignalType;
+		if (signalType is not null)
 		{
 			return ClientSettable.GetOrAdd(signalType, (Type tt) => tt.GetCustomAttribute<SignalSignature>()?.SyncProperty ?? false);
 		}
@@ -1794,51 +1734,50 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	internal static void WriteMarkedData(ReplicationCommandBuffer cb, int stub, Entity sessionEntity, Entity target, int typeId, byte[]? bytes)
 	{
-		int num = ((bytes == null) ? 12 : (16 + bytes.Length));
-		Span<byte> span = ((num > 512) ? ((Span<byte>)new byte[num]) : stackalloc byte[num]);
-		Span<byte> span2 = span;
-		BinaryPrimitives.WriteInt32LittleEndian(span2.Slice(8), typeId);
+		// Layout: two 4-byte object refs (session entity, target), type id, then optional length + payload.
+		int length = bytes == null ? 12 : 16 + bytes.Length;
+		Span<byte> buffer = length > 512 ? new byte[length] : stackalloc byte[length];
+		BinaryPrimitives.WriteInt32LittleEndian(buffer.Slice(8), typeId);
 		if (bytes != null)
 		{
-			BinaryPrimitives.WriteInt32LittleEndian(span2.Slice(12), bytes.Length);
-			bytes.CopyTo(span2.Slice(16));
+			BinaryPrimitives.WriteInt32LittleEndian(buffer.Slice(12), bytes.Length);
+			bytes.CopyTo(buffer.Slice(16));
 		}
-		CommandBuffers.Append(cb, stub, span2, (int off) => cb.StoreObject((object)((off == 0) ? sessionEntity : target)), DataRefOffsets, 1580056798);
+		CommandBuffers.Append(cb, stub, buffer, off => cb.StoreObject(off == 0 ? sessionEntity : target), DataRefOffsets, 1580056798);
 	}
 
-	private void Inject(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp, ClientInputBatch b, HostSession host)
+	private void Inject(InProcessReplicationSessionComponent comp, ClientInputBatch b, HostSession host)
 	{
-		HashSet<uint> hashSet = (_allowed.TryGetValue(b.ClientId, out HashSet<uint> value) ? value : null);
-		ReplayContext replay = comp.ReplayContext;
+		var allowed = _allowed.TryGetValue(b.ClientId, out var allowedIds) ? allowedIds : null;
+		var replay = comp.ReplayContext;
 		bool headless = HeadlessReplication.Active && comp.IsServer;
-		ReplicationCommandBuffer buffer = headless ? Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent.AllocateCB() : ((ReplicationCommandBufferSessionComponent)(object)comp).Buffer;
-		new VRage.Multiplayer.Replication.CB.ReplicationCommandBufferWriterReader(buffer);
-		int assemblyOffset = VRage.Multiplayer.Replication.CB.ReplicationCommandBufferWriterReader.AssemblyOffset;
-		int num = 0;
-		int num2 = 0;
-		int num3 = 0;
-		foreach (var datum in b.Data)
+		var buffer = headless ? InProcessReplicationSessionComponent.AllocateCB() : ((ReplicationCommandBufferSessionComponent)(object)comp).Buffer;
+		// Constructing a writer/reader initializes the static AssemblyOffset read on the next line.
+		new ReplicationCommandBufferWriterReader(buffer);
+		int assemblyOffset = ReplicationCommandBufferWriterReader.AssemblyOffset;
+		int dataApplied = 0;
+		int commandsApplied = 0;
+		int rejected = 0;
+		foreach (var (netId, typeId, bytes) in b.Data)
 		{
-			uint item = datum.NetId;
-			int item2 = datum.TypeId;
-			byte[] item3 = datum.Bytes;
-			Entity entity = ((hashSet != null && hashSet.Contains(item)) ? Local(item) : null);
-			if (entity == null || WorldSocial.Access(entity, IdentityOf(b.ClientId)) == false)
+			var target = allowed != null && allowed.Contains(netId) ? Local(netId) : null;
+			if (target == null || WorldSocial.Access(target, IdentityOf(b.ClientId)) == false)
 			{
-				num3++;
-				if (_joiners.TryGetValue(b.ClientId, out Joiner value2) && value2.Seat == null && value2.Candidates.Count < 64)
+				rejected++;
+				// Input for an entity not yet allowed may be a seat the joiner just sat in: queue it for the seat scan.
+				if (_joiners.TryGetValue(b.ClientId, out var seeker) && seeker.Seat == null && seeker.Candidates.Count < 64)
 				{
-					value2.Candidates.Enqueue(item);
+					seeker.Candidates.Enqueue(netId);
 				}
 			}
 			else
 			{
-				WriteMarkedData(buffer, assemblyOffset + 1, comp.Entity, entity, item2, item3);
-				num++;
+				WriteMarkedData(buffer, assemblyOffset + 1, comp.Entity, target, typeId, bytes);
+				dataApplied++;
 			}
 		}
-		_joiners.TryGetValue(b.ClientId, out Joiner value3);
-		uint stopGrid = (value3 != null) ? Interlocked.Exchange(ref value3.StopGridId, 0u) : 0u;
+		_joiners.TryGetValue(b.ClientId, out var joiner);
+		uint stopGrid = joiner != null ? Interlocked.Exchange(ref joiner.StopGridId, 0u) : 0u;
 		if (stopGrid != 0 && Local(stopGrid) is Entity stopped)
 		{
 			// The joiner's own zero flight input on leaving is dropped as "not ours" / not allowed, so the server kept the last thrust/turn.
@@ -1846,192 +1785,178 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 			{
 				Keen.VRage.DCS.Internal.RuntimeDataInfo.Info flightInfo = Keen.VRage.DCS.Internal.RuntimeDataInfo.Of(flightType);
 				WriteMarkedData(buffer, assemblyOffset + 1, comp.Entity, stopped, flightInfo.TypeId, new byte[flightInfo.Size]);
-				num++;
+				dataApplied++;
 			}
 		}
-		foreach (var remove in b.Removes)
+		foreach (var (netId, typeId) in b.Removes)
 		{
-			uint item4 = remove.NetId;
-			int item5 = remove.TypeId;
-			uint[] array = ((value3 != null) ? value3.LeftGridIds : null);
-			bool flag = array != null && Array.IndexOf(array, item4) >= 0 && MpClock.NowMs() - value3.LeftAtMs < 3000;
-			Entity entity2 = (((hashSet?.Contains(item4) ?? false) | flag) ? Local(item4) : null);
-			if (entity2 == null || WorldSocial.Access(entity2, IdentityOf(b.ClientId)) == false)
+			uint[]? leftIds = joiner != null ? joiner.LeftGridIds : null;
+			bool justLeft = leftIds != null && Array.IndexOf(leftIds, netId) >= 0 && MpClock.NowMs() - joiner.LeftAtMs < 3000;
+			var target = (allowed?.Contains(netId) ?? false) | justLeft ? Local(netId) : null;
+			if (target == null || WorldSocial.Access(target, IdentityOf(b.ClientId)) == false)
 			{
-				num3++;
+				rejected++;
 				continue;
 			}
-			WriteMarkedData(buffer, assemblyOffset + 2, comp.Entity, entity2, item5, null);
-			num++;
+			WriteMarkedData(buffer, assemblyOffset + 2, comp.Entity, target, typeId, null);
+			dataApplied++;
 			InputRemovals++;
-			if (InputRemovals <= 3 || _removalLogged.Add(item5))
+			if (InputRemovals <= 3 || _removalLogged.Add(typeId))
 			{
-				_log.Info($"host world sync: ClientId {b.ClientId}: removed {EngineCodec.DescribeType(item5).Name} on NetworkId {item4} like its game did (first ones / first of each type)");
+				_log.Info($"host world sync: ClientId {b.ClientId}: removed {EngineCodec.DescribeType(typeId).Name} on NetworkId {netId} like its game did (first ones / first of each type)");
 			}
 		}
-		ObjectSpace sp = new ObjectSpace
+		var sp = new ObjectSpace
 		{
 			Name = "host-client",
-			IdOf = (Entity e) => (!_ids.TryGet(e, out var id)) ? ((uint?)null) : new uint?(id),
+			IdOf = (Entity e) => !_ids.TryGet(e, out var id) ? null : id,
 			Explain = ExplainNetId,
 			Resolve = (uint id, bool _) => Local(id),
 			Session = comp.Session,
 			TranslatedSession = comp.Session
 		};
 		object serverComp = _serverComp;
-		bool flag2 = serverComp != null && ReplicationProbe.IsGuarded(serverComp);
-		PermissionGate gate = _gate;
-		long num4 = ((gate != null && _identityOf.TryGetValue(b.ClientId, out var value4)) ? value4 : 0);
-		PermissionsSessionComponent permissions = ((num4 != 0L) ? comp.Session.SessionComponents.TryGet<PermissionsSessionComponent>() : null);
-		ReplicationCommandBuffer replicationCommandBuffer = null;
-		int num5 = 0;
-		ObjectSpace objectSpace = null;
-		foreach (var command in b.Commands)
+		bool guarded = serverComp != null && ReplicationProbe.IsGuarded(serverComp);
+		var gate = _gate;
+		long actor = gate != null && _identityOf.TryGetValue(b.ClientId, out var identity) ? identity : 0;
+		var permissions = actor != 0L ? comp.Session.SessionComponents.TryGet<PermissionsSessionComponent>() : null;
+		ReplicationCommandBuffer? echoBuffer = null;
+		int echoed = 0;
+		ObjectSpace? echoSpace = null;
+		foreach (var (signal, cmd) in b.Commands)
 		{
-			string item6 = command.Signal;
-			WireCommand item7 = command.Command;
-			CommandLayout commandLayout = CommandLayouts.ByName(item6);
-			string fail = null;
-			if (!flag2)
+			var layout = CommandLayouts.ByName(signal);
+			string? fail = null;
+			if (!guarded)
 			{
 				fail = "replay guard not armed (see the probe:CommitFrame line)";
 			}
-			else if (commandLayout == null || !commandLayout.Forwardable)
+			else if (layout == null || !layout.Forwardable)
 			{
 				fail = "not forwardable here";
 			}
-			else if (AdminGuard.IsAdminSignal(item6) && !IsAdminClient(b.ClientId))
+			else if (AdminGuard.IsAdminSignal(signal) && !IsAdminClient(b.ClientId))
 			{
 				fail = "admin only";
 				Interlocked.Increment(ref AdminGuard.Refused);
 			}
-			else if (SocialGuard.IsOwnershipSignal(item6))
+			else if (SocialGuard.IsOwnershipSignal(signal))
 			{
 				fail = "ownership changes require the authenticated grid ownership controls";
 			}
-			else if (item7.Refs.Any(r => r.Kind == WireKind.Entity && WorldSocial.Access(Local(r.Id), num4) == false))
+			else if (cmd.Refs.Any(r => r.Kind == WireKind.Entity && WorldSocial.Access(Local(r.Id), actor) == false))
 			{
 				fail = "grid access denied by its owner";
 			}
-			else if (ControlGuard.Enabled && ControlGuard.IsControllerOnly(commandLayout) && item7.Refs.Count > 0 && item7.Refs[0].Kind == WireKind.Entity && (hashSet == null || !hashSet.Contains(item7.Refs[0].Id)) && Local(item7.Refs[0].Id)?.TryGet<CharacterControllableComponent>() != null)
+			else if (ControlGuard.Enabled && ControlGuard.IsControllerOnly(layout) && cmd.Refs.Count > 0 && cmd.Refs[0].Kind == WireKind.Entity && (allowed == null || !allowed.Contains(cmd.Refs[0].Id)) && Local(cmd.Refs[0].Id)?.TryGet<CharacterControllableComponent>() != null)
 			{
 				fail = "not allowed: another player's character (controller-only signal)";
 				Interlocked.Increment(ref ControlGuard.HostInjectDropped);
 			}
 			else
 			{
-				if (num4 != 0L && item7.Refs.Count > 0 && item7.Refs[0].Kind == WireKind.Entity)
+				string? denied;
+				if (actor != 0L && cmd.Refs.Count > 0 && cmd.Refs[0].Kind == WireKind.Entity && (denied = gate.Check(gate.SignalValidator(signal), Local(cmd.Refs[0].Id), actor, permissions)) != null)
 				{
-					string text = gate.Check(gate.SignalValidator(item6), Local(item7.Refs[0].Id), num4, permissions);
-					if (text != null)
-					{
-						fail = "not allowed: " + text;
-						goto IL_04eb;
-					}
+					fail = "not allowed: " + denied;
 				}
-				if (!SignalCodec.Write(buffer, commandLayout, item7, sp, _scratch, ref fail) && fail == null)
+				else if (!SignalCodec.Write(buffer, layout, cmd, sp, _scratch, ref fail) && fail == null)
 				{
 					fail = "?";
 				}
 			}
-			goto IL_04eb;
-			IL_04eb:
 			if (fail != null)
 			{
-				num3++;
-				NoteC2SDrop(item6, fail);
+				rejected++;
+				NoteC2SDrop(signal, fail);
 				continue;
 			}
-			if (_c2sApplied.AddOrUpdate(ShortName(item6), 1L, (string _, long c) => c + 1) == 1)
+			if (_c2sApplied.AddOrUpdate(ShortName(signal), 1L, (string _, long c) => c + 1) == 1)
 			{
-				_log.Info($"host world sync: ClientId {b.ClientId}: joiner signal {ShortName(item6)} handed to the server (first one)");
+				_log.Info($"host world sync: ClientId {b.ClientId}: joiner signal {ShortName(signal)} handed to the server (first one)");
 			}
-			num2++;
-			if (!IsClientSettableProperty(commandLayout))
+			commandsApplied++;
+			if (!IsClientSettableProperty(layout))
 			{
 				continue;
 			}
+			// A client-set property also has to reach the host's own client and every other joiner.
 			if (!headless)
 			{
-				string fail2 = null;
-				if (replicationCommandBuffer == null)
+				string? echoFail = null;
+				echoBuffer ??= InProcessReplicationSessionComponent.AllocateCB();
+				echoSpace ??= new ObjectSpace
 				{
-					replicationCommandBuffer = Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent.AllocateCB();
-				}
-				if (objectSpace == null)
+					Name = "host-client-inbound",
+					IdOf = (Entity e) => !_ids.TryGet(e, out var id) ? null : id,
+					Explain = ExplainNetId,
+					Resolve = (uint id, bool _) => id == 0 || !_ids.TryGet(id, out Entity entity) ? null : entity,
+					Session = (serverComp as InProcessReplicationSessionComponent)?.Session,
+					TranslatedSession = (serverComp as InProcessReplicationSessionComponent)?.Session
+				};
+				if (SignalCodec.Write(echoBuffer, layout, cmd, echoSpace, _scratch, ref echoFail))
 				{
-					objectSpace = new ObjectSpace
-					{
-						Name = "host-client-inbound",
-						IdOf = (Entity e) => (!_ids.TryGet(e, out var id)) ? ((uint?)null) : new uint?(id),
-						Explain = ExplainNetId,
-						Resolve = (uint id, bool _) => (id == 0 || !_ids.TryGet(id, out Entity obj)) ? null : obj,
-						Session = (serverComp as Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent)?.Session,
-						TranslatedSession = (serverComp as Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent)?.Session
-					};
-				}
-				if (SignalCodec.Write(replicationCommandBuffer, commandLayout, item7, objectSpace, _scratch, ref fail2))
-				{
-					num5++;
+					echoed++;
 				}
 			}
-			SignalKeyDef orAdd = host.SignalKeys.GetOrAdd(commandLayout.Name, commandLayout.Def(0).PayloadBytes, commandLayout.Signature);
+			var key = host.SignalKeys.GetOrAdd(layout.Name, layout.Def(0).PayloadBytes, layout.Signature);
 			lock (_signalSync)
 			{
 				_pendingSignals.Add(new WireCommand
 				{
-					Key = orAdd.Key,
-					Payload = item7.Payload,
-					Refs = item7.Refs
+					Key = key.Key,
+					Payload = cmd.Payload,
+					Refs = cmd.Refs
 				});
 			}
-			if (_echoedProps.AddOrUpdate(ShortName(item6), 1L, (string _, long c) => c + 1) == 1)
+			if (_echoedProps.AddOrUpdate(ShortName(signal), 1L, (string _, long c) => c + 1) == 1)
 			{
-				_log.Info($"host world sync: ClientId {b.ClientId}: {ShortName(item6)} is a client-set property: shown on the host and sent to every joiner (first one)");
+				_log.Info($"host world sync: ClientId {b.ClientId}: {ShortName(signal)} is a client-set property: shown on the host and sent to every joiner (first one)");
 			}
 		}
 		if (headless)
 		{
-			if (num + num2 > 0) comp.ReplayBuffer(buffer);
-			else Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent.ReturnCB(buffer);
+			if (dataApplied + commandsApplied > 0) comp.ReplayBuffer(buffer);
+			else InProcessReplicationSessionComponent.ReturnCB(buffer);
 		}
-		if (replicationCommandBuffer != null)
+		if (echoBuffer != null)
 		{
-			if (num5 > 0)
+			if (echoed > 0)
 			{
-				comp.ReplayBuffer(replicationCommandBuffer);
+				comp.ReplayBuffer(echoBuffer);
 			}
 			else
 			{
-				Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent.ReturnCB(replicationCommandBuffer);
+				InProcessReplicationSessionComponent.ReturnCB(echoBuffer);
 			}
 		}
-		InputDataApplied += num;
-		InputCommandsApplied += num2;
-		InputRejected += num3;
-		host.InputApplied(b.Peer, num, num2, num3);
+		InputDataApplied += dataApplied;
+		InputCommandsApplied += commandsApplied;
+		InputRejected += rejected;
+		host.InputApplied(b.Peer, dataApplied, commandsApplied, rejected);
+
 		Entity? Local(uint netId)
 		{
-			if (netId == 0 || !_ids.TryGet(netId, out Entity obj))
+			if (netId == 0 || !_ids.TryGet(netId, out Entity entity))
 			{
 				return null;
 			}
-			if (headless) return EngineCodec.IsDead(obj) ? null : obj;
+			if (headless) return EngineCodec.IsDead(entity) ? null : entity;
 			bool skip = false;
-			return replay.TranslateObject(obj, ReplicationFailureStrategy.NullOnAnyFail, ref skip) as Entity;
+			return replay.TranslateObject(entity, ReplicationFailureStrategy.NullOnAnyFail, ref skip) as Entity;
 		}
 	}
 
-	private void ServerSpawn(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent server, Joiner j)
+	private void ServerSpawn(InProcessReplicationSessionComponent server, Joiner j)
 	{
-		HostSession host = _host;
+		var host = _host;
 		if (host == null)
 		{
 			return;
 		}
 		try
 		{
-			if (!_joiners.TryGetValue(j.ClientId, out Joiner value) || value != j)
+			if (!_joiners.TryGetValue(j.ClientId, out var current) || current != j)
 			{
 				return;
 			}
@@ -2041,43 +1966,40 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 				host.CharacterAssigned(j.Peer, j.NetId, "existing character");
 				return;
 			}
-			Session session = server.Session;
-			IRespawn respawn = session.TryGet<IRespawn>();
+			var session = server.Session;
+			var respawn = session.TryGet<IRespawn>();
 			if (respawn == null)
 			{
 				host.CharacterFailed(j.Peer, "the host world has no respawn service (IRespawn)");
 				return;
 			}
-			IdentityId identityId = IdentityFor(j.ClientId);
-			HashSet<Entity> others = new HashSet<Entity>(from x in _joiners.Values
-				select x.Character into x
-				where x != null
-				select x, ReferenceEqualityComparer.Instance);
-			List<Entity> list = new List<Entity>();
-			Entity entity = null;
-			if (session.TryFillAliveCharactersHotfix(list, preserveOrder: true))
+			var identityId = IdentityFor(j.ClientId);
+			var others = new HashSet<Entity>(_joiners.Values.Select(x => x.Character).Where(x => x != null), ReferenceEqualityComparer.Instance);
+			var alive = new List<Entity>();
+			Entity? hostCharacter = null;
+			if (session.TryFillAliveCharactersHotfix(alive, preserveOrder: true))
 			{
-				entity = list.FirstOrDefault((Entity x) => !others.Contains(x) && (long?)x.TryGet<OwnershipComponent>()?.Owner == -1559595548) ?? list.FirstOrDefault((Entity x) => !others.Contains(x));
+				hostCharacter = alive.FirstOrDefault(x => !others.Contains(x) && (long?)x.TryGet<OwnershipComponent>()?.Owner == -1559595548) ?? alive.FirstOrDefault(x => !others.Contains(x));
 			}
-			Entity entity2 = null;
-			Entity entity3 = (((long)identityId != -1559595548) ? SavedCharacter(session, identityId, list, others) : null);
-			string text;
-			if (entity3 != null)
+			Entity? character = null;
+			var saved = (long)identityId != PlayerIdentities.HotfixIdentity ? SavedCharacter(session, identityId, alive, others) : null;
+			string via;
+			if (saved != null)
 			{
-				_parked.TryRemove(entity3, out _);
-				entity2 = entity3;
-				text = "its saved character (the host's save kept it; same identity)";
+				_parked.TryRemove(saved, out _);
+				character = saved;
+				via = "its saved character (the host's save kept it; same identity)";
 			}
-			else if (j.ShipPending || !ChosenSpawn(server.Session, host, j, respawn, identityId, entity, out entity2, out text))
+			else if (j.ShipPending || !ChosenSpawn(server.Session, host, j, respawn, identityId, hostCharacter, out character, out via))
 			{
 				return;
 			}
-			Assign(host, j, entity2, identityId, entity, text);
+			Assign(host, j, character, identityId, hostCharacter, via);
 		}
-		catch (Exception ex2)
+		catch (Exception ex)
 		{
-			_log.Error($"host world sync: spawning a character for ClientId {j.ClientId} failed: {ex2}");
-			host.CharacterFailed(j.Peer, ex2.GetType().Name + ": " + ex2.Message);
+			_log.Error($"host world sync: spawning a character for ClientId {j.ClientId} failed: {ex}");
+			host.CharacterFailed(j.Peer, ex.GetType().Name + ": " + ex.Message);
 		}
 	}
 
@@ -2093,40 +2015,38 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	private static Entity? SavedCharacter(Session session, IdentityId identity, List<Entity> alive, HashSet<Entity> others)
 	{
-		Entity entity = null;
+		Entity? lastControlled = null;
 		try
 		{
-			entity = session.TryGet<IPerPlayerData>()?.GetPerPlayerData<ControlPerPlayerData>(identity).LastControlledEntity;
+			lastControlled = session.TryGet<IPerPlayerData>()?.GetPerPlayerData<ControlPerPlayerData>(identity).LastControlledEntity;
 		}
 		catch (Exception)
 		{
 		}
-		Entity entity2 = null;
-		foreach (Entity item in alive)
+		// Prefer the character the identity last controlled, else any free one it owns.
+		Entity? owned = null;
+		foreach (var character in alive)
 		{
-			if (others.Contains(item) || EngineCodec.IsDead(item) || EngineCodec.IsClosing(session, item))
+			if (others.Contains(character) || EngineCodec.IsDead(character) || EngineCodec.IsClosing(session, character))
 			{
 				continue;
 			}
-			OwnershipComponent ownershipComponent = item.TryGet<OwnershipComponent>();
-			if (ownershipComponent != null && (long)ownershipComponent.Owner == (long)identity)
+			var ownership = character.TryGet<OwnershipComponent>();
+			if (ownership != null && (long)ownership.Owner == (long)identity)
 			{
-				if (item == entity)
+				if (character == lastControlled)
 				{
-					return item;
+					return character;
 				}
-				if (entity2 == null)
-				{
-					entity2 = item;
-				}
+				owned ??= character;
 			}
 		}
-		return entity2;
+		return owned;
 	}
 
 	// A leaving player's character stays in the world (with its position, inventory, skin and seat) and is saved with
 	// it; their next join takes it over again through SavedCharacter instead of respawning at a medbay.
-	private void ServerRelease(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent server, Joiner j)
+	private void ServerRelease(InProcessReplicationSessionComponent server, Joiner j)
 	{
 		try
 		{
@@ -2153,24 +2073,23 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	public static void BundlePostfix(object __result)
 	{
-		HostWorld current = Current;
+		var current = Current;
 		if (current == null || current._disabled)
 		{
 			return;
 		}
-		HostSession? host = current._host;
+		var host = current._host;
 		if (host == null || !host.AnySynced)
 		{
 			return;
 		}
-		ServerSceneContext.ServerToClientEntityReplicationData val = (ServerSceneContext.ServerToClientEntityReplicationData)((__result is ServerSceneContext.ServerToClientEntityReplicationData) ? __result : null);
-		if (val == null)
+		if (__result is not ServerSceneContext.ServerToClientEntityReplicationData data)
 		{
 			return;
 		}
 		try
 		{
-			current.ForwardSpawn(val);
+			current.ForwardSpawn(data);
 		}
 		catch (Exception e)
 		{
@@ -2184,115 +2103,116 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		{
 			return;
 		}
-		Stopwatch stopwatch = Stopwatch.StartNew();
-		foreach (Entity key in data.EntityObjectBuilders.Keys)
+		var stopwatch = Stopwatch.StartNew();
+		foreach (var entity in data.EntityObjectBuilders.Keys)
 		{
-			_ids.GetOrAssign(key);
+			_ids.GetOrAssign(entity);
 		}
-		NetIdProxyContext proxies = new NetIdProxyContext((Entity e) => (int)_ids.GetOrAssign(e), null);
-		HashSet<Blob> hashSet = new HashSet<Blob>();
-		EntityBundleMessage entityBundleMessage = new EntityBundleMessage
+		var proxies = new NetIdProxyContext(e => (int)_ids.GetOrAssign(e), null);
+		var blobs = new HashSet<Blob>();
+		var msg = new EntityBundleMessage
 		{
 			Kind = 1,
 			HostTick = _hostTick,
-			Bundle = ((data.ServerBundle.Entities.Count > 0) ? EngineCodec.SerializeBundle(data.ServerBundle, proxies, hashSet) : Array.Empty<byte>()),
-			Entities = EngineCodec.Locate(data.ServerBundle, data.EntityObjectBuilders, (Entity e) => _ids.GetOrAssign(e), out var unlocated)
+			Bundle = data.ServerBundle.Entities.Count > 0 ? EngineCodec.SerializeBundle(data.ServerBundle, proxies, blobs) : Array.Empty<byte>(),
+			Entities = EngineCodec.Locate(data.ServerBundle, data.EntityObjectBuilders, e => _ids.GetOrAssign(e), out var unlocated)
 		};
-		entityBundleMessage.RequiredBlobs = EngineCodec.Ids(hashSet);
-		foreach (KeyValuePair<Entity, DEntityBuilder> entityDatum in data.EntityData)
+		msg.RequiredBlobs = EngineCodec.Ids(blobs);
+		foreach (var entityData in data.EntityData)
 		{
-			DEntityBuilder builder = entityDatum.Value;
-			List<DataBlob> list = EngineCodec.Blobs(ref builder, Keys);
-			if (list.Count > 0)
+			var builder = entityData.Value;
+			var entityBlobs = EngineCodec.Blobs(ref builder, Keys);
+			if (entityBlobs.Count > 0)
 			{
-				entityBundleMessage.Data.Add((_ids.GetOrAssign(entityDatum.Key), list));
+				msg.Data.Add((_ids.GetOrAssign(entityData.Key), entityBlobs));
 			}
 		}
-		foreach (KeyValuePair<Entity, Entity> entityParent in data.EntityParents)
+		foreach (var parent in data.EntityParents)
 		{
-			entityBundleMessage.Parents.Add((_ids.GetOrAssign(entityParent.Key), _ids.GetOrAssign(entityParent.Value)));
+			msg.Parents.Add((_ids.GetOrAssign(parent.Key), _ids.GetOrAssign(parent.Value)));
 		}
-		foreach (Entity stagedEntity in data.StagedEntities)
+		foreach (var staged in data.StagedEntities)
 		{
-			entityBundleMessage.Staged.Add(_ids.GetOrAssign(stagedEntity));
+			msg.Staged.Add(_ids.GetOrAssign(staged));
 		}
-		foreach (Entity skippedEntity in data.SkippedEntities)
+		foreach (var skipped in data.SkippedEntities)
 		{
-			entityBundleMessage.Skipped.Add(_ids.GetOrAssign(skippedEntity));
+			msg.Skipped.Add(_ids.GetOrAssign(skipped));
 		}
-		byte[] array = entityBundleMessage.Encode();
-		HostSession host = _host;
-		host?.PublishLifecycle(array);
+		byte[] wire = msg.Encode();
+		var host = _host;
+		host?.PublishLifecycle(wire);
 		SpawnBundles++;
-		SpawnBytes += array.Length;
-		if (hashSet.Count > 0 && host != null)
+		SpawnBytes += wire.Length;
+		if (blobs.Count > 0 && host != null)
 		{
-			SendSpawnBlobs(host, hashSet);
+			SendSpawnBlobs(host, blobs);
 		}
-		if (data.EntityObjectBuilders.Count >= 20 || SpawnBundles <= 3 || hashSet.Count > 0)
+		if (data.EntityObjectBuilders.Count >= 20 || SpawnBundles <= 3 || blobs.Count > 0)
 		{
-			_log.Info($"host world sync: spawn bundle {data.EntityObjectBuilders.Count} entities ({data.StagedEntities.Count} staged, {data.SkippedEntities.Count} skipped, {unlocated} unlocated, {hashSet.Count} offloaded blobs), {MpLogExtensions.Bytes(array.Length)} on the wire ({MpLogExtensions.Bytes(entityBundleMessage.RawBodyBytes)} raw: engine bundle {MpLogExtensions.Bytes(entityBundleMessage.Bundle.Length)}, entity data {MpLogExtensions.Bytes(entityBundleMessage.DataBytes)}) in {stopwatch.Elapsed.TotalMilliseconds:0.0} ms");
+			_log.Info($"host world sync: spawn bundle {data.EntityObjectBuilders.Count} entities ({data.StagedEntities.Count} staged, {data.SkippedEntities.Count} skipped, {unlocated} unlocated, {blobs.Count} offloaded blobs), {MpLogExtensions.Bytes(wire.Length)} on the wire ({MpLogExtensions.Bytes(msg.RawBodyBytes)} raw: engine bundle {MpLogExtensions.Bytes(msg.Bundle.Length)}, entity data {MpLogExtensions.Bytes(msg.DataBytes)}) in {stopwatch.Elapsed.TotalMilliseconds:0.0} ms");
 		}
 	}
 
 	private void SendSpawnBlobs(HostSession host, HashSet<Blob> blobs)
 	{
-		IReadOnlyDataOffloading offloading = _offloading;
-		List<Blob> list = blobs.ToList();
+		var offloading = _offloading;
+		var list = blobs.ToList();
 		Task.Run(() =>
 		{
 			try
 			{
-				Dictionary<Guid, byte[]> dictionary;
+				Dictionary<Guid, byte[]> loaded;
 				int failed;
 				string firstError;
 				if (offloading != null)
 				{
-					dictionary = EngineCodec.LoadBlobs(offloading, list, BlobLoadTimeout, out failed, out firstError);
+					loaded = EngineCodec.LoadBlobs(offloading, list, BlobLoadTimeout, out failed, out firstError);
 				}
 				else
 				{
-					dictionary = list.ToDictionary(EngineCodec.Id, (Blob _) => (byte[])null);
+					loaded = list.ToDictionary(EngineCodec.Id, (Blob _) => (byte[])null);
 					failed = list.Count;
 					firstError = "no data offloading service on the host";
 				}
-				host.PublishBlobs(dictionary);
-				long value = ((IEnumerable<byte[]>)dictionary.Values).Sum((Func<byte[], long>)((byte[] d) => d?.Length ?? 0));
-				Interlocked.Add(ref SpawnBlobs, dictionary.Count);
-				Interlocked.Add(ref SpawnBlobBytes, value);
+				host.PublishBlobs(loaded);
+				long bytes = loaded.Values.Sum((byte[] d) => (long)(d?.Length ?? 0));
+				Interlocked.Add(ref SpawnBlobs, loaded.Count);
+				Interlocked.Add(ref SpawnBlobBytes, bytes);
 				if (failed > 0)
 				{
 					_log.Error($"host world sync: {failed} offloaded blob(s) of a spawn bundle could not be loaded (first: {firstError})");
 				}
 			}
-			catch (Exception value2)
+			catch (Exception ex)
 			{
-				_log.Error($"host world sync: sending a spawn bundle's offloaded blobs failed: {value2}");
+				_log.Error($"host world sync: sending a spawn bundle's offloaded blobs failed: {ex}");
 			}
 		});
 	}
 
-	private void StampServerBuffer(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent server)
+	private void StampServerBuffer(InProcessReplicationSessionComponent server)
 	{
-		ReplicationCommandBuffer buffer = ((ReplicationCommandBufferSessionComponent)(object)server).Buffer;
+		var buffer = ((ReplicationCommandBufferSessionComponent)(object)server).Buffer;
 		if (buffer != null)
 		{
-			double num = MpClock.NowMs();
-			double num2 = _lastStampMs + 16.666666666666668;
-			double num3 = ((_lastStampMs < 0.0 || Math.Abs(num - num2) > 250.0) ? num : (num2 + 0.1 * (num - num2)));
+			// Server ticks are nominally 60 Hz: follow that cadence, easing toward the wall clock, and resync on a big jump.
+			double now = MpClock.NowMs();
+			double expected = _lastStampMs + 1000.0 / 60.0;
+			double stamp = _lastStampMs < 0.0 || Math.Abs(now - expected) > 250.0 ? now : expected + 0.1 * (now - expected);
 			if (_lastStampMs >= 0.0)
 			{
-				num3 = Math.Max(num3, _lastStampMs + 1.0);
+				stamp = Math.Max(stamp, _lastStampMs + 1.0);
 			}
-			_lastStampMs = num3;
-			_bufferStamp.AddOrUpdate(buffer, new StrongBox<uint>((uint)(long)Math.Round(num3)));
+			_lastStampMs = stamp;
+			_bufferStamp.AddOrUpdate(buffer, new StrongBox<uint>((uint)(long)Math.Round(stamp)));
 			StampedBuffers++;
 		}
 	}
 
 	public void OnPostData(Entity? source, int typeId, ReadOnlySpan<byte> data, ReplicationCommandBuffer cb)
 	{
-		HostSession host = _host;
+		var host = _host;
 		if (host == null || !host.AnySynced || _disabled)
 		{
 			return;
@@ -2302,27 +2222,27 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 			StateUnknownEntity++;
 			return;
 		}
-		TypeKeyDef orAdd = Keys.GetOrAdd(typeId, EngineCodec.DescribeType);
+		var key = Keys.GetOrAdd(typeId, EngineCodec.DescribeType);
 		uint hostMs;
-		if (_bufferStamp.TryGetValue(cb, out StrongBox<uint> value))
+		if (_bufferStamp.TryGetValue(cb, out var stamp))
 		{
-			hostMs = value.Value;
+			hostMs = stamp.Value;
 		}
 		else
 		{
 			hostMs = (uint)MpClock.NowMs();
 			UnstampedPostData++;
 		}
-		host.PublishState(new StateEntry(id, orAdd.Key, (uint)Interlocked.Increment(ref _version), data.ToArray(), hostMs));
+		host.PublishState(new StateEntry(id, key.Key, (uint)Interlocked.Increment(ref _version), data.ToArray(), hostMs));
 	}
 
 	public void OnRemoveData(Entity? source, int typeId)
 	{
-		HostSession host = _host;
+		var host = _host;
 		if (host != null && host.AnySynced && !_disabled && source != null && _ids.TryGet(source, out var id))
 		{
-			TypeKeyDef orAdd = Keys.GetOrAdd(typeId, EngineCodec.DescribeType);
-			host.PublishDataRemove(new (uint, ushort)[1] { (id, orAdd.Key) });
+			var key = Keys.GetOrAdd(typeId, EngineCodec.DescribeType);
+			host.PublishDataRemove(new (uint, ushort)[] { (id, key.Key) });
 		}
 	}
 
@@ -2332,15 +2252,15 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		{
 			return false;
 		}
-		int num = BinaryPrimitives.ReadInt32LittleEndian(payload);
-		if (num >= 0)
+		int targetRef = BinaryPrimitives.ReadInt32LittleEndian(payload);
+		if (targetRef >= 0)
 		{
-			object obj = cb.ReadObject(num);
-			if (obj != null)
+			object target = cb.ReadObject(targetRef);
+			if (target != null)
 			{
-				long num2 = MpClock.NowMs();
-				(int, object) key = (l.Stub, obj);
-				if (_contactLast.TryGetValue(key, out var value) && num2 - value < 100)
+				long now = MpClock.NowMs();
+				(int, object) key = (l.Stub, target);
+				if (_contactLast.TryGetValue(key, out var last) && now - last < ContactCapMs)
 				{
 					ContactCapped++;
 					return true;
@@ -2349,7 +2269,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 				{
 					_contactLast.Clear();
 				}
-				_contactLast[key] = num2;
+				_contactLast[key] = now;
 				return false;
 			}
 		}
@@ -2358,23 +2278,23 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 
 	public void OnSignal(ReplicationCommandBuffer cb, int stub, ReadOnlySpan<byte> payload)
 	{
-		CommandLayout commandLayout = CommandLayouts.ByStub(stub);
-		if (commandLayout == null)
+		var layout = CommandLayouts.ByStub(stub);
+		if (layout == null)
 		{
 			return;
 		}
-		if (commandLayout.Name.StartsWith("Keen.VRage.Multiplayer.Replications.ObservableObjectReplicationSessionComponent+", StringComparison.Ordinal))
+		if (layout.Name.StartsWith("Keen.VRage.Multiplayer.Replications.ObservableObjectReplicationSessionComponent+", StringComparison.Ordinal))
 		{
-			string name = commandLayout.Name;
-			bool flag = ((name == "Keen.VRage.Multiplayer.Replications.ObservableObjectReplicationSessionComponent+ReleaseReplicatedObjectSignal" || name == "Keen.VRage.Multiplayer.Replications.ObservableObjectReplicationSessionComponent+ReleaseReplicatedCollectionSignal") ? true : false);
-			if (!flag || payload.Length < 12 || _disabled)
+			string name = layout.Name;
+			bool release = name == "Keen.VRage.Multiplayer.Replications.ObservableObjectReplicationSessionComponent+ReleaseReplicatedObjectSignal" || name == "Keen.VRage.Multiplayer.Replications.ObservableObjectReplicationSessionComponent+ReleaseReplicatedCollectionSignal";
+			if (!release || payload.Length < 12 || _disabled)
 			{
 				return;
 			}
 			try
 			{
-				int num = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(8));
-				_observables.OnRelease((num >= 0) ? cb.ReadObject(num) : null, commandLayout.Name == "Keen.VRage.Multiplayer.Replications.ObservableObjectReplicationSessionComponent+ReleaseReplicatedCollectionSignal", HeadlessReplication.Active ? (_serverComp as Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent)?.ReplayContext : _hostClientComp?.ReplayContext);
+				int keyRef = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(8));
+				_observables.OnRelease(keyRef >= 0 ? cb.ReadObject(keyRef) : null, layout.Name == "Keen.VRage.Multiplayer.Replications.ObservableObjectReplicationSessionComponent+ReleaseReplicatedCollectionSignal", HeadlessReplication.Active ? (_serverComp as InProcessReplicationSessionComponent)?.ReplayContext : _hostClientComp?.ReplayContext);
 				return;
 			}
 			catch (Exception ex)
@@ -2383,76 +2303,67 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 				return;
 			}
 		}
-		HostSession host = _host;
+		var host = _host;
 		if (host == null || !host.AnySynced || _disabled)
 		{
 			return;
 		}
-		if (!commandLayout.Forwardable)
+		if (!layout.Forwardable)
 		{
-			NoteS2CDrop(commandLayout.Name, commandLayout.Why ?? "not forwardable");
+			NoteS2CDrop(layout.Name, layout.Why ?? "not forwardable");
 			return;
 		}
-		if (IsHostPlayerEvent(commandLayout.Name))
+		if (IsHostPlayerEvent(layout.Name))
 		{
-			NoteS2CDrop(commandLayout.Name, "the host player's own event");
+			NoteS2CDrop(layout.Name, "the host player's own event");
 			return;
 		}
-		if (CappedContactSignal(commandLayout, cb, payload))
+		if (CappedContactSignal(layout, cb, payload))
 		{
-			NoteS2CDrop(commandLayout.Name, $"rate-capped (one per {100} ms per entity)");
+			NoteS2CDrop(layout.Name, $"rate-capped (one per {ContactCapMs} ms per entity)");
 			return;
 		}
-		SignalKeyDef orAdd = host.SignalKeys.GetOrAdd(commandLayout.Name, commandLayout.Def(0).PayloadBytes, commandLayout.Signature);
-		ObjectSpace objectSpace = _tapSpace;
-		if (objectSpace == null)
+		var key = host.SignalKeys.GetOrAdd(layout.Name, layout.Def(0).PayloadBytes, layout.Signature);
+		var space = _tapSpace ??= new ObjectSpace
 		{
-			ObjectSpace objectSpace2 = new ObjectSpace
-			{
-				Name = "server",
-				IdOf = (Entity e) => (!_ids.TryGet(e, out var id)) ? ((uint?)null) : new uint?(id),
-				Explain = ExplainNetId,
-				Resolve = (uint _, bool _) => (Entity?)null
-			};
-			ObjectSpace objectSpace3 = objectSpace2;
-			_tapSpace = objectSpace2;
-			objectSpace = objectSpace3;
-		}
-		ObjectSpace objectSpace4 = objectSpace;
-		objectSpace4.ClearLocalIds();
-		string fail = null;
-		WireCommand wireCommand = SignalCodec.Encode(commandLayout, orAdd.Key, payload, (int i) => cb.ReadObject(i), objectSpace4, _tapScratch, out var _, ref fail);
-		if (wireCommand == null)
+			Name = "server",
+			IdOf = (Entity e) => !_ids.TryGet(e, out var id) ? null : id,
+			Explain = ExplainNetId,
+			Resolve = (uint _, bool _) => (Entity?)null
+		};
+		space.ClearLocalIds();
+		string? fail = null;
+		var command = SignalCodec.Encode(layout, key.Key, payload, i => cb.ReadObject(i), space, _tapScratch, out _, ref fail);
+		if (command == null)
 		{
-			NoteS2CDrop(commandLayout.Name, fail ?? "?");
+			NoteS2CDrop(layout.Name, fail ?? "?");
 			return;
 		}
-		if (commandLayout.StringIdOffsets.Length != 0)
+		if (layout.StringIdOffsets.Length != 0)
 		{
-			_sids.NoteHost(wireCommand.Payload, commandLayout.StringIdOffsets);
+			_sids.NoteHost(command.Payload, layout.StringIdOffsets);
 		}
 		lock (_signalSync)
 		{
-			_pendingSignals.Add(wireCommand);
+			_pendingSignals.Add(command);
 		}
 		SignalsForwarded++;
-		if (_s2cSent.AddOrUpdate(ShortName(commandLayout.Name), 1L, (string _, long c) => c + 1) == 1)
+		if (_s2cSent.AddOrUpdate(ShortName(layout.Name), 1L, (string _, long c) => c + 1) == 1)
 		{
-			_log.Info("host world sync: forwarding S2C signal " + ShortName(commandLayout.Name) + " to joiners (first one)");
+			_log.Info("host world sync: forwarding S2C signal " + ShortName(layout.Name) + " to joiners (first one)");
 		}
 	}
 
 	internal static bool IsHostPlayerEvent(string fullName)
 	{
-		string text = ShortName(fullName);
-		if (text.Contains("LocalPlayer", StringComparison.Ordinal))
+		string name = ShortName(fullName);
+		if (name.Contains("LocalPlayer", StringComparison.Ordinal))
 		{
 			return true;
 		}
-		string[] hostPlayerEventPrefixes = HostPlayerEventPrefixes;
-		foreach (string value in hostPlayerEventPrefixes)
+		foreach (string prefix in HostPlayerEventPrefixes)
 		{
-			if (text.StartsWith(value, StringComparison.Ordinal))
+			if (name.StartsWith(prefix, StringComparison.Ordinal))
 			{
 				return true;
 			}
@@ -2466,56 +2377,52 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		_s2cDrops.AddOrUpdate(ShortName(name) + ": " + why, 1L, (string _, long c) => c + 1);
 	}
 
-	private void NoteC2SDrop(string name, string why)
-	{
-		_c2sDrops.AddOrUpdate(ShortName(name) + ": " + why, 1L, (string _, long c) => c + 1);
-	}
+	private void NoteC2SDrop(string name, string why) => _c2sDrops.AddOrUpdate(ShortName(name) + ": " + why, 1L, (string _, long c) => c + 1);
 
 	private static string ShortName(string full)
 	{
-		int num = full.LastIndexOf('.');
-		if (num < 0)
+		int dot = full.LastIndexOf('.');
+		if (dot < 0)
 		{
 			return full;
 		}
-		int num2 = num + 1;
-		return full.Substring(num2, full.Length - num2);
+		return full[(dot + 1)..];
 	}
 
 	private static string Top(ConcurrentDictionary<string, long> d, int n)
 	{
 		if (!d.IsEmpty)
 		{
-			return string.Join(", ", from kv in d.OrderByDescending((KeyValuePair<string, long> kv) => kv.Value).Take(n)
+			return string.Join(", ", from kv in d.OrderByDescending(kv => kv.Value).Take(n)
 				select $"{kv.Key} x{kv.Value}");
 		}
 		return "none";
 	}
 
-	private ObjectSpace ServerSpace(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent server)
+	private ObjectSpace ServerSpace(InProcessReplicationSessionComponent server)
 	{
-		ReplayContext replay = server.ReplayContext;
+		var replay = server.ReplayContext;
 		return new ObjectSpace
 		{
 			Name = "server",
-			IdOf = (Entity e) => (!_ids.TryGet(e, out var id)) ? ((uint?)null) : new uint?(id),
+			IdOf = (Entity e) => !_ids.TryGet(e, out var id) ? null : id,
 			Explain = ExplainNetId,
-			Resolve = (uint id, bool _) => (!_ids.TryGet(id, out Entity obj)) ? null : obj,
+			Resolve = (uint id, bool _) => !_ids.TryGet(id, out Entity entity) ? null : entity,
 			Session = server.Session,
-			ObservableId = (object o) => _observables.OidOnServer(o, replay),
-			ResolveObservable = (uint oid, bool inCollection) => _observables.ResolveOnServer(oid, inCollection, replay)
+			ObservableId = o => _observables.OidOnServer(o, replay),
+			ResolveObservable = (oid, inCollection) => _observables.ResolveOnServer(oid, inCollection, replay)
 		};
 	}
 
 	/// <summary>Sends a server story addressed to a joiner (discovery/encounter/sector notifications) to run on their PC.</summary>
 	internal bool ForwardServerStory(ushort clientId, IAsyncStateMachine stateMachine)
 	{
-		HostSession host = _host;
-		if (host == null || !_joiners.TryGetValue(clientId, out Joiner j) || Volatile.Read(ref _serverComp) is not Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent server)
+		var host = _host;
+		if (host == null || !_joiners.TryGetValue(clientId, out var j) || Volatile.Read(ref _serverComp) is not InProcessReplicationSessionComponent server)
 		{
 			return false;
 		}
-		ObjectSpace space = ServerSpace(server);
+		var space = ServerSpace(server);
 		List<(string, WireValue)>? fields = StoryState.Encode(stateMachine, space, out string? fail);
 		if (fields == null || space.LocalIds.Count > 0)
 		{
@@ -2536,7 +2443,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 	}
 
 	/// <summary>Streams a joiner's own research, colonization, contracts, credits, GPS, discoveries, tool modes and paint palette live instead of only at join.</summary>
-	private void RootPerPlayerData(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent server, Joiner j)
+	private void RootPerPlayerData(InProcessReplicationSessionComponent server, Joiner j)
 	{
 		if (!_identityOf.TryGetValue(j.ClientId, out long identity))
 		{
@@ -2547,10 +2454,10 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		{
 			return;
 		}
-		List<uint> roots = new List<uint>();
+		var roots = new List<uint>();
 		foreach (object item in items)
 		{
-			if (!HostIdentities.LiveTypes.Any((Type t) => t.IsInstanceOfType(item)))
+			if (!HostIdentities.LiveTypes.Any(t => t.IsInstanceOfType(item)))
 			{
 				continue;
 			}
@@ -2572,10 +2479,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 	}
 
-	public void OnClientStory(PeerId client, ushort clientId, StoryMove move)
-	{
-		(_stories ?? (_stories = new HostStories(_log))).Enqueue(client, clientId, move);
-	}
+	public void OnClientStory(PeerId client, ushort clientId, StoryMove move) => (_stories ??= new HostStories(_log)).Enqueue(client, clientId, move);
 
 	public void ForgetStories(PeerId client)
 	{
@@ -2583,10 +2487,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		_observables.Forget(client);
 	}
 
-	public void OnObservableEdits(PeerId client, ushort clientId, IReadOnlyList<MemberEdit> edits)
-	{
-		_observables.QueueEdits(client, clientId, edits);
-	}
+	public void OnObservableEdits(PeerId client, ushort clientId, IReadOnlyList<MemberEdit> edits) => _observables.QueueEdits(client, clientId, edits);
 
 	public void OnInvoke(Delegate callback)
 	{
@@ -2595,63 +2496,64 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 			return;
 		}
 		string name = callback.Method.Name;
-		bool flag = name.Contains("OnBeforeEntityRemovedFromScene", StringComparison.Ordinal);
-		bool flag2 = !flag && name.Contains("OnBeforeEntityDestroyed", StringComparison.Ordinal);
-		if (!flag && !flag2)
+		bool removed = name.Contains("OnBeforeEntityRemovedFromScene", StringComparison.Ordinal);
+		bool destroyed = !removed && name.Contains("OnBeforeEntityDestroyed", StringComparison.Ordinal);
+		if (!removed && !destroyed)
 		{
 			return;
 		}
-		Entity entity = CapturedEntity(callback.Target);
+		var entity = CapturedEntity(callback.Target);
 		if (entity == null || !_ids.TryGet(entity, out var id))
 		{
 			return;
 		}
+		// Mode 0 despawns (the entity may come back into range); mode 1 forgets it for good.
 		lock (_despawnSync)
 		{
-			_pendingDespawns.Add((id, (!flag) ? ((byte)1) : ((byte)0), flag ? null : entity));
+			_pendingDespawns.Add((id, removed ? (byte)0 : (byte)1, removed ? null : entity));
 		}
 	}
 
 	private void FlushDespawns(HostSession host)
 	{
-		List<(uint, byte, Entity)> pendingDespawns;
+		List<(uint Id, byte Mode, Entity? Forgotten)> pending;
 		lock (_despawnSync)
 		{
 			if (_pendingDespawns.Count == 0)
 			{
 				return;
 			}
-			pendingDespawns = _pendingDespawns;
-			_pendingDespawns = new List<(uint, byte, Entity)>();
+			pending = _pendingDespawns;
+			_pendingDespawns = new();
 		}
-		foreach (var (num, b, entity) in pendingDespawns)
+		foreach (var (id, mode, forgotten) in pending)
 		{
-			if (b == 0)
+			if (mode == 0)
 			{
 				Despawns++;
-				host.PublishDespawn(new uint[1] { num }, 0);
+				host.PublishDespawn(new[] { id }, 0);
 				continue;
 			}
 			Forgets++;
-			host.PublishDespawn(new uint[1] { num }, 1);
-			if (entity != null)
+			host.PublishDespawn(new[] { id }, 1);
+			if (forgotten != null)
 			{
-				_ids.Remove(entity, out var _);
-				RememberForgotten(num, entity);
+				_ids.Remove(forgotten, out _);
+				RememberForgotten(id, forgotten);
 			}
 		}
 	}
 
 	private void RememberForgotten(uint id, Entity entity)
 	{
-		string item;
+		string what;
 		try
 		{
-			item = (entity.GetComposition()?.Guid.ToString() ?? "?") ?? "";
+			what = (entity.GetComposition()?.Guid.ToString() ?? "?") ?? "";
 		}
 		catch (Exception)
 		{
-			item = "?";
+			what = "?";
 		}
 		lock (_forgotten)
 		{
@@ -2659,7 +2561,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 			{
 				_forgotten.Clear();
 			}
-			_forgotten[id] = (MpClock.NowMs(), item);
+			_forgotten[id] = (MpClock.NowMs(), what);
 		}
 	}
 
@@ -2675,9 +2577,9 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 		lock (_forgotten)
 		{
-			if (_forgotten.TryGetValue(id, out (long, string) value))
+			if (_forgotten.TryGetValue(id, out var forgotten))
 			{
-				return $" (destroyed on the server {(double)(MpClock.NowMs() - value.Item1) / 1000.0:0.0} s ago: {value.Item2})";
+				return $" (destroyed on the server {(double)(MpClock.NowMs() - forgotten.Ms) / 1000.0:0.0} s ago: {forgotten.What})";
 			}
 		}
 		return " (assigned earlier, no longer mapped on the host)";
@@ -2691,83 +2593,85 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 		return _closureEntityField.GetOrAdd(target.GetType(), (Type t) =>
 		{
-			FieldInfo[] fields = t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-			foreach (FieldInfo fieldInfo in fields)
+			foreach (var field in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
 			{
-				if (fieldInfo.FieldType == typeof(Entity))
+				if (field.FieldType == typeof(Entity))
 				{
-					return fieldInfo;
+					return field;
 				}
 			}
-			return (FieldInfo?)null;
+			return null;
 		})?.GetValue(target) as Entity;
 	}
 
-	public string SignalStats()
-	{
-		return $"S2C signals top: {Top(_s2cSent, 8)}; S2C dropped: {Top(_s2cDrops, 8)}; C2S applied: {Top(_c2sApplied, 8)}; C2S rejected: {Top(_c2sDrops, 6)}; " + ReplayGuard.Describe() + $"; 0.7.6: {AudioGate.Describe()}; {ToolShadowGuard.Describe()}; {ToolTargetDiagnostics.Describe()}; joiner data removals applied {InputRemovals}; {BuildGuards.Describe()}; {ControlGuard.Describe()}; 0.8.2: state stamped by server tick {StampedBuffers} ticks ({UnstampedPostData} unstamped), passenger ship actions refused {PassengerActionsRefused}; 0.8.3: contact signals rate-capped {ContactCapped}, StringIds announced {_sids.Announced}";
-	}
+	public string SignalStats() =>
+		$"S2C signals top: {Top(_s2cSent, 8)}; S2C dropped: {Top(_s2cDrops, 8)}; C2S applied: {Top(_c2sApplied, 8)}; C2S rejected: {Top(_c2sDrops, 6)}; "
+		+ ReplayGuard.Describe()
+		+ $"; 0.7.6: {AudioGate.Describe()}; {ToolShadowGuard.Describe()}; {ToolTargetDiagnostics.Describe()}; joiner data removals applied {InputRemovals}; {BuildGuards.Describe()}; {ControlGuard.Describe()}; 0.8.2: state stamped by server tick {StampedBuffers} ticks ({UnstampedPostData} unstamped), passenger ship actions refused {PassengerActionsRefused}; 0.8.3: contact signals rate-capped {ContactCapped}, StringIds announced {_sids.Announced}";
 
-	public string Stats()
-	{
-		return $"NetIds {_ids.Count}, type keys {Keys.Count}, spawn bundles {SpawnBundles} ({MpLogExtensions.Bytes(SpawnBytes)}; blobs {SpawnBlobs} {MpLogExtensions.Bytes(SpawnBlobBytes)}), despawns {Despawns}, forgets {Forgets}, joiners {_joiners.Count} (characters spawned {CharactersSpawned}, released {CharactersReleased}, lost {CharactersLost}), joiner input applied {InputDataApplied} data / {InputCommandsApplied} commands, rejected {InputRejected}, S2C signals forwarded {SignalsForwarded} dropped {SignalsDropped}, {_stories?.Describe() ?? "stories: none"}, state for unknown entities {StateUnknownEntity}; {_observables.Describe()}; " + ((_identities != null) ? (_identities.Describe() + ", players " + string.Join(", ", _identityOf.Select((KeyValuePair<ushort, long> kv) => $"ClientId {kv.Key} = {kv.Value}")) + (TeamPermissions.Enabled ? $", team-grid overrides {TeamPermissions.Overrides}" : "") + ((_gate != null) ? $", strict-grid checks {_gate.Checked} refused {_gate.Refused}" : "")) : "identities off");
-	}
+	public string Stats() =>
+		$"NetIds {_ids.Count}, type keys {Keys.Count}, spawn bundles {SpawnBundles} ({MpLogExtensions.Bytes(SpawnBytes)}; blobs {SpawnBlobs} {MpLogExtensions.Bytes(SpawnBlobBytes)}), despawns {Despawns}, forgets {Forgets}, joiners {_joiners.Count} (characters spawned {CharactersSpawned}, released {CharactersReleased}, lost {CharactersLost}), joiner input applied {InputDataApplied} data / {InputCommandsApplied} commands, rejected {InputRejected}, S2C signals forwarded {SignalsForwarded} dropped {SignalsDropped}, {_stories?.Describe() ?? "stories: none"}, state for unknown entities {StateUnknownEntity}; {_observables.Describe()}; "
+		+ (_identities != null
+			? _identities.Describe() + ", players " + string.Join(", ", _identityOf.Select(kv => $"ClientId {kv.Key} = {kv.Value}"))
+				+ (TeamPermissions.Enabled ? $", team-grid overrides {TeamPermissions.Overrides}" : "")
+				+ (_gate != null ? $", strict-grid checks {_gate.Checked} refused {_gate.Refused}" : "")
+			: "identities off");
 
-	private void UpdateNametagRoster(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp)
+	private void UpdateNametagRoster(InProcessReplicationSessionComponent comp)
 	{
 		if (_rosterFailed || !NametagOverlay.Enabled)
 		{
 			return;
 		}
-		long num = MpClock.NowMs();
-		if (num - _lastRosterMs < 500)
+		long now = MpClock.NowMs();
+		if (now - _lastRosterMs < RosterIntervalMs)
 		{
 			return;
 		}
-		_lastRosterMs = num;
+		_lastRosterMs = now;
 		try
 		{
-			List<PlayerTag> list = new List<PlayerTag>();
+			var tags = new List<PlayerTag>();
 			if (!_joiners.IsEmpty)
 			{
-				HashSet<Entity> hashSet = new HashSet<Entity>(ReferenceEqualityComparer.Instance);
-				foreach (Joiner value2 in _joiners.Values)
+				var joinerCharacters = new HashSet<Entity>(ReferenceEqualityComparer.Instance);
+				foreach (var joiner in _joiners.Values)
 				{
-					Entity character = value2.Character;
-					if (character != null && value2.NetId != 0 && !EngineCodec.IsDead(character))
+					var character = joiner.Character;
+					if (character != null && joiner.NetId != 0 && !EngineCodec.IsDead(character))
 					{
-						hashSet.Add(character);
-						if (_silentClients.ContainsKey(value2.ClientId)) continue;
-						list.Add(new PlayerTag(value2.ClientId, value2.NetId, Tagged(IdentityOf(value2.ClientId), value2.Name)));
+						joinerCharacters.Add(character);
+						if (_silentClients.ContainsKey(joiner.ClientId)) continue;
+						tags.Add(new PlayerTag(joiner.ClientId, joiner.NetId, Tagged(IdentityOf(joiner.ClientId), joiner.Name)));
 					}
 				}
-				Entity hostCharacterServer = _hostCharacterServer;
-				if (hostCharacterServer != null && !EngineCodec.IsDead(hostCharacterServer) && !hashSet.Contains(hostCharacterServer) && !_silentClients.ContainsKey(SyncProtocol.HostClientId) && _ids.TryGet(hostCharacterServer, out var id))
+				var hostCharacter = _hostCharacterServer;
+				if (hostCharacter != null && !EngineCodec.IsDead(hostCharacter) && !joinerCharacters.Contains(hostCharacter) && !_silentClients.ContainsKey(SyncProtocol.HostClientId) && _ids.TryGet(hostCharacter, out var id))
 				{
-					list.Add(new PlayerTag(1, id, Tagged(PlayerIdentities.HotfixIdentity, HostNametags.HostName)));
+					tags.Add(new PlayerTag(SyncProtocol.HostClientId, id, Tagged(PlayerIdentities.HotfixIdentity, HostNametags.HostName)));
 				}
 			}
-			HostNametags.Roster.Set(list);
+			HostNametags.Roster.Set(tags);
 		}
-		catch (Exception value)
+		catch (Exception ex)
 		{
 			_rosterFailed = true;
-			_log.Error($"nametags(host): building the player list failed, joiners get no nametags this session (game unaffected): {value}");
+			_log.Error($"nametags(host): building the player list failed, joiners get no nametags this session (game unaffected): {ex}");
 		}
 	}
 
-	private void ResolveHostCharacter(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp)
+	private void ResolveHostCharacter(InProcessReplicationSessionComponent comp)
 	{
 		try
 		{
-			Entity entity = (comp.Session.SessionComponents.TryGet<ClientPlayersSessionComponent>()?.LocalPlayerController)?.GetTopControllable<CharacterControllableComponent>()?.Entity;
-			if (entity != null && comp.ReplayContext.HasPairingLocal(entity) && comp.ReplayContext.TranslateLocalToRemote(entity) is Entity entity2 && entity2 != _hostCharacterServer)
+			var local = (comp.Session.SessionComponents.TryGet<ClientPlayersSessionComponent>()?.LocalPlayerController)?.GetTopControllable<CharacterControllableComponent>()?.Entity;
+			if (local != null && comp.ReplayContext.HasPairingLocal(local) && comp.ReplayContext.TranslateLocalToRemote(local) is Entity server && server != _hostCharacterServer)
 			{
-				_hostCharacterServer = entity2;
+				_hostCharacterServer = server;
 				if (!_hostCharacterLogged)
 				{
 					_hostCharacterLogged = true;
-					_log.Info("nametags(host): the host's character is the one its own client controls (" + (_ids.TryGet(entity2, out var id) ? $"NetworkId {id}" : "not synced yet") + ")");
+					_log.Info("nametags(host): the host's character is the one its own client controls (" + (_ids.TryGet(server, out var id) ? $"NetworkId {id}" : "not synced yet") + ")");
 				}
 			}
 		}
@@ -2777,29 +2681,29 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 	}
 
-	private void UpdateHostNametags(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp)
+	private void UpdateHostNametags(InProcessReplicationSessionComponent comp)
 	{
 		if (!NametagOverlay.Enabled)
 		{
 			return;
 		}
-		NametagOverlay nametagOverlay = _hostTags ?? (_hostTags = new NametagOverlay(_log, "host"));
-		if (_hostTagTick++ % 30 == 0 || _hostTagList.Count != _joiners.Count)
+		var overlay = _hostTags ??= new NametagOverlay(_log, "host");
+		if (_hostTagTick++ % HostTagResolveTicks == 0 || _hostTagList.Count != _joiners.Count)
 		{
 			ResolveHostCharacter(comp);
 			_hostTagList.Clear();
 			try
 			{
-				foreach (Joiner item2 in _joiners.Values.OrderBy((Joiner x) => x.ClientId))
+				foreach (var joiner in _joiners.Values.OrderBy(x => x.ClientId))
 				{
-					Entity item = null;
-					Entity character = item2.Character;
-					if (character != null && !EngineCodec.IsDead(character) && !_silentClients.ContainsKey(item2.ClientId))
+					Entity? target = null;
+					var character = joiner.Character;
+					if (character != null && !EngineCodec.IsDead(character) && !_silentClients.ContainsKey(joiner.ClientId))
 					{
 						bool skip = false;
-						item = comp.ReplayContext.TranslateObject(character, ReplicationFailureStrategy.NullOnAnyFail, ref skip) as Entity;
+						target = comp.ReplayContext.TranslateObject(character, ReplicationFailureStrategy.NullOnAnyFail, ref skip) as Entity;
 					}
-					_hostTagList.Add((item2.ClientId, item2.Name, item));
+					_hostTagList.Add((joiner.ClientId, joiner.Name, target));
 				}
 			}
 			catch (Exception ex)
@@ -2808,6 +2712,6 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 				_hostTagList.Clear();
 			}
 		}
-		nametagOverlay.Update(comp.Session, comp.Entity, _hostTagList);
+		overlay.Update(comp.Session, comp.Entity, _hostTagList);
 	}
 }
