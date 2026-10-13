@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+    <LangVersion>13.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <CheckForOverflowUnderflow>false</CheckForOverflowUnderflow>
+    <RootNamespace>Y51_SE2Online</RootNamespace>
+    <AssemblyName>Y51_SE2Online</AssemblyName>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(SE2Bin)' == ''">
+    <SE2Bin>G:\SteamLibrary\steamapps\common\SpaceEngineers2\Game2</SE2Bin>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="2.4.2" />
+    <PackageReference Include="Krafs.Publicizer" Version="2.3.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Avalonia.Base;Avalonia.Controls;Avalonia.Markup;Avalonia.Markup.Xaml;Game2.Client;Game2.Game;Game2.Simulation;SpaceEngineers2;Steamworks.NET;VRage.Audio;VRage.Core;VRage.Core.Game;VRage.DCS;VRage.Game;VRage.Input;VRage.Library;VRage.Multiplayer;VRage.Physics;VRage.UI;VRage.UI.Shared;VRage.Voxels">
+      <HintPath>$(SE2Bin)\%(Identity).dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Publicize Include="Game2.Client;Game2.Simulation;SpaceEngineers2;VRage.Multiplayer" IncludeVirtualMembers="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Content\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Remove="Tools\**" />
+  </ItemGroup>
+</Project>

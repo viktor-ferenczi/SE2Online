@@ -1,0 +1,303 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
+using Y51_SE2Online.Net;
+
+namespace Y51_SE2Online.Sync;
+
+public sealed partial class HostSession
+{
+	private readonly ChatThrottle _chatThrottle = new();
+	private readonly List<(PeerId Peer, long DueMs)> _removals = new();
+	private readonly Dictionary<PeerId, string> _adminMessages = new();
+	private long _nextAdminPushMs;
+	private string _adminSignature = "";
+
+	public AccessList Access => _o.Access;
+
+	public bool Pvp => _o.Access.Pvp ?? _o.Pvp;
+
+	public bool OfflineRaidProtection => _o.Access.OfflineRaid ?? _o.OfflineRaidProtection;
+
+	/// <summary>Null keeps the world's own per-player PCU, 0 is unlimited.</summary>
+	public int PcuInForce { get => _o.PcuInForce; set => _o.PcuInForce = value; }
+
+	public bool? SunRotation => _o.Access.SunRotation ?? _o.SunRotation;
+
+	public double? SunPeriodMinutes => _o.Access.SunPeriodMinutes ?? _o.SunPeriodMinutes;
+
+	public (bool Rotation, double PeriodMinutes) SunInForce { get => _o.SunInForce; set => _o.SunInForce = value; }
+
+	private double _sunNudgeDeg;
+
+	/// <summary>Degrees the sun should move, collected for the world thread.</summary>
+	public double TakeSunNudge() { lock (_sync) { double deg = _sunNudgeDeg; _sunNudgeDeg = 0; return deg; } }
+
+	public int? PcuLimit => _o.Access.PcuLimit is int chosen ? (chosen < 0 ? null : chosen) : _o.PcuLimit;
+
+	public OnlineRole RoleOf(ulong peerId) => peerId != 0 && _o.Access.IsAdmin(PeerAlias.SteamOf(peerId)) ? OnlineRole.Admin : OnlineRole.Player;
+
+	public bool IsAdminClient(ushort clientId)
+	{
+		if (clientId == SyncProtocol.HostClientId) return true;
+		lock (_sync)
+		{
+			var p = _players.Values.FirstOrDefault(x => x.ClientId == clientId);
+			return p != null && RoleOf(p.Peer?.Value ?? SteamIdOfKey(p.Key)) == OnlineRole.Admin;
+		}
+	}
+
+	public string DisplayName(PlayerRecord p) => Decorate(p.Name, p.IdentityId);
+
+	private string Decorate(string name, long identity)
+	{
+		string tag = identity == 0 ? null : _o.FactionTagOf?.Invoke(identity);
+		return string.IsNullOrEmpty(tag) ? name : "[" + tag + "] " + name;
+	}
+
+	/// <summary>Returns a reject reason for a join that passed version checks, or null to admit it.</summary>
+	private bool CheckAccess(PeerId peer, JoinRequest req)
+	{
+		var verdict = _o.Access.CheckJoin(PeerAlias.SteamOf(peer.Value), req.Password, _o.Password, _o.SessionName, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+		if (verdict == null) return true;
+		_log.Error($"sync(host): refusing {peer} '{req.PlayerName}': {(verdict.Value.Code == JoinRejectCode.Removed ? "banned" : verdict.Value.Text)}");
+		_t.Send(peer, Channel.Control, TextMessage.Encode(SyncMsg.JoinReject, verdict.Value.Code, verdict.Value.Text));
+		return false;
+	}
+
+	private void HandleChat(RemoteClient c, byte[] data)
+	{
+		if (c.Status != ClientStatus.Synced || data.Length > 2048) return;
+		string text = SocialState.Clean(SocialMessage.Decode<ChatSend>(data).Text, ChatLog.MaxText);
+		if (text.Length == 0) return;
+		if (!_chatThrottle.Allow(c.Peer.Value, _clock()))
+		{
+			SendChatTo(c.Peer, new ChatLine("Server", 0, "You are sending messages too quickly.", ChatKind.System, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
+			return;
+		}
+		var kind = RoleOf(c.Peer.Value) == OnlineRole.Admin ? ChatKind.Admin : ChatKind.Player;
+		BroadcastChat(new ChatLine(DisplayName(c.Player), c.Peer.Value, text, kind, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
+	}
+
+	/// <summary>Chat from the hosting player (identity known through HostIdentity) or the dedicated console.</summary>
+	public void LocalChat(string text, bool console)
+	{
+		text = SocialState.Clean(text, ChatLog.MaxText);
+		if (text.Length == 0) return;
+		string from = console ? "Server" : Decorate(_o.HostName, _o.HostIdentity);
+		BroadcastChat(new ChatLine(from, console ? 0 : _o.HostSteamId, text, console ? ChatKind.System : ChatKind.Admin, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
+	}
+
+	private void BroadcastChat(ChatLine line)
+	{
+		_log.Info($"chat: {line.From}: {line.Text}");
+		ChatLog.Add(line, _clock());
+		byte[] data = SocialMessage.Encode(SyncMsg.ChatLine, line);
+		lock (_sync)
+			foreach (RemoteClient c in _clients.Values)
+				if (c.Status == ClientStatus.Synced) _t.Send(c.Peer, Channel.Control, data);
+	}
+
+	private void Announce(string text) => BroadcastChat(new ChatLine("Server", 0, text, ChatKind.System, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
+
+	private void SendChatTo(PeerId peer, ChatLine line) => _t.Send(peer, Channel.Control, SocialMessage.Encode(SyncMsg.ChatLine, line));
+
+	private void HandleAdmin(RemoteClient c, byte[] data)
+	{
+		if (c.Status != ClientStatus.Synced || data.Length > 1024) return;
+		var request = SocialMessage.Decode<AdminRequest>(data);
+		string message;
+		if (request.Action == AdminAction.Refresh) message = "";
+		else if (RoleOf(c.Peer.Value) != OnlineRole.Admin) message = "You are not an admin on this server.";
+		else message = Act(c.Peer.Value, c.Player.Name, OnlineRole.Admin, request, c.Peer, c.Player.ClientId);
+		lock (_sync) _adminMessages[c.Peer] = message;
+		_nextAdminPushMs = 0;
+		_adminSignature = "";
+	}
+
+	/// <summary>Admin action by the hosting player or the dedicated console (actorId 0).</summary>
+	public string LocalAdmin(AdminRequest request) => Act(0, _o.Dedicated ? "Server" : _o.HostName, OnlineRole.Host, request, null, SyncProtocol.HostClientId);
+
+	private string Act(ulong actorId, string actorName, OnlineRole actorRole, AdminRequest r, PeerId? actorPeer, ushort actorClientId)
+	{
+		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		if (!Enum.IsDefined(r.Action)) return "Unknown action.";
+		if (r.Action >= AdminAction.Creative && r.Action is not (AdminAction.Pvp or AdminAction.OfflineRaidProtection or AdminAction.PcuLimit or AdminAction.SunRotation or AdminAction.SunPeriod or AdminAction.SunNudge))
+		{
+			_world.OnAdminRequest(actorPeer, actorClientId, r);
+			return "";
+		}
+		string name = NameOf(r.Target);
+		ulong account = PeerAlias.SteamOf(r.Target);
+		bool protectedTarget = r.Target != 0 && (account == _o.HostSteamId || (actorRole != OnlineRole.Host && RoleOf(r.Target) == OnlineRole.Admin && r.Target != actorId));
+		string result;
+		switch (r.Action)
+		{
+		case AdminAction.Kick:
+		case AdminAction.Ban:
+			if (protectedTarget) return "Only the host can remove another admin.";
+			if (r.Target == actorId) return "You cannot remove yourself.";
+			if (r.Action == AdminAction.Ban) result = _o.Access.Ban(account, name, r.Reason, r.Minutes, actorName, now);
+			else if (!Remove(r.Target, new RemovalNotice(false, SocialState.Clean(r.Reason, 200), null, actorName, _o.SessionName))) return "That player is not connected.";
+			else result = $"Kicked {name}.";
+			if (r.Action == AdminAction.Ban) RemoveAccount(account, new RemovalNotice(true, SocialState.Clean(r.Reason, 200), r.Minutes == 0 ? null : now + r.Minutes * 60000L, actorName, _o.SessionName));
+			string why = SocialState.Clean(r.Reason, 200);
+			Announce((r.Action == AdminAction.Ban ? $"{name} was banned {(r.Minutes == 0 ? "permanently" : "for " + AccessList.Remaining(r.Minutes * 60000L))}" : $"{name} was kicked")
+				+ $" by {actorName}." + (string.IsNullOrWhiteSpace(why) ? " No reason given." : " Reason: " + why));
+			break;
+		case AdminAction.Unban: result = _o.Access.Unban(account); break;
+		case AdminAction.Promote:
+		case AdminAction.Demote:
+			if (actorRole != OnlineRole.Host && r.Action == AdminAction.Demote && r.Target != actorId) return "Only the host can demote another admin.";
+			result = _o.Access.SetAdmin(account, name, r.Action == AdminAction.Promote); break;
+		case AdminAction.WhitelistAdd: result = _o.Access.SetWhitelisted(account, name, true); break;
+		case AdminAction.WhitelistRemove: result = _o.Access.SetWhitelisted(account, name, false); break;
+		case AdminAction.WhitelistOnly: result = _o.Access.SetWhitelistOnly(r.Value); break;
+		case AdminAction.Pvp:
+			result = _o.Access.SetPvp(r.Value);
+			_o.PvpChanged?.Invoke(r.Value);
+			BroadcastChat(new ChatLine("Server", 0, result, ChatKind.System, now));
+			break;
+		case AdminAction.PcuLimit:
+			if (r.Size > 100_000_000) return "That PCU limit is too large.";
+			result = _o.Access.SetPcuLimit((int)Math.Round(r.Size));
+			BroadcastChat(new ChatLine("Server", 0, result, ChatKind.System, now));
+			break;
+		case AdminAction.SunRotation:
+			result = _o.Access.SetSunRotation(r.Value);
+			BroadcastChat(new ChatLine("Server", 0, result, ChatKind.System, now));
+			break;
+		case AdminAction.SunPeriod:
+			if (!(r.Size >= 1 && r.Size <= 10080)) return "Day length must be between 1 minute and 7 days (10080 minutes).";
+			result = _o.Access.SetSunPeriod(r.Size);
+			BroadcastChat(new ChatLine("Server", 0, result, ChatKind.System, now));
+			break;
+		case AdminAction.SunNudge:
+			if (!(Math.Abs(r.Size) <= 360)) return "Move the sun by at most 360 degrees.";
+			lock (_sync) _sunNudgeDeg += r.Size;
+			result = "Sun moved " + r.Size.ToString("+0.#;-0.#", System.Globalization.CultureInfo.InvariantCulture) + " degrees.";
+			break;
+		case AdminAction.OfflineRaidProtection:
+			result = _o.Access.SetOfflineRaid(r.Value);
+			_o.OfflineRaidChanged?.Invoke(r.Value);
+			BroadcastChat(new ChatLine("Server", 0, result, ChatKind.System, now));
+			break;
+		default: return "";
+		}
+		_log.Info($"admin: {actorName} {r.Action} {(r.Target != 0 ? name + " (" + r.Target + ")" : "")}: {result}");
+		_adminSignature = "";
+		_nextAdminPushMs = 0;
+		return result;
+	}
+
+	private string NameOf(ulong steamId)
+	{
+		lock (_sync)
+		{
+			var p = _players.Values.FirstOrDefault(x => x.Peer?.Value == steamId) ?? _players.Values.FirstOrDefault(x => SteamIdOfKey(x.Key) == steamId);
+			if (p != null) return p.Name;
+		}
+		var (bans, whitelist, admins) = _o.Access.Copy(0);
+		return bans.FirstOrDefault(b => b.SteamId == steamId)?.Name ?? whitelist.Concat(admins).FirstOrDefault(a => a.SteamId == steamId)?.Name ?? steamId.ToString();
+	}
+
+	/// <summary>Removes every game instance of a Steam account.</summary>
+	private void RemoveAccount(ulong account, RemovalNotice notice)
+	{
+		List<ulong> peers;
+		lock (_sync) peers = _clients.Keys.Select(p => p.Value).Where(v => PeerAlias.SteamOf(v) == account).ToList();
+		foreach (ulong peer in peers) Remove(peer, notice);
+	}
+
+	/// <summary>Tells a connected player why they are removed, then disconnects them shortly after.</summary>
+	public bool Remove(ulong steamId, RemovalNotice notice)
+	{
+		PeerId? peer;
+		lock (_sync) peer = _clients.Keys.Cast<PeerId?>().FirstOrDefault(p => p.Value.Value == steamId);
+		if (peer == null) return false;
+		lock (_sync) if (_clients.TryGetValue(peer.Value, out var client)) client.Removed = true;
+		_t.Send(peer.Value, Channel.Control, TextMessage.Encode(SyncMsg.JoinReject, JoinRejectCode.Removed, JsonSerializer.Serialize(notice)));
+		lock (_removals) _removals.Add((peer.Value, _clock() + 750));
+		return true;
+	}
+
+	private void TickAdmin(long now)
+	{
+		lock (_removals)
+			for (int i = _removals.Count - 1; i >= 0; i--)
+				if (now >= _removals[i].DueMs)
+				{
+					_t.Disconnect(_removals[i].Peer, 1000, "Removed by an admin");
+					_removals.RemoveAt(i);
+				}
+		if (now < _nextAdminPushMs) return;
+		_nextAdminPushMs = now + 1000;
+		var players = AccessPlayers();
+		string signature = _o.Access.Revision + "|" + string.Join(",", (_o.SafeZones?.Invoke() ?? Array.Empty<SafeZoneInfo>()).Select(z => z.NetId + ":" + z.Radius)) + "|" + string.Join(";", players.Select(p => p.SteamId + p.Name + p.Role + p.Connected + p.PingMs / 50));
+		bool changed = signature != _adminSignature;
+		_adminSignature = signature;
+		List<RemoteClient> clients;
+		// A joiner that finishes loading after the last roster change still needs its first copy.
+		lock (_sync) clients = _clients.Values.Where(c => c.Status == ClientStatus.Synced && (changed || !c.AdminStateSent)).ToList();
+		foreach (var c in clients)
+		{
+			string message;
+			lock (_sync) { _adminMessages.TryGetValue(c.Peer, out message); _adminMessages.Remove(c.Peer); }
+			var state = StateFor(RoleOf(c.Peer.Value), players, message ?? "");
+			byte[] data = SocialMessage.Encode(SyncMsg.AdminState, state);
+			_t.Send(c.Peer, data.Length > 8192 ? Channel.Bulk : Channel.Control, data);
+			c.AdminStateSent = true;
+		}
+	}
+
+	/// <summary>The roster with roles; ping is -1 when unknown.</summary>
+	public AccessPlayer[] AccessPlayers()
+	{
+		var list = new List<AccessPlayer>();
+		if (_o.HostCountsAsPlayer) list.Add(new AccessPlayer(_o.HostSteamId, Decorate(_o.HostName, _o.HostIdentity), OnlineRole.Host, true, 0));
+		List<(PeerId? Peer, string Key, string Name, long Identity)> players;
+		lock (_sync) players = _players.Values.Select(p => (p.Peer, p.Key, p.Name, p.IdentityId)).ToList();
+		foreach (var p in players)
+		{
+			int ping = -1;
+			if (p.Peer is PeerId peer && _t.TryGetStats(peer, out PeerStats st) && st.LastRttMs >= 0) ping = (int)st.LastRttMs;
+			ulong id = p.Peer?.Value ?? SteamIdOfKey(p.Key);
+			list.Add(new AccessPlayer(id, Decorate(p.Name, p.Identity), RoleOf(id), p.Peer.HasValue, ping));
+		}
+		return list.ToArray();
+	}
+
+	private static ulong SteamIdOfKey(string key)
+	{
+		if (!key.StartsWith("steam:", StringComparison.Ordinal)) return 0;
+		var digits = key.AsSpan(6);
+		int hash = digits.IndexOf('#');
+		return ulong.TryParse(hash < 0 ? digits : digits[..hash], out ulong id) ? id : 0;
+	}
+
+	public AdminState StateFor(OnlineRole role, AccessPlayer[] players, string message)
+	{
+		var (bans, whitelist, _) = _o.Access.Copy(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+		bool admin = role != OnlineRole.Player;
+		return new AdminState
+		{
+			Role = role, ServerName = _o.SessionName, Dedicated = !_o.HostCountsAsPlayer, Message = message, MaxPlayers = _o.MaxPlayers,
+			WhitelistOnly = _o.Access.WhitelistOnly, Pvp = Pvp, OfflineRaidProtection = OfflineRaidProtection, PcuLimit = _o.PcuInForce, SunRotation = _o.SunInForce.Rotation, SunPeriodMinutes = _o.SunInForce.PeriodMinutes, HasPassword = !string.IsNullOrEmpty(_o.Password), Revision = _o.Access.Revision,
+			Players = admin ? players : players.Select(p => p with { SteamId = 0 }).ToArray(),
+			Bans = admin ? bans : Array.Empty<BanEntry>(), Whitelist = admin ? whitelist : Array.Empty<AccessEntry>(),
+			SafeZones = admin ? _o.SafeZones?.Invoke() ?? Array.Empty<SafeZoneInfo>() : Array.Empty<SafeZoneInfo>()
+		};
+	}
+
+	/// <summary>Replies to a world admin action requested by a joiner.</summary>
+	public void SendAdminMessage(PeerId? peer, string message)
+	{
+		if (peer == null) { LocalAdminMessage = message; return; }
+		lock (_sync) _adminMessages[peer.Value] = message;
+		_adminSignature = "";
+		_nextAdminPushMs = 0;
+	}
+
+	public string LocalAdminMessage { get; set; } = "";
+}
