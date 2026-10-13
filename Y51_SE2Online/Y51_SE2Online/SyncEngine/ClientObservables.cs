@@ -18,10 +18,7 @@ internal sealed class ClientObservables
 	{
 		public uint Oid;
 
-		public override string ToString()
-		{
-			return $"host observable #{Oid}";
-		}
+		public override string ToString() => $"host observable #{Oid}";
 	}
 
 	private sealed class RemoteCollection : IObservedCollection, IObserved, IDisposable
@@ -36,10 +33,7 @@ internal sealed class ClientObservables
 		{
 		}
 
-		public override string ToString()
-		{
-			return $"host observed list #{Oid}";
-		}
+		public override string ToString() => $"host observed list #{Oid}";
 	}
 
 	private sealed class Entry
@@ -56,7 +50,7 @@ internal sealed class ClientObservables
 
 		public bool IsList => Wrapper != null;
 
-		public object? Local => ((object)Wrapper?.Source) ?? ((object)Replica);
+		public object? Local => (object?)Wrapper?.Source ?? Replica;
 	}
 
 	private readonly IMpLog _log;
@@ -100,52 +94,43 @@ internal sealed class ClientObservables
 
 	private void Note(string k)
 	{
-		_counts[k] = (_counts.TryGetValue(k, out var value) ? (value + 1) : 1);
+		_counts[k] = _counts.TryGetValue(k, out var count) ? count + 1 : 1;
 	}
 
 	public uint? IdOf(object local)
 	{
-		if (!_byLocal.TryGetValue(local, out Entry value))
+		if (!_byLocal.TryGetValue(local, out Entry? entry))
 		{
 			return null;
 		}
-		return value.Oid;
+		return entry.Oid;
 	}
 
 	public bool IsReplica(object? local)
 	{
-		if (local != null)
-		{
-			return _byLocal.ContainsKey(local);
-		}
-		return false;
+		return local != null && _byLocal.ContainsKey(local);
 	}
 
 	public bool WasReleased(object local)
 	{
-		object value;
-		if (!_byLocal.ContainsKey(local))
-		{
-			return _released.TryGetValue(local, out value);
-		}
-		return false;
+		return !_byLocal.ContainsKey(local) && _released.TryGetValue(local, out _);
 	}
 
 	public object? Resolve(uint oid)
 	{
-		if (!_byOid.TryGetValue(oid, out Entry value))
+		if (!_byOid.TryGetValue(oid, out Entry? entry))
 		{
 			return null;
 		}
-		return value.Local;
+		return entry.Local;
 	}
 
 	public ObjectSpace Attach(ObjectSpace sp)
 	{
 		sp.ObservableId = IdOf;
-		sp.ListId = (IList l) => IdOf(l);
-		sp.ResolveObservable = (uint oid, bool _) => (!_byOid.TryGetValue(oid, out Entry value)) ? null : value.Replica;
-		sp.ResolveList = (uint oid) => (!_byOid.TryGetValue(oid, out Entry value)) ? null : value.Wrapper?.Source;
+		sp.ListId = l => IdOf(l);
+		sp.ResolveObservable = (oid, _) => !_byOid.TryGetValue(oid, out Entry? entry) ? null : entry.Replica;
+		sp.ResolveList = oid => !_byOid.TryGetValue(oid, out Entry? entry) ? null : entry.Wrapper?.Source;
 		sp.WasReleased = WasReleased;
 		return sp;
 	}
@@ -169,22 +154,22 @@ internal sealed class ClientObservables
 			}
 			try
 			{
-				string text = op.Kind switch
+				string? failure = op.Kind switch
 				{
-					ObservableOpKind.NewList => NewList(comp, op), 
-					ObservableOpKind.NewObject => NewObject(comp, op), 
-					ObservableOpKind.Member => Member(comp, op), 
-					ObservableOpKind.ListChange => ListChange(comp, op), 
-					ObservableOpKind.Release => Release(comp, op), 
-					_ => $"unknown step {op.Kind}", 
+					ObservableOpKind.NewList => NewList(comp, op),
+					ObservableOpKind.NewObject => NewObject(comp, op),
+					ObservableOpKind.Member => Member(comp, op),
+					ObservableOpKind.ListChange => ListChange(comp, op),
+					ObservableOpKind.Release => Release(comp, op),
+					_ => $"unknown step {op.Kind}",
 				};
-				if (text == null)
+				if (failure == null)
 				{
 					Applied++;
 				}
 				else
 				{
-					Fail(op, text);
+					Fail(op, failure);
 				}
 			}
 			catch (Exception ex)
@@ -197,8 +182,8 @@ internal sealed class ClientObservables
 	private void Fail(ObservableOp op, string why)
 	{
 		Failed++;
-		ObservableOpKind kind = op.Kind;
-		if (kind - 1 <= ObservableOpKind.NewList)
+		// NewList or NewObject (the byte subtraction wraps 0 to 255)
+		if (op.Kind - 1 <= ObservableOpKind.NewList)
 		{
 			_broken.Add(op.Oid);
 		}
@@ -216,7 +201,6 @@ internal sealed class ClientObservables
 
 	private string? NewList(ObservableObjectReplicationClientSessionComponent comp, ObservableOp op)
 	{
-		//IL_00cf: Unknown result type (might be due to invalid IL or missing references)
 		if (_byOid.ContainsKey(op.Oid))
 		{
 			return null;
@@ -226,38 +210,37 @@ internal sealed class ClientObservables
 		{
 			return "list type " + op.Text + " not found";
 		}
-		IList list = (IList)Activator.CreateInstance(type, nonPublic: true);
+		var list = (IList)Activator.CreateInstance(type, nonPublic: true);
 		Type declared = ObservableRules.ElementType(type);
 		foreach (WireValue item in op.Items)
 		{
-			object value = Decode(item, declared, out string fail);
+			object? value = Decode(item, declared, out string? fail);
 			if (fail != null)
 			{
 				return "item: " + fail;
 			}
 			list.Add(value);
 		}
-		ObservableObjectReplicationSessionComponent.ClientObservedCollection clientObservedCollection = new ObservableObjectReplicationSessionComponent.ClientObservedCollection(list);
-		RemoteCollection remoteCollection = new RemoteCollection
+		var wrapper = new ObservableObjectReplicationSessionComponent.ClientObservedCollection(list);
+		var proxy = new RemoteCollection
 		{
 			Oid = op.Oid
 		};
-		comp.OnReplicateNewCollection(new InProcessPairingKey<IObservedCollection>((IObservedCollection)remoteCollection), (object)clientObservedCollection);
-		Entry value2 = new Entry
+		comp.OnReplicateNewCollection(new InProcessPairingKey<IObservedCollection>(proxy), wrapper);
+		var entry = new Entry
 		{
 			Oid = op.Oid,
-			Proxy = remoteCollection,
-			Wrapper = clientObservedCollection
+			Proxy = proxy,
+			Wrapper = wrapper
 		};
-		_byOid[op.Oid] = value2;
-		_byLocal[list] = value2;
+		_byOid[op.Oid] = entry;
+		_byLocal[list] = entry;
 		NewLists++;
 		return null;
 	}
 
 	private string? NewObject(ObservableObjectReplicationClientSessionComponent comp, ObservableOp op)
 	{
-		//IL_0314: Unknown result type (might be due to invalid IL or missing references)
 		if (_byOid.ContainsKey(op.Oid))
 		{
 			return null;
@@ -268,63 +251,63 @@ internal sealed class ClientObservables
 			return "type " + op.Text + " not found";
 		}
 		ObservableObject? adopted = Adopt?.Invoke(type);
-		ObservableObject observableObject = adopted ?? (ObservableObject)Activator.CreateInstance(type, nonPublic: true);
-		AccessibleTypeInfo typeInfo = ((IAccessible)observableObject).GetTypeInfo();
-		foreach (var (text, wireValue) in op.Members)
+		ObservableObject replica = adopted ?? (ObservableObject)Activator.CreateInstance(type, nonPublic: true);
+		AccessibleTypeInfo typeInfo = ((IAccessible)replica).GetTypeInfo();
+		foreach (var (name, wire) in op.Members)
 		{
-			if (!typeInfo.Members.TryGetValue(text, out var value))
+			if (!typeInfo.Members.TryGetValue(name, out var member))
 			{
-				Note(type.Name + "." + text + ": no such member here");
+				Note(type.Name + "." + name + ": no such member here");
 			}
-			else if (wireValue.Kind == WireKind.ObservedList)
+			else if (wire.Kind == WireKind.ObservedList)
 			{
-				if (!_byOid.TryGetValue(wireValue.Id, out Entry value2) || value2.Wrapper == null)
+				if (!_byOid.TryGetValue(wire.Id, out Entry? listEntry) || listEntry.Wrapper == null)
 				{
-					Note($"{type.Name}.{text}: observed list #{wireValue.Id} is not here");
+					Note($"{type.Name}.{name}: observed list #{wire.Id} is not here");
 				}
-				else if (value.Get(observableObject) is IList { IsReadOnly: false } list && list is INotifyCollectionChanged && list != value2.Wrapper.Source)
+				else if (member.Get(replica) is IList { IsReadOnly: false } list && list is INotifyCollectionChanged && list != listEntry.Wrapper.Source)
 				{
 					if (adopted != null)
 					{
 						list.Clear();
 					}
-					_byLocal.Remove(value2.Wrapper.Source);
-					value2.Wrapper.AdoptExistingCollection(list);
-					_byLocal[value2.Wrapper.Source] = value2;
+					_byLocal.Remove(listEntry.Wrapper.Source);
+					listEntry.Wrapper.AdoptExistingCollection(list);
+					_byLocal[listEntry.Wrapper.Source] = listEntry;
 				}
-				else if (value.CanWrite)
+				else if (member.CanWrite)
 				{
-					value.Set(observableObject, value2.Wrapper.Source);
+					member.Set(replica, listEntry.Wrapper.Source);
 				}
 			}
-			else if (value.CanWrite)
+			else if (member.CanWrite)
 			{
-				object value3 = Decode(wireValue, value.Type, out string fail);
+				object? value = Decode(wire, member.Type, out string? fail);
 				if (fail != null)
 				{
-					Note($"{type.Name}.{text}: {fail}");
-					_log.WarnOnce("client-obs-member-" + type.Name + "." + text, $"client: host observable {type.Name}.{text} could not be read here ({fail}); left at its default");
+					Note($"{type.Name}.{name}: {fail}");
+					_log.WarnOnce("client-obs-member-" + type.Name + "." + name, $"client: host observable {type.Name}.{name} could not be read here ({fail}); left at its default");
 				}
 				else
 				{
-					value.Set(observableObject, value3);
+					member.Set(replica, value);
 				}
 			}
 		}
-		RemoteObservable remoteObservable = new RemoteObservable
+		var proxy = new RemoteObservable
 		{
 			Oid = op.Oid
 		};
-		comp.OnReplicateNewObject(new InProcessPairingKey<ObservableObject>((ObservableObject)remoteObservable), type, (object)observableObject);
-		Entry value4 = new Entry
+		comp.OnReplicateNewObject(new InProcessPairingKey<ObservableObject>(proxy), type, replica);
+		var entry = new Entry
 		{
 			Oid = op.Oid,
-			Proxy = remoteObservable,
-			Replica = observableObject,
+			Proxy = proxy,
+			Replica = replica,
 			Info = typeInfo
 		};
-		_byOid[op.Oid] = value4;
-		_byLocal[observableObject] = value4;
+		_byOid[op.Oid] = entry;
+		_byLocal[replica] = entry;
 		NewObjects++;
 		if (adopted != null)
 		{
@@ -339,114 +322,103 @@ internal sealed class ClientObservables
 
 	private string? Member(ObservableObjectReplicationClientSessionComponent comp, ObservableOp op)
 	{
-		if (!_byOid.TryGetValue(op.Oid, out Entry value) || value.Info == null)
+		if (!_byOid.TryGetValue(op.Oid, out Entry? entry) || entry.Info == null)
 		{
 			return "model not here";
 		}
-		if (!ObservableRules.TryReplicating(value.Info, op.Text, out var member))
+		if (!ObservableRules.TryReplicating(entry.Info, op.Text, out var member))
 		{
-			return value.Info.Type.Name + "." + op.Text + " is not a replicating member here";
+			return entry.Info.Type.Name + "." + op.Text + " is not a replicating member here";
 		}
-		object obj = Decode(op.Value, member.Type, out string fail);
+		object? value = Decode(op.Value, member.Type, out string? fail);
 		if (fail != null)
 		{
-			return $"{value.Info.Type.Name}.{op.Text}: {fail}";
+			return $"{entry.Info.Type.Name}.{op.Text}: {fail}";
 		}
-		((ObservableObjectReplicationSessionComponent)comp).OnReplicateMemberChanged((ObservableObject)value.Proxy, op.Text, obj);
+		((ObservableObjectReplicationSessionComponent)comp).OnReplicateMemberChanged((ObservableObject)entry.Proxy, op.Text, value);
 		return null;
 	}
 
 	private string? ListChange(ObservableObjectReplicationClientSessionComponent comp, ObservableOp op)
 	{
-		if (!_byOid.TryGetValue(op.Oid, out Entry value) || value.Wrapper == null)
+		if (!_byOid.TryGetValue(op.Oid, out Entry? entry) || entry.Wrapper == null)
 		{
 			return "list not here";
 		}
-		IList newItems = null;
+		IList? newItems = null;
 		if (op.Items != null)
 		{
-			Type declared = ObservableRules.ElementType(value.Wrapper.Source.GetType());
-			List<object> list = new List<object>(op.Items.Count);
-			foreach (WireValue item2 in op.Items)
+			Type declared = ObservableRules.ElementType(entry.Wrapper.Source.GetType());
+			var decoded = new List<object>(op.Items.Count);
+			foreach (WireValue item in op.Items)
 			{
-				object item = Decode(item2, declared, out string fail);
+				object? value = Decode(item, declared, out string? fail);
 				if (fail != null)
 				{
 					return "item: " + fail;
 				}
-				list.Add(item);
+				decoded.Add(value);
 			}
-			newItems = list;
+			newItems = decoded;
 		}
-		ReplicatedCollectionChange replicatedCollectionChange = new ReplicatedCollectionChange((CollectionChangeKind)op.Change, op.Start, newItems, op.Count);
-		comp.OnReplicateCollectionChanged((IObservedCollection)value.Proxy, replicatedCollectionChange);
+		var change = new ReplicatedCollectionChange((CollectionChangeKind)op.Change, op.Start, newItems, op.Count);
+		comp.OnReplicateCollectionChanged((IObservedCollection)entry.Proxy, change);
 		return null;
 	}
 
 	private string? Release(ObservableObjectReplicationClientSessionComponent comp, ObservableOp op)
 	{
-		//IL_008e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0075: Unknown result type (might be due to invalid IL or missing references)
 		_broken.Remove(op.Oid);
-		if (!_byOid.Remove(op.Oid, out Entry value))
+		if (!_byOid.Remove(op.Oid, out Entry? entry))
 		{
 			return null;
 		}
-		if (value.Local != null)
+		if (entry.Local != null)
 		{
-			_byLocal.Remove(value.Local);
-			_released.AddOrUpdate(value.Local, value);
+			_byLocal.Remove(entry.Local);
+			_released.AddOrUpdate(entry.Local, entry);
 		}
 		Releases++;
-		if (value.Proxy is RemoteCollection remoteCollection)
+		if (entry.Proxy is RemoteCollection list)
 		{
-			comp.OnReleaseReplicatedCollection(new InProcessPairingKey<IObservedCollection>((IObservedCollection)remoteCollection), (IObservedCollection)remoteCollection);
+			comp.OnReleaseReplicatedCollection(new InProcessPairingKey<IObservedCollection>(list), list);
 		}
 		else
 		{
-			comp.OnReleaseReplicatedObject(new InProcessPairingKey<ObservableObject>((ObservableObject)value.Proxy), (ObservableObject)value.Proxy);
+			comp.OnReleaseReplicatedObject(new InProcessPairingKey<ObservableObject>((ObservableObject)entry.Proxy), (ObservableObject)entry.Proxy);
 		}
 		return null;
 	}
 
 	public void OnLocalEdit(object? replica, string? name, object? value, ObjectSpace space)
 	{
-		if (replica == null || name == null || !_byLocal.TryGetValue(replica, out Entry value2) || value2.Info == null)
+		if (replica == null || name == null || !_byLocal.TryGetValue(replica, out Entry? entry) || entry.Info == null)
 		{
 			EditsDropped++;
 			Note("edit of a model the host does not know");
 			return;
 		}
-		string fail = null;
+		string? fail = null;
 		space.ClearLocalIds();
-		WireValue value3 = ObjectCodec.Encode(value, value2.Info.Members.TryGetValue(name, out var value4) ? value4.Type : typeof(object), space, ref fail);
+		WireValue wire = ObjectCodec.Encode(value, entry.Info.Members.TryGetValue(name, out var member) ? member.Type : typeof(object), space, ref fail);
 		if (fail != null || space.LocalIds.Count > 0)
 		{
 			EditsDropped++;
-			Note($"edit {value2.Info.Type.Name}.{name} cannot travel: {fail ?? "entity"}");
+			Note($"edit {entry.Info.Type.Name}.{name} cannot travel: {fail ?? "entity"}");
 			return;
 		}
-		if (_pendingEdits.Count > 0)
+		if (_pendingEdits.Count > 0 && _pendingEdits[^1].Oid == entry.Oid && _pendingEdits[^1].Name == name)
 		{
-			List<MemberEdit> pendingEdits = _pendingEdits;
-			if (pendingEdits[pendingEdits.Count - 1].Oid == value2.Oid)
-			{
-				List<MemberEdit> pendingEdits2 = _pendingEdits;
-				if (pendingEdits2[pendingEdits2.Count - 1].Name == name)
-				{
-					List<MemberEdit> pendingEdits3 = _pendingEdits;
-					pendingEdits3[pendingEdits3.Count - 1] = new MemberEdit(value2.Oid, name, value3);
-					goto IL_0194;
-				}
-			}
+			_pendingEdits[^1] = new MemberEdit(entry.Oid, name, wire);
 		}
-		_pendingEdits.Add(new MemberEdit(value2.Oid, name, value3));
-		goto IL_0194;
-		IL_0194:
+		else
+		{
+			_pendingEdits.Add(new MemberEdit(entry.Oid, name, wire));
+		}
 		Edits++;
 		if (Edits <= 20)
 		{
-			_log.Info($"client: edit {value2.Info.Type.Name}.{name} = {value ?? "null"} (observable #{value2.Oid}) -> host");
+			_log.Info($"client: edit {entry.Info.Type.Name}.{name} = {value ?? "null"} (observable #{entry.Oid}) -> host");
 		}
 	}
 
@@ -456,14 +428,15 @@ internal sealed class ClientObservables
 		{
 			return null;
 		}
-		List<MemberEdit> result = new List<MemberEdit>(_pendingEdits);
+		var result = new List<MemberEdit>(_pendingEdits);
 		_pendingEdits.Clear();
 		return result;
 	}
 
 	public string Describe()
 	{
-		return $"observables: {_byOid.Count} here ({NewObjects} models / {NewLists} lists built, {Releases} released), steps applied {Applied}, failed {Failed}, edits sent {Edits} dropped {EditsDropped}" + ((_counts.Count == 0) ? "" : ("; " + string.Join(", ", from kv in _counts.OrderByDescending((KeyValuePair<string, long> kv) => kv.Value).Take(6)
-			select $"{kv.Key} x{kv.Value}")));
+		return $"observables: {_byOid.Count} here ({NewObjects} models / {NewLists} lists built, {Releases} released), steps applied {Applied}, failed {Failed}, edits sent {Edits} dropped {EditsDropped}" + (_counts.Count == 0 ? "" : "; " + string.Join(", ",
+			from kv in _counts.OrderByDescending(kv => kv.Value).Take(6)
+			select $"{kv.Key} x{kv.Value}"));
 	}
 }

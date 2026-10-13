@@ -95,8 +95,8 @@ internal sealed class ClientUpstream
 	public void Capture(ReplicationCommandBuffer cb, Func<Entity?, uint?> controlled, ObjectSpace space, Action<Delegate>? onStory, Func<Entity?, uint?>? removable = null)
 	{
 		_removable = removable ?? controlled;
-		int num = CommandBuffers.Count(cb);
-		for (int i = 0; i < num; i++)
+		int count = CommandBuffers.Count(cb);
+		for (int i = 0; i < count; i++)
 		{
 			byte[] bytes = CommandBuffers.Bytes(cb, i);
 			Buffers++;
@@ -110,24 +110,24 @@ internal sealed class ClientUpstream
 	private void Drop(string name, string why)
 	{
 		string key = Short(name) + ": " + why;
-		_dropped[key] = (_dropped.TryGetValue(key, out var value) ? (value + 1) : 1);
+		_dropped[key] = _dropped.TryGetValue(key, out var count) ? count + 1 : 1;
 	}
 
 	private bool Walk(ReplicationCommandBuffer cb, byte[] bytes, Func<Entity?, uint?> controlled, ObjectSpace space, Action<Delegate>? onStory)
 	{
-		int num = 0;
-		while (num + 8 <= bytes.Length)
+		int at = 0;
+		while (at + 8 <= bytes.Length)
 		{
-			int stub = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(num + 4));
-			int p = num + 8;
-			CommandLayout commandLayout = CommandLayouts.ByStub(stub);
-			if (commandLayout == null)
+			int stub = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(at + 4));
+			int p = at + 8;
+			CommandLayout layout = CommandLayouts.ByStub(stub);
+			if (layout == null)
 			{
 				return false;
 			}
 			CommandsSeen++;
 			int size;
-			switch (commandLayout.Kind)
+			switch (layout.Kind)
 			{
 			case CommandKind.PostData:
 			{
@@ -135,98 +135,98 @@ internal sealed class ClientUpstream
 				{
 					return false;
 				}
-				int num2 = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(p + 4));
-				int num3 = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(p + 8));
-				int num4 = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(p + 12));
-				if (num4 < 0 || p + 16 + num4 > bytes.Length)
+				int entityId = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(p + 4));
+				int localTypeId = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(p + 8));
+				int dataLength = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(p + 12));
+				if (dataLength < 0 || p + 16 + dataLength > bytes.Length)
 				{
 					return false;
 				}
-				size = 16 + num4;
-				uint? num5 = controlled((num2 >= 0) ? (cb.ReadObject(num2) as Entity) : null);
-				if (!num5.HasValue)
+				size = 16 + dataLength;
+				uint? owner = controlled(entityId >= 0 ? cb.ReadObject(entityId) as Entity : null);
+				if (!owner.HasValue)
 				{
 					NotOurs++;
-					if (!_notOursNames.TryGetValue(num3, out string value))
+					if (!_notOursNames.TryGetValue(localTypeId, out string? typeName))
 					{
 						try
 						{
-							value = EngineCodec.DescribeType(num3).Name;
+							typeName = EngineCodec.DescribeType(localTypeId).Name;
 						}
 						catch (Exception)
 						{
-							value = $"type {num3}";
+							typeName = $"type {localTypeId}";
 						}
-						_notOursNames[num3] = value;
+						_notOursNames[localTypeId] = typeName;
 					}
-					Drop(value, "data on an entity this player does not control");
+					Drop(typeName, "data on an entity this player does not control");
 					break;
 				}
-				ushort key;
+				ushort typeKey;
 				try
 				{
-					key = _types.GetOrAdd(num3, EngineCodec.DescribeType).Key;
+					typeKey = _types.GetOrAdd(localTypeId, EngineCodec.DescribeType).Key;
 				}
 				catch (Exception)
 				{
 					NotForwardable++;
 					break;
 				}
-				(uint, ushort) tuple = (num5.Value, key);
-				byte[] array = bytes.AsSpan(p + 16, num4).ToArray();
-				if (!_current.TryGetValue(tuple, out byte[] value2) || !value2.AsSpan().SequenceEqual(array))
+				(uint, ushort) key = (owner.Value, typeKey);
+				byte[] data = bytes.AsSpan(p + 16, dataLength).ToArray();
+				if (!_current.TryGetValue(key, out byte[]? previous) || !previous.AsSpan().SequenceEqual(data))
 				{
-					_changed.Add(tuple);
+					_changed.Add(key);
 				}
-				_current[tuple] = array;
-				_removed.Remove(tuple);
-				_removedChanged.Remove(tuple);
+				_current[key] = data;
+				_removed.Remove(key);
+				_removedChanged.Remove(key);
 				DataKept++;
 				break;
 			}
 			case CommandKind.RemoveData:
 			{
-				size = commandLayout.PayloadBytes;
+				size = layout.PayloadBytes;
 				if (size < 12 || p + size > bytes.Length)
 				{
 					return false;
 				}
-				int num6 = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(p + 4));
+				int entityId = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(p + 4));
 				int localTypeId = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(p + 8));
-				uint? num7 = (_removable ?? controlled)((num6 >= 0) ? (cb.ReadObject(num6) as Entity) : null);
-				if (!num7.HasValue)
+				uint? owner = (_removable ?? controlled)(entityId >= 0 ? cb.ReadObject(entityId) as Entity : null);
+				if (!owner.HasValue)
 				{
 					NotOurs++;
 					break;
 				}
-				ushort key2;
+				ushort typeKey;
 				try
 				{
-					key2 = _types.GetOrAdd(localTypeId, EngineCodec.DescribeType).Key;
+					typeKey = _types.GetOrAdd(localTypeId, EngineCodec.DescribeType).Key;
 				}
 				catch (Exception)
 				{
 					NotForwardable++;
 					break;
 				}
-				(uint, ushort) tuple2 = (num7.Value, key2);
-				_current.Remove(tuple2);
-				_changed.Remove(tuple2);
-				_removed[tuple2] = 10;
-				_removedChanged.Add(tuple2);
+				(uint, ushort) key = (owner.Value, typeKey);
+				_current.Remove(key);
+				_changed.Remove(key);
+				_removed[key] = 10;
+				_removedChanged.Add(key);
 				DataRemoved++;
 				break;
 			}
 			case CommandKind.Signal:
 			{
-				if (commandLayout.Name.StartsWith("Keen.VRage.Multiplayer.Replications.ObservableObjectReplicationSessionComponent+", StringComparison.Ordinal))
+				if (layout.Name.StartsWith("Keen.VRage.Multiplayer.Replications.ObservableObjectReplicationSessionComponent+", StringComparison.Ordinal))
 				{
-					size = commandLayout.PayloadBytes;
+					size = layout.PayloadBytes;
 					if (size < 0 || p + size > bytes.Length)
 					{
 						return false;
 					}
-					if (commandLayout.Name == "Keen.VRage.Multiplayer.Replications.ObservableObjectReplicationSessionComponent+ReplicateMemberChangedSignal" && OnObservableEdit != null && size >= 16)
+					if (layout.Name == "Keen.VRage.Multiplayer.Replications.ObservableObjectReplicationSessionComponent+ReplicateMemberChangedSignal" && OnObservableEdit != null && size >= 16)
 					{
 						ObservableEdits++;
 						OnObservableEdit(Slot(4), Slot(8) as string, Slot(12));
@@ -237,82 +237,82 @@ internal sealed class ClientUpstream
 					}
 					break;
 				}
-				if (!commandLayout.Forwardable)
+				if (!layout.Forwardable)
 				{
-					if (commandLayout.PayloadBytes < 0 && !commandLayout.Dynamic)
+					if (layout.PayloadBytes < 0 && !layout.Dynamic)
 					{
 						return false;
 					}
-					size = ((commandLayout.PayloadBytes >= 0) ? commandLayout.PayloadBytes : commandLayout.Frame(bytes.AsSpan(p), new List<(int, Segment)>()));
+					size = layout.PayloadBytes >= 0 ? layout.PayloadBytes : layout.Frame(bytes.AsSpan(p), new List<(int, Segment)>());
 					if (size < 0)
 					{
 						return false;
 					}
 					NotForwardable++;
-					Drop(commandLayout.Name, commandLayout.Why ?? "not forwardable");
+					Drop(layout.Name, layout.Why ?? "not forwardable");
 					break;
 				}
-				SignalKeyDef orAdd = _signals.GetOrAdd(commandLayout.Name, commandLayout.Def(0).PayloadBytes, commandLayout.Signature);
-				string fail = null;
+				SignalKeyDef signal = _signals.GetOrAdd(layout.Name, layout.Def(0).PayloadBytes, layout.Signature);
+				string? fail = null;
 				space.ClearLocalIds();
-				object first = null;
+				object? first = null;
 				bool firstRead = false;
-				WireCommand wireCommand = SignalCodec.Encode(commandLayout, orAdd.Key, bytes.AsSpan(p), (int i) =>
+				WireCommand? command = SignalCodec.Encode(layout, signal.Key, bytes.AsSpan(p), i =>
 				{
-					object obj2 = cb.ReadObject(i);
+					object resolved = cb.ReadObject(i);
 					if (!firstRead)
 					{
 						firstRead = true;
-						first = obj2;
+						first = resolved;
 					}
-					return obj2;
+					return resolved;
 				}, space, _scratch, out size, ref fail);
 				if (size < 0)
 				{
 					return false;
 				}
-				if (wireCommand != null && commandLayout.Segments.Length != 0 && commandLayout.Segments[0].Kind == SegmentKind.Ref && ControlGuard.DropUpstream(commandLayout, first))
+				if (command != null && layout.Segments.Length != 0 && layout.Segments[0].Kind == SegmentKind.Ref && ControlGuard.DropUpstream(layout, first))
 				{
 					NotOurs++;
 					break;
 				}
-				if (wireCommand != null && ControlGuard.IsHeldByForeignCharacter(first as Entity))
+				if (command != null && ControlGuard.IsHeldByForeignCharacter(first as Entity))
 				{
 					NotOurs++;
-					Drop(commandLayout.Name, "another player's tool");
+					Drop(layout.Name, "another player's tool");
 					break;
 				}
-				if (wireCommand != null && HostOwnsBookkeeping(commandLayout.Name))
+				if (command != null && HostOwnsBookkeeping(layout.Name))
 				{
 					NotForwardable++;
-					Drop(commandLayout.Name, "fracture bookkeeping (the host's own game sends it)");
+					Drop(layout.Name, "fracture bookkeeping (the host's own game sends it)");
 					break;
 				}
-				if (wireCommand != null && (commandLayout.Name == "AnimationEventSignal" || commandLayout.Name.EndsWith(".AnimationEventSignal", StringComparison.Ordinal)))
+				if (command != null && (layout.Name == "AnimationEventSignal" || layout.Name.EndsWith(".AnimationEventSignal", StringComparison.Ordinal)))
 				{
 					NotForwardable++;
-					Drop(commandLayout.Name, "client-only animation event");
+					Drop(layout.Name, "client-only animation event");
 					break;
 				}
-				if (wireCommand != null && commandLayout.StringIdOffsets.Length != 0)
+				if (command != null && layout.StringIdOffsets.Length != 0)
 				{
-					byte[] array2 = StringIdTable.Client?.Map(wireCommand.Payload, commandLayout.StringIdOffsets, toLocal: false);
-					if (array2 == null)
+					byte[]? mapped = StringIdTable.Client?.Map(command.Payload, layout.StringIdOffsets, toLocal: false);
+					if (mapped == null)
 					{
 						BadRefs++;
-						Drop(commandLayout.Name, "StringId the host does not know");
+						Drop(layout.Name, "StringId the host does not know");
 						break;
 					}
-					wireCommand.Payload = array2;
+					command.Payload = mapped;
 				}
-				if (wireCommand == null)
+				if (command == null)
 				{
 					BadRefs++;
-					Drop(commandLayout.Name, fail ?? "?");
+					Drop(layout.Name, fail ?? "?");
 				}
 				else
 				{
-					_commands.Add(wireCommand);
+					_commands.Add(command);
 					SignalsKept++;
 				}
 				break;
@@ -325,10 +325,10 @@ internal sealed class ClientUpstream
 					return false;
 				}
 				int id = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(p + 4));
-				if (cb.ReadObject(id) is Delegate obj && obj.Method.Name.Contains("MoveNextRemotely", StringComparison.Ordinal) && onStory != null)
+				if (cb.ReadObject(id) is Delegate story && story.Method.Name.Contains("MoveNextRemotely", StringComparison.Ordinal) && onStory != null)
 				{
 					Stories++;
-					onStory(obj);
+					onStory(story);
 				}
 				else
 				{
@@ -337,7 +337,7 @@ internal sealed class ClientUpstream
 				break;
 			}
 			default:
-				size = commandLayout.PayloadBytes;
+				size = layout.PayloadBytes;
 				if (size < 0 || p + size > bytes.Length)
 				{
 					return false;
@@ -345,150 +345,149 @@ internal sealed class ClientUpstream
 				NotForwardable++;
 				break;
 			}
-			num = p + size;
+			at = p + size;
+
 			object? Slot(int off)
 			{
-				int num8 = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(p + off));
-				if (num8 < 0)
+				int id = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(p + off));
+				if (id < 0)
 				{
 					return null;
 				}
-				return cb.ReadObject(num8);
+				return cb.ReadObject(id);
 			}
 		}
-		return num == bytes.Length;
+		return at == bytes.Length;
 	}
 
 	public static int CollectStoryMoves(ReplicationCommandBuffer cb, List<Delegate> into, int max)
 	{
-		int num = 0;
-		int num2 = CommandBuffers.Count(cb);
-		for (int i = 0; i < num2; i++)
+		int found = 0;
+		int count = CommandBuffers.Count(cb);
+		for (int i = 0; i < count; i++)
 		{
-			byte[] array = CommandBuffers.Bytes(cb, i);
-			int num3 = 0;
-			while (num3 + 8 <= array.Length)
+			byte[] bytes = CommandBuffers.Bytes(cb, i);
+			int at = 0;
+			while (at + 8 <= bytes.Length)
 			{
-				CommandLayout commandLayout = CommandLayouts.ByStub(BinaryPrimitives.ReadInt32LittleEndian(array.AsSpan(num3 + 4)));
-				int num4 = num3 + 8;
-				if (commandLayout == null)
+				CommandLayout layout = CommandLayouts.ByStub(BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(at + 4)));
+				int p = at + 8;
+				if (layout == null)
 				{
 					break;
 				}
-				int num5;
-				if (commandLayout.Kind == CommandKind.PostData)
+				int size;
+				if (layout.Kind == CommandKind.PostData)
 				{
-					if (num4 + 16 > array.Length)
+					if (p + 16 > bytes.Length)
 					{
 						break;
 					}
-					num5 = 16 + BinaryPrimitives.ReadInt32LittleEndian(array.AsSpan(num4 + 12));
+					size = 16 + BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(p + 12));
 				}
-				else if (commandLayout.Kind == CommandKind.PostInvoke)
+				else if (layout.Kind == CommandKind.PostInvoke)
 				{
-					num5 = 8;
-					if (num4 + 8 <= array.Length && cb.ReadObject(BinaryPrimitives.ReadInt32LittleEndian(array.AsSpan(num4 + 4))) is Delegate obj && obj.Method.Name.Contains("MoveNextRemotely", StringComparison.Ordinal) && into.Count < max)
+					size = 8;
+					if (p + 8 <= bytes.Length && cb.ReadObject(BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(p + 4))) is Delegate story && story.Method.Name.Contains("MoveNextRemotely", StringComparison.Ordinal) && into.Count < max)
 					{
-						into.Add(obj);
-						num++;
+						into.Add(story);
+						found++;
 					}
 				}
-				else if (commandLayout.PayloadBytes >= 0)
+				else if (layout.PayloadBytes >= 0)
 				{
-					num5 = commandLayout.PayloadBytes;
+					size = layout.PayloadBytes;
 				}
 				else
 				{
-					num5 = (commandLayout.Dynamic ? commandLayout.Frame(array.AsSpan(num4), new List<(int, Segment)>()) : (-1));
+					size = layout.Dynamic ? layout.Frame(bytes.AsSpan(p), new List<(int, Segment)>()) : -1;
 				}
-				if (num5 < 0 || num4 + num5 > array.Length)
+				if (size < 0 || p + size > bytes.Length)
 				{
 					break;
 				}
-				num3 = num4 + num5;
+				at = p + size;
 			}
 		}
-		return num;
+		return found;
 	}
 
 	public void Flush(ClientSession session, long nowMs)
 	{
-		List<TypeKeyDef> list = _types.TakeUnannounced();
-		if (list.Count > 0)
+		List<TypeKeyDef> newTypes = _types.TakeUnannounced();
+		if (newTypes.Count > 0)
 		{
-			session.AnnounceInputTypes(list);
-			_log.Info("client: upstream input types: " + string.Join(", ", list.ConvertAll((TypeKeyDef d) => $"{d.Key}={d.ShortName}")));
+			session.AnnounceInputTypes(newTypes);
+			_log.Info("client: upstream input types: " + string.Join(", ", newTypes.ConvertAll(d => $"{d.Key}={d.ShortName}")));
 		}
-		List<SignalKeyDef> list2 = _signals.TakeUnannounced();
-		if (list2.Count > 0)
+		List<SignalKeyDef> newSignals = _signals.TakeUnannounced();
+		if (newSignals.Count > 0)
 		{
-			session.AnnounceSignals(list2);
-			foreach (SignalKeyDef item2 in list2)
+			session.AnnounceSignals(newSignals);
+			foreach (SignalKeyDef signal in newSignals)
 			{
-				_log.Info($"client: upstream signal key {item2.Key} = {Short(item2.Name)} ({((item2.PayloadBytes == ushort.MaxValue) ? "dynamic" : (item2.PayloadBytes + " B"))}, [{item2.RefOffsets}])");
+				_log.Info($"client: upstream signal key {signal.Key} = {Short(signal.Name)} ({(signal.PayloadBytes == ushort.MaxValue ? "dynamic" : signal.PayloadBytes + " B")}, [{signal.RefOffsets}])");
 			}
 		}
-		List<InputEntry> list3 = new List<InputEntry>();
-		bool flag = nowMs - _lastFullMs >= 100;
-		if (flag)
+		var entries = new List<InputEntry>();
+		bool full = nowMs - _lastFullMs >= 100;
+		if (full)
 		{
 			_lastFullMs = nowMs;
 		}
-		foreach (var (item, bytes) in _current)
+		foreach (var (key, bytes) in _current)
 		{
-			if (flag || _changed.Contains(item))
+			if (full || _changed.Contains(key))
 			{
-				list3.Add(new InputEntry(item.Item1, item.Item2, bytes));
+				entries.Add(new InputEntry(key.Item1, key.Item2, bytes));
 			}
 		}
 		_changed.Clear();
 		if (_removed.Count > 0)
 		{
-			foreach (var item3 in new List<(uint, ushort)>(_removed.Keys))
+			foreach (var key in new List<(uint, ushort)>(_removed.Keys))
 			{
-				bool flag2 = _removedChanged.Contains(item3);
-				if (flag2 || flag)
+				bool justRemoved = _removedChanged.Contains(key);
+				if (justRemoved || full)
 				{
-					list3.Add(new InputEntry(item3.Item1, item3.Item2, Array.Empty<byte>()));
-					if (!flag2 && --_removed[item3] <= 0)
+					entries.Add(new InputEntry(key.Item1, key.Item2, Array.Empty<byte>()));
+					if (!justRemoved && --_removed[key] <= 0)
 					{
-						_removed.Remove(item3);
+						_removed.Remove(key);
 					}
 				}
 			}
 			_removedChanged.Clear();
 		}
-		if (list3.Count > 0 || _commands.Count > 0)
+		if (entries.Count > 0 || _commands.Count > 0)
 		{
-			session.SendUpstream(list3, _commands);
+			session.SendUpstream(entries, _commands);
 		}
 		_commands.Clear();
 	}
 
 	public string Describe()
 	{
-		string value = ((_dropped.Count == 0) ? "" : ("; dropped: " + string.Join(", ", from kv in _dropped.OrderByDescending((KeyValuePair<string, long> kv) => kv.Value).Take(6)
-			select $"{kv.Key} x{kv.Value}")));
-		return $"upstream: {CommandsSeen} commands seen in {Buffers} buffers, kept {DataKept} data ({DataRemoved} removals) / {SignalsKept} signals / {Stories} story moves / {ObservableEdits} model edits ({ObservableSwallowed} observable confirmations kept here), not ours {NotOurs}, not forwardable {NotForwardable}, unresolvable {BadRefs}, closures {Closures}, unparsed buffers {Unparsed}{value}";
+		string dropped = _dropped.Count == 0 ? "" : "; dropped: " + string.Join(", ",
+			from kv in _dropped.OrderByDescending(kv => kv.Value).Take(6)
+			select $"{kv.Key} x{kv.Value}");
+		return $"upstream: {CommandsSeen} commands seen in {Buffers} buffers, kept {DataKept} data ({DataRemoved} removals) / {SignalsKept} signals / {Stories} story moves / {ObservableEdits} model edits ({ObservableSwallowed} observable confirmations kept here), not ours {NotOurs}, not forwardable {NotForwardable}, unresolvable {BadRefs}, closures {Closures}, unparsed buffers {Unparsed}{dropped}";
 	}
 
 	private static bool HostOwnsBookkeeping(string name)
 	{
-		if (!name.EndsWith("BreakableComponent+BeforeFracturesChangedSignal", StringComparison.Ordinal) && !name.EndsWith("BreakableComponent+AfterFracturesChangedSignal", StringComparison.Ordinal))
-		{
-			return name.EndsWith("BreakableComponent+FracturesChangedSignal", StringComparison.Ordinal);
-		}
-		return true;
+		return name.EndsWith("BreakableComponent+BeforeFracturesChangedSignal", StringComparison.Ordinal)
+			|| name.EndsWith("BreakableComponent+AfterFracturesChangedSignal", StringComparison.Ordinal)
+			|| name.EndsWith("BreakableComponent+FracturesChangedSignal", StringComparison.Ordinal);
 	}
 
 	internal static string Short(string full)
 	{
-		int num = full.LastIndexOf('.');
-		if (num < 0)
+		int dot = full.LastIndexOf('.');
+		if (dot < 0)
 		{
 			return full;
 		}
-		int num2 = num + 1;
-		return full.Substring(num2, full.Length - num2);
+		return full[(dot + 1)..];
 	}
 }

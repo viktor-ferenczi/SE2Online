@@ -127,10 +127,7 @@ internal sealed class ClientStories
 
 	public int InFlight => _byId.Count;
 
-	private bool FirstOf(string key)
-	{
-		return _logged.Add(key);
-	}
+	private bool FirstOf(string key) => _logged.Add(key);
 
 	public ClientStories(IMpLog log)
 	{
@@ -139,21 +136,21 @@ internal sealed class ClientStories
 
 	private void Count(string key)
 	{
-		_counts[key] = (_counts.TryGetValue(key, out var value) ? (value + 1) : 1);
+		_counts[key] = _counts.TryGetValue(key, out var count) ? count + 1 : 1;
 	}
 
 	public void OnMove(Delegate d, ClientSession session, ObjectSpace space, Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent? comp)
 	{
-		if (!ReadClosure(d, out NetworkStoryContext context, out object box, out Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp2))
+		if (!ReadClosure(d, out NetworkStoryContext? context, out object? box, out var closureComp))
 		{
 			Count("unreadable closure");
 			_log.WarnOnce("story-unreadable", "client: a network-story closure has an unexpected shape (" + ClosureShape(d) + "); such stories are dropped");
 			return;
 		}
-		StoryMove storyMove = Prepare(context, box, comp2 ?? comp, space);
-		if (storyMove != null)
+		StoryMove? move = Prepare(context, box, closureComp ?? comp, space);
+		if (move != null)
 		{
-			session.SendStoryMove(storyMove);
+			session.SendStoryMove(move);
 		}
 	}
 
@@ -167,22 +164,19 @@ internal sealed class ClientStories
 		{
 			return false;
 		}
-		FieldInfo[] source = ObjectCodec.Fields(target.GetType());
-		context = source.FirstOrDefault((FieldInfo f) => typeof(NetworkStoryContext).IsAssignableFrom(f.FieldType))?.GetValue(target) as NetworkStoryContext;
-		box = source.FirstOrDefault((FieldInfo f) => f.FieldType == typeof(IAsyncStateMachine))?.GetValue(target);
-		comp = source.FirstOrDefault((FieldInfo f) => typeof(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent).IsAssignableFrom(f.FieldType))?.GetValue(target) as Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent;
-		if (context != null)
-		{
-			return box != null;
-		}
-		return false;
+		FieldInfo[] fields = ObjectCodec.Fields(target.GetType());
+		context = fields.FirstOrDefault(f => typeof(NetworkStoryContext).IsAssignableFrom(f.FieldType))?.GetValue(target) as NetworkStoryContext;
+		box = fields.FirstOrDefault(f => f.FieldType == typeof(IAsyncStateMachine))?.GetValue(target);
+		comp = fields.FirstOrDefault(f => typeof(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent).IsAssignableFrom(f.FieldType))?.GetValue(target) as Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent;
+		return context != null && box != null;
 	}
 
 	private static string ClosureShape(Delegate d)
 	{
 		if (d.Target != null)
 		{
-			return d.Target.GetType().Name + ": " + string.Join(", ", from f in ObjectCodec.Fields(d.Target.GetType())
+			return d.Target.GetType().Name + ": " + string.Join(", ",
+				from f in ObjectCodec.Fields(d.Target.GetType())
 				select f.FieldType.Name + " " + f.Name);
 		}
 		return d.Method.Name + ", no target";
@@ -192,53 +186,45 @@ internal sealed class ClientStories
 	{
 		string stateMachineType = ObjectCodec.TypeName(box.GetType());
 		string name = StoryState.Name(stateMachineType);
-		if (Denied.TryGetValue(name, out var value) && value == Keep.LocalOnly)
+		if (Denied.TryGetValue(name, out var keep) && keep == Keep.LocalOnly)
 		{
 			DeniedCount++;
 			Count(name + ": answered here (never sent to the host)");
-			object result = null;
-			if (LocalResults.TryGetValue(name, out var value2))
+			object? result = null;
+			if (LocalResults.TryGetValue(name, out var localResult))
 			{
 				Type type = StoryState.ResultType(context);
-				if ((object)type != null && type.IsEnum)
+				if (type is not null && type.IsEnum)
 				{
-					result = Enum.ToObject(type, value2);
+					result = Enum.ToObject(type, localResult);
 				}
 			}
-			_log.Info($"client: STORY {name} answered here{((result != null) ? $" ({result})" : "")}: joiners do not save the host's world");
-			_local.Add(() =>
-			{
-				FinishLocal(comp, context, result, null);
-			});
+			_log.Info($"client: STORY {name} answered here{(result != null ? $" ({result})" : "")}: joiners do not save the host's world");
+			_local.Add(() => FinishLocal(comp, context, result, null));
 			return null;
 		}
-		if (Denied.TryGetValue(name, out value))
+		if (Denied.TryGetValue(name, out keep))
 		{
-			bool flag = PerPlayer && value == Keep.Succeed;
-			if (flag && name == "CameraStatePerPlayerData.StoreCameraData")
+			// With per-player identities a Succeed story is the player's own and goes to the host.
+			bool send = PerPlayer && keep == Keep.Succeed;
+			if (send && name == "CameraStatePerPlayerData.StoreCameraData")
 			{
-				long num = MpClock.NowMs();
-				if (num - _lastCameraMs < 100)
+				long now = MpClock.NowMs();
+				if (now - _lastCameraMs < 100)
 				{
 					CameraCoalesced++;
-					_local.Add(() =>
-					{
-						FinishLocal(comp, context, null, null);
-					});
+					_local.Add(() => FinishLocal(comp, context, null, null));
 					return null;
 				}
-				_lastCameraMs = num;
+				_lastCameraMs = now;
 			}
-			if (!flag)
+			if (!send)
 			{
 				DeniedCount++;
-				Count(name + ((value == Keep.Succeed) ? ": kept local (shared identity)" : ": held (the world sync's character flow does this)"));
-				if (value == Keep.Succeed)
+				Count(name + (keep == Keep.Succeed ? ": kept local (shared identity)" : ": held (the world sync's character flow does this)"));
+				if (keep == Keep.Succeed)
 				{
-					_local.Add(() =>
-					{
-						FinishLocal(comp, context, null, null);
-					});
+					_local.Add(() => FinishLocal(comp, context, null, null));
 				}
 				return null;
 			}
@@ -249,42 +235,33 @@ internal sealed class ClientStories
 			if (!PerPlayer)
 			{
 				Count(name + ": applied to this player's own toolbar");
-				_local.Add(() =>
-				{
-					RunToolbarLocally(name, box, comp, context);
-				});
+				_local.Add(() => RunToolbarLocally(name, box, comp, context));
 				return null;
 			}
 			Count(name + ": applied locally and sent to the host");
-			_local.Add(() =>
-			{
-				ApplyToolbarLocally(name, box, comp);
-			});
+			_local.Add(() => ApplyToolbarLocally(name, box, comp));
 		}
-		bool flag2 = false;
-		if (!_byContext.TryGetValue(context, out var value3))
+		bool isNew = false;
+		if (!_byContext.TryGetValue(context, out var id))
 		{
-			value3 = _next++;
-			_byContext[context] = value3;
-			_byId[value3] = new Entry
+			id = _next++;
+			_byContext[context] = id;
+			_byId[id] = new Entry
 			{
-				Id = value3,
+				Id = id,
 				Context = context,
 				Comp = comp,
 				Name = name
 			};
-			flag2 = true;
+			isNew = true;
 		}
-		Entry entry = _byId[value3];
+		Entry entry = _byId[id];
 		entry.LastMs = MpClock.NowMs();
 		space.ClearLocalIds();
-		List<(string, WireValue)> list = StoryState.Encode(box, space, out string fail);
-		if (list == null || space.LocalIds.Count > 0)
+		List<(string, WireValue)>? fields = StoryState.Encode(box, space, out string? fail);
+		if (fields == null || space.LocalIds.Count > 0)
 		{
-			if (fail == null)
-			{
-				fail = "refers to an entity the host does not have";
-			}
+			fail ??= "refers to an entity the host does not have";
 			if (fail.Contains("was already released by the host", StringComparison.Ordinal))
 			{
 				bool isVoid = StoryState.ResultType(context) == typeof(DBNull);
@@ -294,46 +271,37 @@ internal sealed class ClientStories
 				{
 					_log.Info($"client: STORY {name} names a model the host already released ({fail}); {(isVoid ? "done here as a no-op" : "skipped here like Keen does")} (further ones only counted)");
 				}
-				Forget(value3);
-				_local.Add(() =>
-				{
-					FinishLocal(comp, context, null, isVoid ? null : new Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException());
-				});
+				Forget(id);
+				_local.Add(() => FinishLocal(comp, context, null, isVoid ? null : new Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException()));
 				return null;
 			}
 			CannotTravel++;
 			Count(name + ": cannot travel (" + fail + ")");
 			_log.WarnOnce("story-travel-" + name, $"client: story {name} cannot travel to the host ({fail}); it is skipped here");
-			Forget(value3);
-			_local.Add(() =>
-			{
-				FinishLocal(comp, context, null, new Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException());
-			});
+			Forget(id);
+			_local.Add(() => FinishLocal(comp, context, null, new Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException()));
 			return null;
 		}
 		Sent++;
 		entry.AtHost = true;
-		if (flag2 && AudioRouting.IsBuildStory(name))
+		if (isNew && AudioRouting.IsBuildStory(name))
 		{
 			AudioRouting.Instance.NoteOwnBuild(MpClock.NowMs());
 		}
 		Count(name + ": sent");
 		if (FirstOf("sent " + name) | (Sent <= 20))
 		{
-			_log.Info($"client: STORY {name} #{value3} -> host ({list.Count} fields){((Sent > 20) ? "; first of its kind" : "")}");
+			_log.Info($"client: STORY {name} #{id} -> host ({fields.Count} fields){(Sent > 20 ? "; first of its kind" : "")}");
 		}
 		return new StoryMove
 		{
-			StoryId = value3,
+			StoryId = id,
 			StateMachineType = stateMachineType,
-			Fields = list
+			Fields = fields
 		};
 	}
 
-	private static bool IsWaitable(string fail)
-	{
-		return fail.Contains("is not on this side", StringComparison.Ordinal);
-	}
+	private static bool IsWaitable(string fail) => fail.Contains("is not on this side", StringComparison.Ordinal);
 
 	private static int WaitMs(string fail)
 	{
@@ -346,130 +314,124 @@ internal sealed class ClientStories
 
 	public void ProcessInbox(ConcurrentQueue<object> inbox, ObjectSpace space, Action<Action> post)
 	{
-		foreach (Action item in _local)
+		foreach (Action action in _local)
 		{
-			post(item);
+			post(action);
 		}
 		_local.Clear();
-		List<object> list = new List<object>();
-		long num = MpClock.NowMs();
-		foreach (var item2 in _waiting)
+		var batch = new List<object>();
+		long nowMs = MpClock.NowMs();
+		foreach (var waited in _waiting)
 		{
-			list.Add(item2);
+			batch.Add(waited);
 		}
 		_waiting.Clear();
-		object result;
-		while (inbox.TryDequeue(out result))
+		object? received;
+		while (inbox.TryDequeue(out received))
 		{
-			list.Add(result);
+			batch.Add(received);
 		}
-		foreach (object item3 in list)
+		foreach (object queued in batch)
 		{
-			object obj = item3;
-			long num2 = num;
-			if (item3 is ValueTuple<object, long> tuple)
+			object message = queued;
+			long since = nowMs;
+			if (queued is ValueTuple<object, long> waited)
 			{
-				(obj, num2) = tuple;
+				(message, since) = waited;
 			}
-			if (!(obj is StoryMove storyMove))
+			if (message is not StoryMove move)
 			{
-				if (!(obj is StoryFinish storyFinish))
+				if (message is not StoryFinish finish)
 				{
 					continue;
 				}
-				if (!_byId.TryGetValue(storyFinish.StoryId, out Entry value))
+				if (!_byId.TryGetValue(finish.StoryId, out Entry? story))
 				{
 					Count("finish for an unknown story");
 					continue;
 				}
-				object result2 = null;
-				Exception ex = null;
-				if (storyFinish.Status == 0)
+				object? result2 = null;
+				Exception? ex = null;
+				if (finish.Status == 0)
 				{
-					string fail = null;
-					Type type = StoryState.ResultType(value.Context);
+					string? fail = null;
+					Type type = StoryState.ResultType(story.Context);
 					space.ClearLocalIds();
 					space.LocalStubs.Clear();
-					result2 = ((type == typeof(DBNull)) ? DBNull.Value : ObjectCodec.Decode(storyFinish.Result, type, space, translated: false, ref fail));
-					if (fail != null && IsWaitable(fail) && num - num2 < WaitMs(fail))
+					result2 = type == typeof(DBNull) ? DBNull.Value : ObjectCodec.Decode(finish.Result, type, space, translated: false, ref fail);
+					if (fail != null && IsWaitable(fail) && nowMs - since < WaitMs(fail))
 					{
-						_waiting.Add((storyFinish, num2));
+						_waiting.Add((finish, since));
 						continue;
 					}
 					if (fail != null)
 					{
 						ex = new Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException();
-						Count(value.Name + ": result unusable here (" + fail + ")");
+						Count(story.Name + ": result unusable here (" + fail + ")");
 					}
 				}
 				else
 				{
 					ex = new Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException();
-					Count($"{value.Name}: {((storyFinish.Status == 2) ? "skipped" : "failed")} on the host ({storyFinish.Text})");
+					Count($"{story.Name}: {(finish.Status == 2 ? "skipped" : "failed")} on the host ({finish.Text})");
 				}
-				Forget(value.Id);
+				Forget(story.Id);
 				Finished++;
-				string text;
+				string outcome;
 				if (ex == null)
 				{
-					text = "ok" + StoryState.Describe(result2);
+					outcome = "ok" + StoryState.Describe(result2);
 				}
 				else
 				{
-					text = ((storyFinish.Text.Length > 0) ? storyFinish.Text : "result unusable here");
+					outcome = finish.Text.Length > 0 ? finish.Text : "result unusable here";
 				}
-				if (FirstOf("finished " + value.Name + ((ex == null) ? "" : (" " + StoryState.Shape(text)))) | (Finished <= 20))
+				if (FirstOf("finished " + story.Name + (ex == null ? "" : " " + StoryState.Shape(outcome))) | (Finished <= 20))
 				{
-					_log.Info($"client: STORY {value.Name} #{value.Id} finished on the host ({text})");
+					_log.Info($"client: STORY {story.Name} #{story.Id} finished on the host ({outcome})");
 				}
-				NetworkStoryContext ctx = value.Context;
-				Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp = value.Comp;
-				post(() =>
-				{
-					FinishLocal(comp, ctx, result2, ex);
-				});
+				NetworkStoryContext ctx = story.Context;
+				var comp = story.Comp;
+				post(() => FinishLocal(comp, ctx, result2, ex));
 				continue;
 			}
-			if (!_byId.TryGetValue(storyMove.StoryId, out Entry value2))
+			if (!_byId.TryGetValue(move.StoryId, out Entry? entry))
 			{
-				if ((storyMove.StoryId & ServerOrigin) != 0)
+				if ((move.StoryId & ServerOrigin) != 0)
 				{
-					StartServerStory(storyMove, space, post, num, num2);
+					StartServerStory(move, space, post, nowMs, since);
 					continue;
 				}
 				Count("move for an unknown story");
 				continue;
 			}
-			value2.LastMs = MpClock.NowMs();
+			entry.LastMs = MpClock.NowMs();
 			space.ClearLocalIds();
 			space.LocalStubs.Clear();
-			object obj2 = StoryState.Decode(storyMove, space, value2.Context, null, out string fail2);
-			if (obj2 == null && fail2 != null && IsWaitable(fail2) && num - num2 < WaitMs(fail2))
+			object? resumed = StoryState.Decode(move, space, entry.Context, null, out string? moveFail);
+			if (resumed == null && moveFail != null && IsWaitable(moveFail) && nowMs - since < WaitMs(moveFail))
 			{
-				_waiting.Add((storyMove, num2));
+				_waiting.Add((move, since));
 				continue;
 			}
-			value2.AtHost = false;
-			if (obj2 == null)
+			entry.AtHost = false;
+			if (resumed == null)
 			{
 				Failed++;
-				_log.Warn($"client: story {value2.Name} #{value2.Id} came back but cannot continue here ({fail2}); skipped");
-				Forget(value2.Id);
-				NetworkStoryContext ctx2 = value2.Context;
-				Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp2 = value2.Comp;
-				post(() =>
-				{
-					FinishLocal(comp2, ctx2, null, new Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException());
-				});
+				_log.Warn($"client: story {entry.Name} #{entry.Id} came back but cannot continue here ({moveFail}); skipped");
+				Forget(entry.Id);
+				NetworkStoryContext ctx2 = entry.Context;
+				var comp2 = entry.Comp;
+				post(() => FinishLocal(comp2, ctx2, null, new Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException()));
 				continue;
 			}
 			Resumed++;
-			if (FirstOf("resumed " + value2.Name) | (Resumed <= 20))
+			if (FirstOf("resumed " + entry.Name) | (Resumed <= 20))
 			{
-				_log.Info($"client: STORY {value2.Name} #{value2.Id} back from the host, continuing here");
+				_log.Info($"client: STORY {entry.Name} #{entry.Id} back from the host, continuing here");
 			}
-			IAsyncStateMachine sm = (IAsyncStateMachine)obj2;
-			string n = value2.Name;
+			var sm = (IAsyncStateMachine)resumed;
+			string n = entry.Name;
 			post(() =>
 			{
 				try
@@ -483,21 +445,18 @@ internal sealed class ClientStories
 			});
 		}
 		long now = MpClock.NowMs();
-		foreach (Entry item4 in _byId.Values.Where((Entry x) => !x.AtHost && now - x.LastMs > 300000).ToList())
+		foreach (Entry idle in _byId.Values.Where(x => !x.AtHost && now - x.LastMs > 300000).ToList())
 		{
-			Forget(item4.Id);
+			Forget(idle.Id);
 		}
-		foreach (Entry item5 in _byId.Values.Where((Entry x) => x.AtHost && now - x.LastMs > 60000).ToList())
+		foreach (Entry stale in _byId.Values.Where(x => x.AtHost && now - x.LastMs > 60000).ToList())
 		{
 			TimedOut++;
-			_log.Warn($"client: story {item5.Name} #{item5.Id} got no answer from the host in {60} s; skipped");
-			Forget(item5.Id);
-			NetworkStoryContext ctx3 = item5.Context;
-			Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp3 = item5.Comp;
-			post(() =>
-			{
-				FinishLocal(comp3, ctx3, null, new Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException());
-			});
+			_log.Warn($"client: story {stale.Name} #{stale.Id} got no answer from the host in {60} s; skipped");
+			Forget(stale.Id);
+			NetworkStoryContext ctx3 = stale.Context;
+			var comp3 = stale.Comp;
+			post(() => FinishLocal(comp3, ctx3, null, new Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException()));
 		}
 	}
 
@@ -505,7 +464,7 @@ internal sealed class ClientStories
 	{
 		string name = StoryState.Name(move.StateMachineType);
 		Type? type = ObjectCodec.FindType(move.StateMachineType);
-		FieldInfo? builder = (type == null) ? null : ObjectCodec.Fields(type).FirstOrDefault((FieldInfo f) => StoryState.IsBuilder(f.FieldType));
+		FieldInfo? builder = (type == null) ? null : ObjectCodec.Fields(type).FirstOrDefault(f => StoryState.IsBuilder(f.FieldType));
 		if (builder == null)
 		{
 			Count(name + ": host story type not here");
@@ -541,9 +500,9 @@ internal sealed class ClientStories
 
 	private void Forget(uint id)
 	{
-		if (_byId.Remove(id, out Entry value))
+		if (_byId.Remove(id, out Entry? entry))
 		{
-			_byContext.Remove(value.Context);
+			_byContext.Remove(entry.Context);
 		}
 	}
 
@@ -566,7 +525,7 @@ internal sealed class ClientStories
 				{
 					result = Activator.CreateInstance(type);
 				}
-				story.GetType().GetMethod("SetResult", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Invoke(story, new object[2] { result, ex });
+				story.GetType().GetMethod("SetResult", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Invoke(story, new object?[] { result, ex });
 			}
 		}
 		catch (Exception)
@@ -576,22 +535,21 @@ internal sealed class ClientStories
 
 	private void RunToolbarLocally(string name, object box, Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp, NetworkStoryContext context)
 	{
-		Exception ex = (ApplyToolbarLocally(name, box, comp) ? null : new Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException());
+		Exception? ex = ApplyToolbarLocally(name, box, comp) ? null : new Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException();
 		FinishLocal(comp, context, null, ex);
 	}
 
-	internal static IdentityId LocalIdentity(Session session)
-	{
-		return session.SessionComponents.TryGet<ClientPlayersSessionComponent>()?.LocalPlayerIdentity ?? InProcessPerPlayerDataSessionComponent.HotfixIdentity;
-	}
+	internal static IdentityId LocalIdentity(Session session) =>
+		session.SessionComponents.TryGet<ClientPlayersSessionComponent>()?.LocalPlayerIdentity ?? InProcessPerPlayerDataSessionComponent.HotfixIdentity;
 
 	private bool ApplyToolbarLocally(string name, object box, Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent comp)
 	{
 		try
 		{
 			Session session = comp.Session;
-			ToolbarPerPlayerData perPlayerData = (session.SessionComponents.Components.OfType<IPerPlayerData>().FirstOrDefault() ?? throw new InvalidOperationException("no IPerPlayerData on the client")).GetPerPlayerData<ToolbarPerPlayerData>(LocalIdentity(session));
-			_log.Info("client: " + ApplyToolbarStory(name, box, perPlayerData));
+			IPerPlayerData perPlayer = session.SessionComponents.Components.OfType<IPerPlayerData>().FirstOrDefault() ?? throw new InvalidOperationException("no IPerPlayerData on the client");
+			var toolbar = perPlayer.GetPerPlayerData<ToolbarPerPlayerData>(LocalIdentity(session));
+			_log.Info("client: " + ApplyToolbarStory(name, box, toolbar));
 			return true;
 		}
 		catch (Exception ex)
@@ -603,26 +561,26 @@ internal sealed class ClientStories
 
 	internal static string ApplyToolbarStory(string name, object box, ToolbarPerPlayerData data)
 	{
-		FieldInfo[] source = ObjectCodec.Fields(box.GetType());
+		FieldInfo[] fields = ObjectCodec.Fields(box.GetType());
 		if (name.EndsWith(".RequestSetTile", StringComparison.Ordinal))
 		{
-			ToolbarSelection toolbarSelection = (ToolbarSelection)source.First((FieldInfo x) => x.FieldType == typeof(ToolbarSelection)).GetValue(box);
-			object value = source.First((FieldInfo x) => x.FieldType.Name.StartsWith("ReleaseToServer", StringComparison.Ordinal)).GetValue(box);
-			ToolbarTile toolbarTile = value.GetType().GetProperty("Value").GetValue(value) as ToolbarTile;
-			if (toolbarSelection.ToolbarIndexIndex >= 0 && toolbarSelection.ToolbarIndexIndex < data.ToolbarTiles.Count)
+			var selection = (ToolbarSelection)fields.First(x => x.FieldType == typeof(ToolbarSelection)).GetValue(box);
+			object released = fields.First(x => x.FieldType.Name.StartsWith("ReleaseToServer", StringComparison.Ordinal)).GetValue(box);
+			var tile = released.GetType().GetProperty("Value").GetValue(released) as ToolbarTile;
+			if (selection.ToolbarIndexIndex >= 0 && selection.ToolbarIndexIndex < data.ToolbarTiles.Count)
 			{
-				ObservableCollection<ToolbarTile> observableCollection = data.ToolbarTiles[toolbarSelection.ToolbarIndexIndex];
-				if (toolbarSelection.TileIndex >= 0 && toolbarSelection.TileIndex < observableCollection.Count)
+				ObservableCollection<ToolbarTile> row = data.ToolbarTiles[selection.ToolbarIndexIndex];
+				if (selection.TileIndex >= 0 && selection.TileIndex < row.Count)
 				{
-					observableCollection[toolbarSelection.TileIndex] = toolbarTile;
-					return $"toolbar tile {toolbarSelection.ToolbarIndexIndex}/{toolbarSelection.TileIndex} set to {toolbarTile?.GetType().Name ?? "empty"} on this player's own toolbar";
+					row[selection.TileIndex] = tile;
+					return $"toolbar tile {selection.ToolbarIndexIndex}/{selection.TileIndex} set to {tile?.GetType().Name ?? "empty"} on this player's own toolbar";
 				}
 			}
-			return $"toolbar tile {toolbarSelection.ToolbarIndexIndex}/{toolbarSelection.TileIndex} is outside this player's toolbar ({data.ToolbarTiles.Count} rows); nothing set";
+			return $"toolbar tile {selection.ToolbarIndexIndex}/{selection.TileIndex} is outside this player's toolbar ({data.ToolbarTiles.Count} rows); nothing set";
 		}
 		if (name.EndsWith(".RequestResetToolbar", StringComparison.Ordinal))
 		{
-			(source.First((FieldInfo x) => x.FieldType == typeof(DefaultToolbarDefinition)).GetValue(box) as DefaultToolbarDefinition)?.ResetToolbar(data);
+			(fields.First(x => x.FieldType == typeof(DefaultToolbarDefinition)).GetValue(box) as DefaultToolbarDefinition)?.ResetToolbar(data);
 			return "toolbar reset to its defaults on this player's own toolbar";
 		}
 		return name + ": nothing to do on this player's own toolbar";
@@ -630,7 +588,8 @@ internal sealed class ClientStories
 
 	public string Describe()
 	{
-		return $"stories: sent {Sent}, host-started {ServerStarted}, resumed {Resumed}, finished {Finished}, local toolbar {Local}, kept local {DeniedCount}, camera coalesced {CameraCoalesced}, cannot travel {CannotTravel}, released-model no-ops {ReleasedNoOps}, failed {Failed}, timed out {TimedOut}, in flight {_byId.Count}" + ((_counts.Count == 0) ? "" : ("; " + string.Join(", ", from kv in _counts.OrderByDescending((KeyValuePair<string, long> kv) => kv.Value).Take(8)
-			select $"{kv.Key} x{kv.Value}")));
+		return $"stories: sent {Sent}, host-started {ServerStarted}, resumed {Resumed}, finished {Finished}, local toolbar {Local}, kept local {DeniedCount}, camera coalesced {CameraCoalesced}, cannot travel {CannotTravel}, released-model no-ops {ReleasedNoOps}, failed {Failed}, timed out {TimedOut}, in flight {_byId.Count}" + (_counts.Count == 0 ? "" : "; " + string.Join(", ",
+			from kv in _counts.OrderByDescending(kv => kv.Value).Take(8)
+			select $"{kv.Key} x{kv.Value}"));
 	}
 }

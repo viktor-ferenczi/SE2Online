@@ -49,14 +49,10 @@ internal sealed class HostStories
 			_space = space;
 		}
 
-		public void Start<TResult>(NetworkStoryContext context, IAsyncStateMachine stateMachine)
-		{
-			stateMachine.MoveNext();
-		}
+		public void Start<TResult>(NetworkStoryContext context, IAsyncStateMachine stateMachine) => stateMachine.MoveNext();
 
-		public unsafe void MoveToServer(NetworkStoryContext context, IAsyncStateMachine stateMachine, ServerRequest server)
+		public void MoveToServer(NetworkStoryContext context, IAsyncStateMachine stateMachine, ServerRequest server)
 		{
-			//IL_002a: Expected native int or pointer, but got VT
 			server.Result = new ReplicationEventContext
 			{
 				IsLocal = true,
@@ -70,13 +66,13 @@ internal sealed class HostStories
 		{
 			_space.ClearLocalIds();
 			_space.Observed.Clear();
-			List<(string, WireValue)> list = StoryState.Encode(stateMachine, _space, out string fail);
-			if (list != null && _space.LocalIds.Count > 0)
+			List<(string, WireValue)>? fields = StoryState.Encode(stateMachine, _space, out string? fail);
+			if (fields != null && _space.LocalIds.Count > 0)
 			{
-				list = null;
+				fields = null;
 				fail = "refers to an entity the joiner does not have";
 			}
-			if (list == null)
+			if (fields == null)
 			{
 				_owner.Done(_entry);
 				_owner.Fail(_host, _entry.Peer, _entry.Id, _entry.Name, "cannot travel back: " + fail);
@@ -89,7 +85,7 @@ internal sealed class HostStories
 			{
 				StoryId = _entry.Id,
 				StateMachineType = ObjectCodec.TypeName(stateMachine.GetType()),
-				Fields = list
+				Fields = fields
 			});
 		}
 
@@ -97,26 +93,26 @@ internal sealed class HostStories
 		{
 			_owner.Done(_entry);
 			_owner.Finished++;
-			string text = ((exception == null) ? ("ok" + StoryState.Describe(result)) : exception.GetType().Name);
-			if (_owner.FirstOf("finished " + _entry.Name + ((exception == null) ? "" : (" " + text))) | (_owner.Finished <= 20))
+			string outcome = exception == null ? "ok" + StoryState.Describe(result) : exception.GetType().Name;
+			if (_owner.FirstOf("finished " + _entry.Name + (exception == null ? "" : " " + outcome)) | (_owner.Finished <= 20))
 			{
-				_owner._log.Info($"host world sync: STORY {_entry.Name} #{_entry.Id} finished on the server ({text}), result to {_entry.Peer}");
+				_owner._log.Info($"host world sync: STORY {_entry.Name} #{_entry.Id} finished on the server ({outcome}), result to {_entry.Peer}");
 			}
-			StoryFinish storyFinish = new StoryFinish
+			var finish = new StoryFinish
 			{
 				StoryId = _entry.Id
 			};
 			if (exception != null)
 			{
-				storyFinish.Status = (byte)((!(exception is Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException)) ? 1 : 2);
-				storyFinish.Text = exception.GetType().Name + ": " + exception.Message;
+				finish.Status = (byte)(exception is not Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException ? 1 : 2);
+				finish.Text = exception.GetType().Name + ": " + exception.Message;
 			}
-			else if (result != null && !(result is DBNull))
+			else if (result != null && result is not DBNull)
 			{
-				string fail = null;
+				string? fail = null;
 				_space.ClearLocalIds();
 				_space.Observed.Clear();
-				storyFinish.Result = ObjectCodec.Encode(result, typeof(TResult), _space, ref fail);
+				finish.Result = ObjectCodec.Encode(result, typeof(TResult), _space, ref fail);
 				if (fail == null && _space.LocalIds.Count > 0)
 				{
 					_owner.Defer(_entry, result, typeof(TResult));
@@ -124,15 +120,15 @@ internal sealed class HostStories
 				}
 				if (fail != null)
 				{
-					storyFinish.Status = 2;
-					storyFinish.Text = "result cannot travel: " + fail;
+					finish.Status = 2;
+					finish.Text = "result cannot travel: " + fail;
 				}
 				else
 				{
 					_owner.Roots(_entry.Peer, _space);
 				}
 			}
-			_host.SendStoryFinish(_entry.Peer, storyFinish);
+			_host.SendStoryFinish(_entry.Peer, finish);
 		}
 	}
 
@@ -178,22 +174,9 @@ internal sealed class HostStories
 
 	private long _lastPurgeMs;
 
-	public bool Pending
-	{
-		get
-		{
-			if (_in.IsEmpty && _forget.IsEmpty)
-			{
-				return !_deferred.IsEmpty;
-			}
-			return true;
-		}
-	}
+	public bool Pending => !_in.IsEmpty || !_forget.IsEmpty || !_deferred.IsEmpty;
 
-	internal bool FirstOf(string key)
-	{
-		return _logged.TryAdd(key, 0);
-	}
+	internal bool FirstOf(string key) => _logged.TryAdd(key, 0);
 
 	public HostStories(IMpLog log)
 	{
@@ -219,10 +202,7 @@ internal sealed class HostStories
 		_in.Enqueue((peer, clientId, move));
 	}
 
-	public void Forget(PeerId peer)
-	{
-		_forget.Enqueue(peer);
-	}
+	public void Forget(PeerId peer) => _forget.Enqueue(peer);
 
 	internal void Defer(Entry e, object? result, Type type)
 	{
@@ -232,86 +212,81 @@ internal sealed class HostStories
 	internal void RetryDeferred(IStorySink host, ObjectSpace space)
 	{
 		int count = _deferred.Count;
-		long num = MpClock.NowMs();
-		(Entry, object, Type, long) result;
-		for (int i = 0; i < count && _deferred.TryDequeue(out result); i++)
+		long now = MpClock.NowMs();
+		(Entry Entry, object? Result, Type Type, long SinceMs) deferred;
+		for (int i = 0; i < count && _deferred.TryDequeue(out deferred); i++)
 		{
-			string fail = null;
+			string? fail = null;
 			space.ClearLocalIds();
 			space.Observed.Clear();
-			WireValue result2 = ObjectCodec.Encode(result.Item2, result.Item3, space, ref fail);
+			WireValue encoded = ObjectCodec.Encode(deferred.Result, deferred.Type, space, ref fail);
 			if (fail == null && space.LocalIds.Count > 0)
 			{
-				if (num - result.Item4 < 3000)
+				if (now - deferred.SinceMs < 3000)
 				{
-					_deferred.Enqueue(result);
+					_deferred.Enqueue(deferred);
 					continue;
 				}
 				fail = "refers to entities the joiner does not have";
 			}
 			if (fail == null)
 			{
-				Roots(result.Item1.Peer, space);
+				Roots(deferred.Entry.Peer, space);
 			}
-			host.SendStoryFinish(result.Item1.Peer, (fail == null) ? new StoryFinish
-			{
-				StoryId = result.Item1.Id,
-				Result = result2
-			} : new StoryFinish
-			{
-				StoryId = result.Item1.Id,
-				Status = 2,
-				Text = "result cannot travel: " + fail
-			});
+			host.SendStoryFinish(deferred.Entry.Peer, fail == null
+				? new StoryFinish
+				{
+					StoryId = deferred.Entry.Id,
+					Result = encoded
+				}
+				: new StoryFinish
+				{
+					StoryId = deferred.Entry.Id,
+					Status = 2,
+					Text = "result cannot travel: " + fail
+				});
 		}
 	}
 
 	public void Drain(Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent hostClient, Func<IStorySink?> host, Func<ObjectSpace> serverSpace, Session serverSession, bool serverOnly = false)
 	{
-		Entry value;
-		while (true)
+		Entry? removed;
+		while (_forget.TryDequeue(out var gone))
 		{
-			if (!_forget.TryDequeue(out var gone))
+			foreach (var key in _entries.Keys.Where(k => k.Item1 == gone).ToList())
 			{
-				break;
-			}
-			foreach (var item in _entries.Keys.Where(((PeerId, uint) k) => k.Item1 == gone).ToList())
-			{
-				_entries.TryRemove(item, out value);
+				_entries.TryRemove(key, out removed);
 			}
 		}
 		long now = MpClock.NowMs();
 		if (now - _lastPurgeMs > 1000)
 		{
 			_lastPurgeMs = now;
-			foreach (var item2 in (from kv in _entries
+			foreach (var key in (from kv in _entries
 				where now - kv.Value.LastMs > 300000
 				select kv.Key).ToList())
 			{
-				_entries.TryRemove(item2, out value);
+				_entries.TryRemove(key, out removed);
 			}
 		}
-		(PeerId, ushort, StoryMove) result;
-		while (_in.TryDequeue(out result))
+		(PeerId, ushort, StoryMove) queued;
+		while (_in.TryDequeue(out queued))
 		{
-			(PeerId Peer, ushort ClientId, StoryMove Move) it = result;
+			(PeerId Peer, ushort ClientId, StoryMove Move) it = queued;
 			ushort source = SourceFor?.Invoke(it.ClientId) ?? 1;
 			if (serverOnly)
 			{
 				Run(it.Peer, it.Move, host(), serverSpace(), serverSession, source, it.ClientId);
 				continue;
 			}
-			hostClient.PostInvoke(delegate
-			{
-				Run(it.Peer, it.Move, host(), serverSpace(), serverSession, source, it.ClientId);
-			});
+			hostClient.PostInvoke(_ => Run(it.Peer, it.Move, host(), serverSpace(), serverSession, source, it.ClientId));
 		}
 		if (!_deferred.IsEmpty)
 		{
-			IStorySink storySink = host();
-			if (storySink != null)
+			IStorySink? sink = host();
+			if (sink != null)
 			{
-				RetryDeferred(storySink, serverSpace());
+				RetryDeferred(sink, serverSpace());
 			}
 		}
 	}
@@ -322,98 +297,97 @@ internal sealed class HostStories
 		{
 			return;
 		}
-		string text = StoryState.Name(move.StateMachineType);
-		Entry value2;
+		string name = StoryState.Name(move.StateMachineType);
+		Entry? removed;
 		try
 		{
 			(PeerId, uint) key = (peer, move.StoryId);
-			if (!_entries.TryGetValue(key, out Entry value))
+			if (!_entries.TryGetValue(key, out Entry? entry))
 			{
 				Type type = ObjectCodec.FindType(move.StateMachineType);
-				FieldInfo fieldInfo = ((type == null) ? null : ObjectCodec.Fields(type).FirstOrDefault((FieldInfo f) => StoryState.IsBuilder(f.FieldType)));
-				if (fieldInfo == null)
+				FieldInfo? builder = type == null ? null : ObjectCodec.Fields(type).FirstOrDefault(f => StoryState.IsBuilder(f.FieldType));
+				if (builder == null)
 				{
-					Fail(host, peer, move.StoryId, text, "no state machine type " + move.StateMachineType + " / builder here");
+					Fail(host, peer, move.StoryId, name, "no state machine type " + move.StateMachineType + " / builder here");
 					return;
 				}
-				NetworkStoryContext networkStoryContext = (NetworkStoryContext)Activator.CreateInstance(fieldInfo.FieldType);
-				value = new Entry
+				var context = (NetworkStoryContext)Activator.CreateInstance(builder.FieldType);
+				entry = new Entry
 				{
 					Peer = peer,
 					Id = move.StoryId,
-					Name = text,
-					Context = networkStoryContext
+					Name = name,
+					Context = context
 				};
-				networkStoryContext.Narrator = new HostStoryNarrator(this, value, host, space);
-				_entries[key] = value;
+				context.Narrator = new HostStoryNarrator(this, entry, host, space);
+				_entries[key] = entry;
 				Started++;
 			}
 			else
 			{
 				Resumed++;
 			}
-			value.LastMs = MpClock.NowMs();
-			bool flag = value.Moves++ == 0;
+			entry.LastMs = MpClock.NowMs();
+			bool firstMove = entry.Moves++ == 0;
 			space.ClearLocalIds();
 			space.LocalStubs.Clear();
-			object obj = StoryState.Decode(move, space, value.Context, MakeRequest, out string fail);
-			if (obj == null)
+			object? sm = StoryState.Decode(move, space, entry.Context, MakeRequest, out string? fail);
+			if (sm == null)
 			{
-				_entries.TryRemove(key, out value2);
+				_entries.TryRemove(key, out removed);
 				if (fail != null && ObjectCodec.IsUnknownModel(fail))
 				{
-					AlreadyReleased(host, peer, move.StoryId, text, value.Context, fail);
+					AlreadyReleased(host, peer, move.StoryId, name, entry.Context, fail);
 				}
 				else
 				{
-					Fail(host, peer, move.StoryId, text, fail ?? "?");
+					Fail(host, peer, move.StoryId, name, fail ?? "?");
 				}
 				return;
 			}
 			{
-				string text2 = Gate?.Invoke(clientId, obj, serverSession);
-				if (text2 != null)
+				string? refusal = Gate?.Invoke(clientId, sm, serverSession);
+				if (refusal != null)
 				{
-					_entries.TryRemove(key, out value2);
+					_entries.TryRemove(key, out removed);
 					Refused++;
-					Count(text + (text2.StartsWith("passenger", StringComparison.Ordinal) ? ": refused (passenger seat)" : ": refused (strict grids)"));
-					_log.Info($"host world sync: STORY {text} #{move.StoryId} from {peer} refused: {text2}");
+					Count(name + (refusal.StartsWith("passenger", StringComparison.Ordinal) ? ": refused (passenger seat)" : ": refused (strict grids)"));
+					_log.Info($"host world sync: STORY {name} #{move.StoryId} from {peer} refused: {refusal}");
 					host.SendStoryFinish(peer, new StoryFinish
 					{
 						StoryId = move.StoryId,
 						Status = 2,
-						Text = "not allowed: " + text2
+						Text = "not allowed: " + refusal
 					});
 					return;
 				}
 			}
-			Count(text);
-			if (flag && AudioRouting.IsBuildStory(text))
+			Count(name);
+			if (firstMove && AudioRouting.IsBuildStory(name))
 			{
-				AudioRouting.Instance.NoteJoinerBuild((clientId != 0) ? clientId : sourceClientId, MpClock.NowMs());
+				AudioRouting.Instance.NoteJoinerBuild(clientId != 0 ? clientId : sourceClientId, MpClock.NowMs());
 			}
-			if (FirstOf("run " + text) | (Started + Resumed <= 20))
+			if (FirstOf("run " + name) | (Started + Resumed <= 20))
 			{
-				_log.Info($"host world sync: STORY {text} #{move.StoryId} from {peer} runs on the server as ClientId {sourceClientId}");
+				_log.Info($"host world sync: STORY {name} #{move.StoryId} from {peer} runs on the server as ClientId {sourceClientId}");
 			}
-			((IAsyncStateMachine)obj).MoveNext();
+			((IAsyncStateMachine)sm).MoveNext();
 		}
 		catch (Exception ex)
 		{
-			_entries.TryRemove((peer, move.StoryId), out value2);
-			Fail(host, peer, move.StoryId, text, ex.GetType().Name + ": " + ex.Message);
+			_entries.TryRemove((peer, move.StoryId), out removed);
+			Fail(host, peer, move.StoryId, name, ex.GetType().Name + ": " + ex.Message);
 		}
 		ServerRequest MakeRequest()
 		{
-			//IL_002f: Expected native int or pointer, but got VT
-			ServerRequest serverRequest = new ServerRequest();
-			serverRequest.Result = new ReplicationEventContext
+			var request = new ServerRequest();
+			request.Result = new ReplicationEventContext
 			{
 				IsLocal = false,
 				Session = serverSession,
 				SourceId = new ClientId(sourceClientId)
 			};
-			return serverRequest;
+			return request;
 		}
 	}
 
@@ -433,21 +407,23 @@ internal sealed class HostStories
 	private void AlreadyReleased(IStorySink host, PeerId peer, uint id, string name, NetworkStoryContext context, string why)
 	{
 		ReleasedNoOps++;
-		bool flag = StoryState.ResultType(context) == typeof(DBNull);
+		bool isVoid = StoryState.ResultType(context) == typeof(DBNull);
 		Count(name + ": model already released (no-op)");
 		if (FirstOf("released " + name))
 		{
-			_log.Info($"host world sync: STORY {name} #{id} from {peer} names a model this host already released ({why}); {(flag ? "nothing to do, answered as done" : "skipped, as Keen does")} (further ones only counted)");
+			_log.Info($"host world sync: STORY {name} #{id} from {peer} names a model this host already released ({why}); {(isVoid ? "nothing to do, answered as done" : "skipped, as Keen does")} (further ones only counted)");
 		}
-		host.SendStoryFinish(peer, flag ? new StoryFinish
-		{
-			StoryId = id
-		} : new StoryFinish
-		{
-			StoryId = id,
-			Status = 2,
-			Text = "model already released: " + why
-		});
+		host.SendStoryFinish(peer, isVoid
+			? new StoryFinish
+			{
+				StoryId = id
+			}
+			: new StoryFinish
+			{
+				StoryId = id,
+				Status = 2,
+				Text = "model already released: " + why
+			});
 	}
 
 	internal void Done(Entry e)
@@ -457,7 +433,8 @@ internal sealed class HostStories
 
 	public string Describe()
 	{
-		return $"stories: received {Received}, started {Started}, resumed {Resumed}, moved to client {MovedToClient}, finished {Finished}, failed {Failed}, released-model no-ops {ReleasedNoOps}" + (_counts.IsEmpty ? "" : ("; " + string.Join(", ", from kv in _counts.OrderByDescending((KeyValuePair<string, long> kv) => kv.Value).Take(8)
-			select $"{kv.Key} x{kv.Value}")));
+		return $"stories: received {Received}, started {Started}, resumed {Resumed}, moved to client {MovedToClient}, finished {Finished}, failed {Failed}, released-model no-ops {ReleasedNoOps}" + (_counts.IsEmpty ? "" : "; " + string.Join(", ",
+			from kv in _counts.OrderByDescending(kv => kv.Value).Take(8)
+			select $"{kv.Key} x{kv.Value}"));
 	}
 }

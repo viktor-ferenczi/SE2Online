@@ -106,15 +106,15 @@ public sealed class OwnBodyFilter
 	public (double X, double Y, double Z, Quaternion Q) Filter(long now, double x, double y, double z, Quaternion q, Vector3? velocity, Quaternion ownTurn, string source, string? why, bool smoothedSource = false)
 	{
 		Frames++;
-		Vec3D vec3D = new Vec3D(x, y, z);
+		var pos = new Vec3D(x, y, z);
 		q = Quaternion.Normalize(q);
 		if (!Enabled)
 		{
-			_src = (_shown = vec3D);
-			_srcQ = (_shownQ = q);
+			_src = _shown = pos;
+			_srcQ = _shownQ = q;
 			_has = true;
 			_lastMs = now;
-			return (X: x, Y: y, Z: z, Q: q);
+			return (x, y, z, q);
 		}
 		if (!_has || now - _lastMs > 1000)
 		{
@@ -123,15 +123,15 @@ public sealed class OwnBodyFilter
 			_offQ = Quaternion.Identity;
 			if (_startFromShown && now - _lastMs <= 1000)
 			{
-				Vec3D off = _shown - vec3D;
+				Vec3D off = _shown - pos;
 				if (off.Length <= SnapMeters)
 				{
 					_off = off;
 				}
-				Quaternion quaternion = Quaternion.Normalize(_shownQ * Quaternion.Conjugate(q));
-				if (LookMath.AngleDeg(quaternion, Quaternion.Identity) <= SnapDeg)
+				Quaternion offQ = Quaternion.Normalize(_shownQ * Quaternion.Conjugate(q));
+				if (LookMath.AngleDeg(offQ, Quaternion.Identity) <= SnapDeg)
 				{
-					_offQ = quaternion;
+					_offQ = offQ;
 				}
 				Report(now, off.Length, LookMath.AngleDeg(_shownQ, q), source, why ?? "own body hand-over (seat / smoothed -> this source)", snapped: false);
 			}
@@ -141,38 +141,38 @@ public sealed class OwnBodyFilter
 		else
 		{
 			_startFromShown = false;
-			double num = Math.Clamp(now - _lastMs, 0L, 100L);
-			double num2 = Math.Exp((0.0 - num) / TauMs);
-			_off *= num2;
-			_offQ = Quaternion.Normalize(Quaternion.Slerp(Quaternion.Identity, _offQ, (float)num2));
-			if (num > 0.0)
+			double dtMs = Math.Clamp(now - _lastMs, 0L, 100L);
+			double decay = Math.Exp((0.0 - dtMs) / TauMs);
+			_off *= decay;
+			_offQ = Quaternion.Normalize(Quaternion.Slerp(Quaternion.Identity, _offQ, (float)decay));
+			if (dtMs > 0.0)
 			{
-				Vec3D vec3D2 = (vec3D - _src) * (1000.0 / num);
-				if (vec3D2.Length < 500.0)
+				Vec3D measuredVel = (pos - _src) * (1000.0 / dtMs);
+				if (measuredVel.Length < 500.0)
 				{
-					_vEst += (vec3D2 - _vEst) * 0.25;
+					_vEst += (measuredVel - _vEst) * 0.25;
 				}
 			}
-			Vec3D vec3D3;
+			Vec3D velocityOrEstimate;
 			if (velocity.HasValue)
 			{
-				Vector3 valueOrDefault = velocity.GetValueOrDefault();
-				vec3D3 = new Vec3D(valueOrDefault.X, valueOrDefault.Y, valueOrDefault.Z);
+				Vector3 v = velocity.GetValueOrDefault();
+				velocityOrEstimate = new Vec3D(v.X, v.Y, v.Z);
 			}
 			else
 			{
-				vec3D3 = _vEst;
+				velocityOrEstimate = _vEst;
 			}
-			Vec3D vec3D4 = vec3D3;
-			Vec3D vec3D5 = _src + vec3D4 * (num / 1000.0);
-			Vec3D vec3D6 = vec3D - vec3D5;
-			double length = vec3D6.Length;
-			Quaternion value = Quaternion.Normalize(_srcQ * ownTurn);
-			Quaternion quaternion2 = Quaternion.Normalize(q * Quaternion.Conjugate(value));
-			float num3 = LookMath.AngleDeg(quaternion2, Quaternion.Identity);
-			bool flag = length > SnapMeters;
-			bool flag2 = num3 > SnapDeg;
-			if (flag)
+			Vec3D vel = velocityOrEstimate;
+			Vec3D predicted = _src + vel * (dtMs / 1000.0);
+			Vec3D jump = pos - predicted;
+			double jumpM = jump.Length;
+			Quaternion predictedQ = Quaternion.Normalize(_srcQ * ownTurn);
+			Quaternion turnError = Quaternion.Normalize(q * Quaternion.Conjugate(predictedQ));
+			float jumpDeg = LookMath.AngleDeg(turnError, Quaternion.Identity);
+			bool snapPos = jumpM > SnapMeters;
+			bool snapRot = jumpDeg > SnapDeg;
+			if (snapPos)
 			{
 				_off = default;
 				Snaps++;
@@ -181,61 +181,61 @@ public sealed class OwnBodyFilter
 			// limit, about 0.3 m at a walk, let all of their frame-to-frame noise through). A smoothed timeline (seat,
 			// moving deck, fast flight) is already smooth and is what the ship itself is drawn from: blending it made the
 			// body trail its seat whenever the ship accelerated, so there only real jumps are blended.
-			else if (length > (smoothedSource ? 0.2 + 0.25 * vec3D4.Length * num / 1000.0 : PassMeters))
+			else if (jumpM > (smoothedSource ? 0.2 + 0.25 * vel.Length * dtMs / 1000.0 : PassMeters))
 			{
-				_off -= vec3D6;
+				_off -= jump;
 				Blended++;
-				if (_lastJumpFrame == Frames - 1 && (vec3D6 + _lastJump).Length < 0.3 * _lastJump.Length + PassMeters)
+				if (_lastJumpFrame == Frames - 1 && (jump + _lastJump).Length < 0.3 * _lastJump.Length + PassMeters)
 				{
-					_off -= _lastJump * (1.0 - num2);
+					_off -= _lastJump * (1.0 - decay);
 					_lastJumpFrame = -10L;
 				}
 				else
 				{
-					_lastJump = vec3D6;
+					_lastJump = jump;
 					_lastJumpFrame = Frames;
 				}
 			}
-			if (flag2)
+			if (snapRot)
 			{
 				_offQ = Quaternion.Identity;
 				Snaps++;
 			}
-			else if (num3 > PassDeg)
+			else if (jumpDeg > PassDeg)
 			{
-				_offQ = Quaternion.Normalize(_offQ * Quaternion.Conjugate(quaternion2));
+				_offQ = Quaternion.Normalize(_offQ * Quaternion.Conjugate(turnError));
 				Blended++;
 			}
-			if (length > MaxJumpM)
+			if (jumpM > MaxJumpM)
 			{
-				MaxJumpM = length;
+				MaxJumpM = jumpM;
 			}
-			if (num3 > MaxJumpDeg)
+			if (jumpDeg > MaxJumpDeg)
 			{
-				MaxJumpDeg = num3;
+				MaxJumpDeg = jumpDeg;
 			}
-			if (length >= LogMeters || num3 >= LogDeg)
+			if (jumpM >= LogMeters || jumpDeg >= LogDeg)
 			{
 				BlendedBig++;
-				Report(now, length, num3, source, why, flag | flag2);
+				Report(now, jumpM, jumpDeg, source, why, snapPos | snapRot);
 			}
 		}
-		double length2 = _off.Length;
-		if (length2 > MaxOffsetMeters)
+		double offM = _off.Length;
+		if (offM > MaxOffsetMeters)
 		{
-			_off *= MaxOffsetMeters / length2;
+			_off *= MaxOffsetMeters / offM;
 		}
-		float num4 = LookMath.AngleDeg(_offQ, Quaternion.Identity);
-		if (num4 > MaxOffsetDeg)
+		float offDeg = LookMath.AngleDeg(_offQ, Quaternion.Identity);
+		if (offDeg > MaxOffsetDeg)
 		{
-			_offQ = Quaternion.Normalize(Quaternion.Slerp(Quaternion.Identity, _offQ, MaxOffsetDeg / num4));
+			_offQ = Quaternion.Normalize(Quaternion.Slerp(Quaternion.Identity, _offQ, MaxOffsetDeg / offDeg));
 		}
-		_src = vec3D;
+		_src = pos;
 		_srcQ = q;
-		_shown = vec3D + _off;
+		_shown = pos + _off;
 		_shownQ = Quaternion.Normalize(_offQ * q);
 		_lastMs = now;
-		return (X: _shown.X, Y: _shown.Y, Z: _shown.Z, Q: _shownQ);
+		return (_shown.X, _shown.Y, _shown.Z, _shownQ);
 	}
 
 	private void Report(long now, double m, float deg, string source, string? why, bool snapped)
@@ -248,22 +248,22 @@ public sealed class OwnBodyFilter
 				return;
 			}
 			Logged++;
-			string text = ((_suppressed > 0) ? $" (+{_suppressed} more in the last second)" : "");
+			string more = _suppressed > 0 ? $" (+{_suppressed} more in the last second)" : "";
 			_suppressed = 0;
 			_lastLogMs = now;
-			IMpLog? log = _log;
-			string text2 = $"client: own body: frame discontinuity {m.ToString("0.00", CultureInfo.InvariantCulture)} m / {deg.ToString("0.0", CultureInfo.InvariantCulture)} deg from source '{source}'";
-			string obj = ((why != null) ? (" (" + why + ")") : "");
-			string text3;
+			IMpLog log = _log;
+			string jump = $"client: own body: frame discontinuity {m.ToString("0.00", CultureInfo.InvariantCulture)} m / {deg.ToString("0.0", CultureInfo.InvariantCulture)} deg from source '{source}'";
+			string reason = why != null ? " (" + why + ")" : "";
+			string outcome;
 			if (snapped)
 			{
-				text3 = " -> shown as is (beyond the snap limit)";
+				outcome = " -> shown as is (beyond the snap limit)";
 			}
 			else
 			{
-				text3 = (Enabled ? " -> blended out" : " -> shown as is (bodyfilter off)");
+				outcome = Enabled ? " -> blended out" : " -> shown as is (bodyfilter off)";
 			}
-			log.Info(text2 + obj + text3 + text);
+			log.Info(jump + reason + outcome + more);
 		}
 	}
 

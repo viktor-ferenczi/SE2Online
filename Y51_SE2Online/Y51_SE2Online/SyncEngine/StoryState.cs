@@ -12,49 +12,45 @@ namespace Y51_SE2Online.SyncEngine;
 
 internal static class StoryState
 {
-	public static bool IsBuilder(Type t)
-	{
-		return typeof(NetworkStoryContext).IsAssignableFrom(t);
-	}
+	public static bool IsBuilder(Type t) => typeof(NetworkStoryContext).IsAssignableFrom(t);
 
 	public static List<(string, WireValue)>? Encode(object box, ObjectSpace sp, out string? fail)
 	{
 		fail = null;
-		List<(string, WireValue)> list = new List<(string, WireValue)>();
-		FieldInfo[] array = ObjectCodec.Fields(box.GetType());
-		foreach (FieldInfo fieldInfo in array)
+		var members = new List<(string, WireValue)>();
+		foreach (FieldInfo field in ObjectCodec.Fields(box.GetType()))
 		{
-			if (!fieldInfo.IsStatic)
+			if (!field.IsStatic)
 			{
-				object value = fieldInfo.GetValue(box);
-				WireValue item;
-				if (IsBuilder(fieldInfo.FieldType))
+				object value = field.GetValue(box);
+				WireValue encoded;
+				if (IsBuilder(field.FieldType))
 				{
-					item = WireValue.Of(WireKind.Builder);
+					encoded = WireValue.Of(WireKind.Builder);
 				}
 				else if (value is ServerRequest)
 				{
-					item = WireValue.Of(WireKind.ServerRequest);
+					encoded = WireValue.Of(WireKind.ServerRequest);
 				}
 				else
 				{
-					item = ((!fieldInfo.Name.StartsWith("<>u__", StringComparison.Ordinal) || value is ClientRequest) ? ObjectCodec.Encode(value, fieldInfo.FieldType, sp, ref fail) : WireValue.Of(WireKind.Default));
+					encoded = !field.Name.StartsWith("<>u__", StringComparison.Ordinal) || value is ClientRequest
+						? ObjectCodec.Encode(value, field.FieldType, sp, ref fail)
+						: WireValue.Of(WireKind.Default);
 				}
 				if (fail != null)
 				{
-					fail = fieldInfo.Name + ": " + fail;
+					fail = field.Name + ": " + fail;
 					return null;
 				}
-				list.Add((fieldInfo.Name, item));
+				members.Add((field.Name, encoded));
 			}
 		}
-		return list;
+		return members;
 	}
 
 	public static object? Decode(StoryMove m, ObjectSpace sp, object builder, Func<ServerRequest>? serverRequest, out string? fail)
 	{
-		//IL_00fd: Expected Obj, but got VT
-		//IL_00f5->IL00fb: Incompatible stack types: Obj vs VT
 		fail = null;
 		Type type = ObjectCodec.FindType(m.StateMachineType);
 		if (type == null)
@@ -62,179 +58,152 @@ internal static class StoryState
 			fail = "state machine type " + m.StateMachineType + " not found";
 			return null;
 		}
-		object obj = (type.IsValueType ? Activator.CreateInstance(type) : RuntimeHelpers.GetUninitializedObject(type));
-		FieldInfo[] source = ObjectCodec.Fields(type);
-		foreach (var field in m.Fields)
+		object stateMachine = type.IsValueType ? Activator.CreateInstance(type) : RuntimeHelpers.GetUninitializedObject(type);
+		FieldInfo[] fields = ObjectCodec.Fields(type);
+		foreach (var entry in m.Fields)
 		{
-			string name = field.Name;
-			WireValue item = field.Value;
-			FieldInfo fieldInfo = source.FirstOrDefault((FieldInfo x) => x.Name == name);
-			if (fieldInfo == null)
+			string name = entry.Name;
+			WireValue wire = entry.Value;
+			FieldInfo field = fields.FirstOrDefault(x => x.Name == name);
+			if (field == null)
 			{
 				fail = "field " + name + " not in this build";
 				return null;
 			}
 			object value;
-			switch (item.Kind)
+			switch (wire.Kind)
 			{
 			case WireKind.Builder:
 				value = builder;
 				break;
 			case WireKind.ServerRequest:
-				value = serverRequest?.Invoke() ?? ((object)null);
-				break;
-			default:
-				value = ObjectCodec.Decode(item, fieldInfo.FieldType, sp, translated: false, ref fail);
+				value = serverRequest?.Invoke();
 				break;
 			case WireKind.Default:
 				continue;
+			default:
+				value = ObjectCodec.Decode(wire, field.FieldType, sp, translated: false, ref fail);
+				break;
 			}
 			if (fail != null)
 			{
 				fail = name + ": " + fail;
 				return null;
 			}
-			fieldInfo.SetValue(obj, value);
+			field.SetValue(stateMachine, value);
 		}
-		return obj;
+		return stateMachine;
 	}
 
 	public static string Assess(Type sm)
 	{
-		List<string> list = new List<string>();
-		List<string> list2 = new List<string>();
-		List<string> list3 = new List<string>();
-		FieldInfo[] array = ObjectCodec.Fields(sm);
-		foreach (FieldInfo fieldInfo in array)
+		var cannot = new List<string>();
+		var dependsOnValues = new List<string>();
+		var whileUnset = new List<string>();
+		foreach (FieldInfo field in ObjectCodec.Fields(sm))
 		{
-			if (fieldInfo.IsStatic || fieldInfo.Name == "<>1__state" || IsBuilder(fieldInfo.FieldType) || fieldInfo.Name.StartsWith("<>u__", StringComparison.Ordinal) || fieldInfo.FieldType == typeof(ServerRequest) || fieldInfo.FieldType == typeof(ClientRequest))
+			if (field.IsStatic || field.Name == "<>1__state" || IsBuilder(field.FieldType) || field.Name.StartsWith("<>u__", StringComparison.Ordinal) || field.FieldType == typeof(ServerRequest) || field.FieldType == typeof(ClientRequest))
 			{
 				continue;
 			}
-			string text = ObjectCodec.TypeProblem(fieldInfo.FieldType);
-			if (text != null)
+			string? problem = ObjectCodec.TypeProblem(field.FieldType);
+			if (problem != null)
 			{
-				bool num = !fieldInfo.Name.StartsWith("<", StringComparison.Ordinal) || fieldInfo.Name == "<>4__this" || fieldInfo.Name.StartsWith("<>8__", StringComparison.Ordinal);
-				string item = CleanField(fieldInfo.Name) + ": " + text;
-				if (!num)
+				// Parameters, `this` and closures are always set; other hoisted locals (<x>5__n) may not be yet.
+				bool alwaysSet = !field.Name.StartsWith("<", StringComparison.Ordinal) || field.Name == "<>4__this" || field.Name.StartsWith("<>8__", StringComparison.Ordinal);
+				string entry = CleanField(field.Name) + ": " + problem;
+				if (!alwaysSet)
 				{
-					list3.Add(item);
+					whileUnset.Add(entry);
 				}
-				else if (text.Contains("depends on the value", StringComparison.Ordinal))
+				else if (problem.Contains("depends on the value", StringComparison.Ordinal))
 				{
-					list2.Add(item);
+					dependsOnValues.Add(entry);
 				}
 				else
 				{
-					list.Add(item);
+					cannot.Add(entry);
 				}
 			}
 		}
-		if (list.Count > 0)
+		if (cannot.Count > 0)
 		{
-			return "cannot (" + string.Join("; ", list) + ")";
+			return "cannot (" + string.Join("; ", cannot) + ")";
 		}
-		if (list2.Count > 0)
+		if (dependsOnValues.Count > 0)
 		{
-			return "depends on values (" + string.Join("; ", list2) + ")";
+			return "depends on values (" + string.Join("; ", dependsOnValues) + ")";
 		}
-		if (list3.Count > 0)
+		if (whileUnset.Count > 0)
 		{
-			return "travels while unset (" + string.Join("; ", list3) + ")";
+			return "travels while unset (" + string.Join("; ", whileUnset) + ")";
 		}
 		return "travels";
 	}
 
 	private static string CleanField(string n)
 	{
-		int num = n.IndexOf('<');
-		int num2 = n.IndexOf('>');
-		if (num != 0 || num2 <= 1)
+		int open = n.IndexOf('<');
+		int close = n.IndexOf('>');
+		if (open != 0 || close <= 1)
 		{
 			return n;
 		}
-		return n.Substring(1, num2 - 1);
+		return n.Substring(1, close - 1);
 	}
 
 	public static string Name(string stateMachineType)
 	{
-		string text = stateMachineType;
-		int num = text.IndexOf(',');
-		if (num >= 0)
+		string fullName = stateMachineType;
+		int comma = fullName.IndexOf(',');
+		if (comma >= 0)
 		{
-			text = text.Substring(0, num);
+			fullName = fullName.Substring(0, comma);
 		}
-		int num2 = text.LastIndexOf('+');
-		string text2 = ((num2 > 0) ? text.Substring(0, num2) : text);
-		int num3 = text2.LastIndexOf('.');
-		string text3;
-		if (num3 < 0)
+		int plus = fullName.LastIndexOf('+');
+		string owner = plus > 0 ? fullName.Substring(0, plus) : fullName;
+		int dot = owner.LastIndexOf('.');
+		owner = dot < 0 ? owner : owner[(dot + 1)..];
+		string method = plus <= 0 ? fullName : fullName[(plus + 1)..];
+		int open = method.IndexOf('<');
+		int close = method.IndexOf('>');
+		if (open >= 0 && close > open)
 		{
-			text3 = text2;
+			method = method[(open + 1)..close];
 		}
-		else
-		{
-			string text4 = text2;
-			int num4 = num3 + 1;
-			text3 = text4.Substring(num4, text4.Length - num4);
-		}
-		text2 = text3;
-		string text5;
-		if (num2 <= 0)
-		{
-			text5 = text;
-		}
-		else
-		{
-			string text4 = text;
-			int num4 = num2 + 1;
-			text5 = text4.Substring(num4, text4.Length - num4);
-		}
-		string text6 = text5;
-		int num5 = text6.IndexOf('<');
-		int num6 = text6.IndexOf('>');
-		if (num5 >= 0 && num6 > num5)
-		{
-			string text7 = text6;
-			int num4 = num5 + 1;
-			text6 = text7.Substring(num4, num6 - num4);
-		}
-		return text2 + "." + text6;
+		return owner + "." + method;
 	}
 
-	public static string Shape(string text)
-	{
-		return Regex.Replace(text, "\\d+", "N");
-	}
+	public static string Shape(string text) => Regex.Replace(text, @"\d+", "N");
 
 	public static string Describe(object? result)
 	{
-		if (result != null)
+		if (result == null)
 		{
-			if (!(result is DBNull))
-			{
-				if (!(result is string text))
-				{
-					if (result is ICollection collection)
-					{
-						return $" {collection.GetType().Name} ({collection.Count})";
-					}
-					if (!result.GetType().IsPrimitive && !result.GetType().IsEnum)
-					{
-						if (result is ITuple tuple)
-						{
-							string text2 = tuple.ToString();
-							return " " + ((text2 != null && text2.Length <= 80) ? text2 : result.GetType().Name);
-						}
-						return " " + result.GetType().Name;
-					}
-					return " " + result;
-				}
-				return " \"" + ((text.Length > 40) ? (text.Substring(0, 40) + "...") : text) + "\"";
-			}
+			return " null";
+		}
+		if (result is DBNull)
+		{
 			return "";
 		}
-		return " null";
+		if (result is string text)
+		{
+			return " \"" + (text.Length > 40 ? text.Substring(0, 40) + "..." : text) + "\"";
+		}
+		if (result is ICollection collection)
+		{
+			return $" {collection.GetType().Name} ({collection.Count})";
+		}
+		if (result.GetType().IsPrimitive || result.GetType().IsEnum)
+		{
+			return " " + result;
+		}
+		if (result is ITuple tuple)
+		{
+			string? shown = tuple.ToString();
+			return " " + (shown != null && shown.Length <= 80 ? shown : result.GetType().Name);
+		}
+		return " " + result.GetType().Name;
 	}
 
 	public static Type ResultType(object context)

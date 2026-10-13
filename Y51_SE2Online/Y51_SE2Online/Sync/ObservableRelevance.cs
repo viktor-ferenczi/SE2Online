@@ -30,7 +30,7 @@ public sealed class ObservableRelevance<TPeer> where TPeer : notnull
 		public readonly Dictionary<(uint Oid, string Member), ObservableOp> Held = new Dictionary<(uint, string), ObservableOp>();
 	}
 
-	public delegate(ObservableOp Op, IReadOnlyList<uint> Children)? SnapshotFn(uint oid);
+	public delegate (ObservableOp Op, IReadOnlyList<uint> Children)? SnapshotFn(uint oid);
 
 	private readonly SnapshotFn _snapshot;
 
@@ -62,73 +62,70 @@ public sealed class ObservableRelevance<TPeer> where TPeer : notnull
 		_clock = clock ?? new Func<long>(MpClock.NowMs);
 	}
 
-	public bool AnyHas(uint oid)
-	{
-		return _holders.ContainsKey(oid);
-	}
+	public bool AnyHas(uint oid) => _holders.ContainsKey(oid);
 
 	public bool Has(TPeer peer, uint oid)
 	{
-		if (_peers.TryGetValue(peer, out PeerState value))
+		if (_peers.TryGetValue(peer, out PeerState? state))
 		{
-			return value.Has.Contains(oid);
+			return state.Has.Contains(oid);
 		}
 		return false;
 	}
 
 	public int CountFor(TPeer peer)
 	{
-		if (!_peers.TryGetValue(peer, out PeerState value))
+		if (!_peers.TryGetValue(peer, out PeerState? state))
 		{
 			return 0;
 		}
-		return value.Has.Count;
+		return state.Has.Count;
 	}
 
 	private PeerState State(TPeer peer)
 	{
-		if (!_peers.TryGetValue(peer, out PeerState value))
+		if (!_peers.TryGetValue(peer, out PeerState? state))
 		{
-			value = (_peers[peer] = new PeerState());
+			state = _peers[peer] = new PeerState();
 		}
-		return value;
+		return state;
 	}
 
 	public void AddRoot(TPeer peer, uint oid, long nowMs)
 	{
-		PeerState peerState = State(peer);
-		if (!peerState.Roots.Contains(oid) || !peerState.Has.Contains(oid))
+		PeerState state = State(peer);
+		if (!state.Roots.Contains(oid) || !state.Has.Contains(oid))
 		{
-			peerState.PendingRoots.TryAdd(oid, nowMs);
+			state.PendingRoots.TryAdd(oid, nowMs);
 		}
 	}
 
 	public int ProcessPendingRoots(long nowMs)
 	{
-		int num = 0;
-		foreach (var (peer, peerState2) in _peers)
+		int added = 0;
+		foreach (var (peer, state) in _peers)
 		{
-			if (peerState2.PendingRoots.Count == 0)
+			if (state.PendingRoots.Count == 0)
 			{
 				continue;
 			}
-			foreach (var (num4, num5) in peerState2.PendingRoots.ToList())
+			foreach (var (oid, since) in state.PendingRoots.ToList())
 			{
-				if (EnsureSent(peer, peerState2, num4))
+				if (EnsureSent(peer, state, oid))
 				{
-					peerState2.PendingRoots.Remove(num4);
-					peerState2.Roots.Add(num4);
+					state.PendingRoots.Remove(oid);
+					state.Roots.Add(oid);
 					RootsAdded++;
-					num++;
+					added++;
 				}
-				else if (nowMs - num5 > 10000)
+				else if (nowMs - since > 10000)
 				{
-					peerState2.PendingRoots.Remove(num4);
+					state.PendingRoots.Remove(oid);
 					RootsExpired++;
 				}
 			}
 		}
-		return num;
+		return added;
 	}
 
 	private bool EnsureSent(TPeer peer, PeerState p, uint oid)
@@ -143,22 +140,22 @@ public sealed class ObservableRelevance<TPeer> where TPeer : notnull
 		}
 		try
 		{
-			(ObservableOp, IReadOnlyList<uint>)? tuple = _snapshot(oid);
-			if (!tuple.HasValue)
+			var snapshot = _snapshot(oid);
+			if (!snapshot.HasValue)
 			{
 				SnapshotsMissing++;
 				return false;
 			}
-			foreach (uint item in tuple.Value.Item2)
+			foreach (uint child in snapshot.Value.Children)
 			{
-				if (item != oid)
+				if (child != oid)
 				{
-					EnsureSent(peer, p, item);
+					EnsureSent(peer, p, child);
 				}
 			}
-			p.Out.Add(tuple.Value.Item1);
+			p.Out.Add(snapshot.Value.Op);
 			p.Has.Add(oid);
-			_holders[oid] = ((!_holders.TryGetValue(oid, out var value)) ? 1 : (value + 1));
+			_holders[oid] = !_holders.TryGetValue(oid, out var holders) ? 1 : holders + 1;
 			p.Snapshots++;
 			return true;
 		}
@@ -168,45 +165,42 @@ public sealed class ObservableRelevance<TPeer> where TPeer : notnull
 		}
 	}
 
-	public void OnChange(ObservableOp op, TPeer? origin = default(TPeer?), bool hasOrigin = false)
+	public void OnChange(ObservableOp op, TPeer? origin = default, bool hasOrigin = false)
 	{
 		if (!_holders.ContainsKey(op.Oid))
 		{
 			return;
 		}
-		List<uint> list = null;
-		long num = 0L;
-		foreach (var (val2, peerState2) in _peers)
+		List<uint>? refs = null;
+		long now = 0L;
+		foreach (var (peer, state) in _peers)
 		{
-			if (!peerState2.Has.Contains(op.Oid) || (hasOrigin && EqualityComparer<TPeer>.Default.Equals(val2, origin)))
+			if (!state.Has.Contains(op.Oid) || (hasOrigin && EqualityComparer<TPeer>.Default.Equals(peer, origin)))
 			{
 				continue;
 			}
-			if (list == null)
-			{
-				list = op.Refs();
-			}
-			if (op.Kind == ObservableOpKind.Member && list.Count == 0)
+			refs ??= op.Refs();
+			if (op.Kind == ObservableOpKind.Member && refs.Count == 0)
 			{
 				(uint, string) key = (op.Oid, op.Text);
-				if (num == 0L)
+				if (now == 0L)
 				{
-					num = _clock();
+					now = _clock();
 				}
-				if (peerState2.LastSent.TryGetValue(key, out var value) && num - value < 50)
+				if (state.LastSent.TryGetValue(key, out var lastSent) && now - lastSent < 50)
 				{
-					peerState2.Held[key] = op;
-					peerState2.Deferred++;
+					state.Held[key] = op;
+					state.Deferred++;
 					continue;
 				}
-				peerState2.LastSent[key] = num;
-				peerState2.Held.Remove(key);
+				state.LastSent[key] = now;
+				state.Held.Remove(key);
 			}
-			foreach (uint item in list)
+			foreach (uint oid in refs)
 			{
-				EnsureSent(val2, peerState2, item);
+				EnsureSent(peer, state, oid);
 			}
-			Append(peerState2, op);
+			Append(state, op);
 		}
 	}
 
@@ -214,12 +208,10 @@ public sealed class ObservableRelevance<TPeer> where TPeer : notnull
 	{
 		if (op.Kind == ObservableOpKind.Member && p.Out.Count > 0)
 		{
-			List<ObservableOp> list = p.Out;
-			ObservableOp observableOp = list[list.Count - 1];
-			if (observableOp != null && observableOp.Kind == ObservableOpKind.Member && observableOp.Oid == op.Oid && observableOp.Text == op.Text)
+			ObservableOp last = p.Out[^1];
+			if (last != null && last.Kind == ObservableOpKind.Member && last.Oid == op.Oid && last.Text == op.Text)
 			{
-				List<ObservableOp> list2 = p.Out;
-				list2[list2.Count - 1] = op;
+				p.Out[^1] = op;
 				Coalesced++;
 				return;
 			}
@@ -230,18 +222,18 @@ public sealed class ObservableRelevance<TPeer> where TPeer : notnull
 
 	public void OnRelease(uint oid)
 	{
-		foreach (var (_, peerState2) in _peers)
+		foreach (var (_, state) in _peers)
 		{
-			peerState2.PendingRoots.Remove(oid);
-			peerState2.Roots.Remove(oid);
-			foreach (var item in peerState2.Held.Keys.Where(((uint Oid, string Member) k) => k.Oid == oid).ToList())
+			state.PendingRoots.Remove(oid);
+			state.Roots.Remove(oid);
+			foreach (var key in state.Held.Keys.Where(k => k.Oid == oid).ToList())
 			{
-				peerState2.Held.Remove(item);
+				state.Held.Remove(key);
 			}
-			if (peerState2.Has.Remove(oid))
+			if (state.Has.Remove(oid))
 			{
-				peerState2.Out.Add(ObservableOp.Release(oid));
-				peerState2.Releases++;
+				state.Out.Add(ObservableOp.Release(oid));
+				state.Releases++;
 			}
 		}
 		_holders.Remove(oid);
@@ -249,56 +241,56 @@ public sealed class ObservableRelevance<TPeer> where TPeer : notnull
 
 	public void Forget(TPeer peer)
 	{
-		if (!_peers.Remove(peer, out PeerState value))
+		if (!_peers.Remove(peer, out PeerState? state))
 		{
 			return;
 		}
-		foreach (uint ha in value.Has)
+		foreach (uint oid in state.Has)
 		{
-			if (_holders.TryGetValue(ha, out var value2) && value2 > 1)
+			if (_holders.TryGetValue(oid, out var holders) && holders > 1)
 			{
-				_holders[ha] = value2 - 1;
+				_holders[oid] = holders - 1;
 			}
 			else
 			{
-				_holders.Remove(ha);
+				_holders.Remove(oid);
 			}
 		}
 	}
 
 	public List<(TPeer Peer, List<ObservableOp> Ops)> TakeOutput()
 	{
-		List<(TPeer, List<ObservableOp>)> list = new List<(TPeer, List<ObservableOp>)>();
-		long num = 0L;
-		foreach (var (item, peerState2) in _peers)
+		var output = new List<(TPeer, List<ObservableOp>)>();
+		long now = 0L;
+		foreach (var (peer, state) in _peers)
 		{
-			if (peerState2.Held.Count > 0)
+			if (state.Held.Count > 0)
 			{
-				if (num == 0L)
+				if (now == 0L)
 				{
-					num = _clock();
+					now = _clock();
 				}
-				foreach (var (key, op) in peerState2.Held.ToList())
+				foreach (var (key, op) in state.Held.ToList())
 				{
-					if (!peerState2.LastSent.TryGetValue(key, out var value) || num - value >= 50)
+					if (!state.LastSent.TryGetValue(key, out var lastSent) || now - lastSent >= 50)
 					{
-						peerState2.Held.Remove(key);
-						peerState2.LastSent[key] = num;
-						Append(peerState2, op);
+						state.Held.Remove(key);
+						state.LastSent[key] = now;
+						Append(state, op);
 					}
 				}
 			}
-			if (peerState2.Out.Count != 0)
+			if (state.Out.Count != 0)
 			{
-				list.Add((item, peerState2.Out));
-				peerState2.Out = new List<ObservableOp>();
+				output.Add((peer, state.Out));
+				state.Out = new List<ObservableOp>();
 			}
 		}
-		return list;
+		return output;
 	}
 
 	public string Describe()
 	{
-		return $"{_holders.Count} observables held by {_peers.Count} joiner(s) (" + string.Join(", ", _peers.Select((KeyValuePair<TPeer, PeerState> kv) => $"{kv.Key}: {kv.Value.Has.Count} held, {kv.Value.Roots.Count} roots, {kv.Value.PendingRoots.Count} pending, {kv.Value.Snapshots} snapshots / {kv.Value.Ops} changes / {kv.Value.Releases} releases sent, {kv.Value.Deferred} changes rate-capped")) + $"), roots added {RootsAdded}, expired {RootsExpired}, snapshots unavailable {SnapshotsMissing}, coalesced {Coalesced}";
+		return $"{_holders.Count} observables held by {_peers.Count} joiner(s) (" + string.Join(", ", _peers.Select(kv => $"{kv.Key}: {kv.Value.Has.Count} held, {kv.Value.Roots.Count} roots, {kv.Value.PendingRoots.Count} pending, {kv.Value.Snapshots} snapshots / {kv.Value.Ops} changes / {kv.Value.Releases} releases sent, {kv.Value.Deferred} changes rate-capped")) + $"), roots added {RootsAdded}, expired {RootsExpired}, snapshots unavailable {SnapshotsMissing}, coalesced {Coalesced}";
 	}
 }
