@@ -65,7 +65,7 @@ internal sealed class HostIdentities
 		.Append(typeof(IntegrityToolPerPlayerData)).Append(typeof(PaintToolPerPlayerData)).ToArray();
 
 	// Server stories that only notify the addressed player's UI; others (saves, inventory) stay skipped.
-	private static readonly HashSet<string> ForwardedStoryOwners = new HashSet<string>(StringComparer.Ordinal) { "DiscoveriesServerSessionComponent", "ColonizationProgressServerSessionComponent", "EncounterNotificationSessionComponent" };
+	internal static readonly HashSet<string> ForwardedStoryOwners = new HashSet<string>(StringComparer.Ordinal) { "DiscoveriesServerSessionComponent", "ColonizationProgressServerSessionComponent", "EncounterNotificationSessionComponent" };
 
 	public static HostIdentities? Current { get; private set; }
 

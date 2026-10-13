@@ -45,9 +45,12 @@ internal static class AdminGuard
             const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
             if (declaring.GetMethods(all).Where(m => m.Name == method).Any(m => m.CustomAttributes.Any(a => a.ConstructorArguments.Any(c => c.Value as string == "ValidateAdminAccess"))))
                 return true;
-            return CallsValidator(box.GetMethod("MoveNext", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public), 1);
+            MethodInfo moveNext = box.GetMethod("MoveNext", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            // A story whose IL cannot be read might be an admin one: only admins may run it.
+            if (moveNext?.GetMethodBody()?.GetILAsByteArray() == null) return true;
+            return CallsValidator(moveNext, 1);
         }
-        catch (Exception) { return false; }
+        catch (Exception) { return true; }
     }
 
     // MoveTo.Server(CommonValidators.ValidateAdminAccess) loads the validator with ldftn, a lambda calls it.

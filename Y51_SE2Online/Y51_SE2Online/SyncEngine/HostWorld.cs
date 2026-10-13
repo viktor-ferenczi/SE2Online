@@ -2423,7 +2423,9 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 			return false;
 		}
 		var space = ServerSpace(server);
-		List<(string, WireValue)>? fields = StoryState.Encode(stateMachine, space, out string? fail);
+		StoryType? story = StoryState.Find(stateMachine.GetType());
+		string? fail = story is { HostMayStart: true } ? null : "not a story joiners accept from the host";
+		List<(string, WireValue)>? fields = fail != null ? null : StoryState.EncodeArguments(story!, stateMachine, space, out fail);
 		if (fields == null || space.LocalIds.Count > 0)
 		{
 			_log.WarnOnce("server-story-" + stateMachine.GetType().FullName, $"host world sync: server story {StoryState.Name(ObjectCodec.TypeName(stateMachine.GetType()))} for ClientId {clientId} cannot travel ({fail ?? "refers to an entity the joiner does not have"}); skipped");
