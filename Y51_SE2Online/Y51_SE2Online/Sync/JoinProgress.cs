@@ -10,7 +10,7 @@ public sealed class JoinProgress
 
 	public const string RejoinKeyName = "F3";
 
-	private readonly object _sync = new object();
+	private readonly object _sync = new();
 
 	private JoinStage _stage;
 
@@ -155,12 +155,11 @@ public sealed class JoinProgress
 			_world = world;
 			_expected = Math.Max(0L, expectedBytes);
 			_partsTotal = Math.Max(0, parts);
-			_partsReceived = (_partsBuilt = 0);
+			_partsReceived = _partsBuilt = 0;
 			_entitiesBuilt = 0;
 			_received = 0L;
-			_receivedBase = bulkBase ?? (-1);
-			JoinStage stage = _stage;
-			if (stage <= JoinStage.WaitingForHostWorld)
+			_receivedBase = bulkBase ?? -1;
+			if (_stage <= JoinStage.WaitingForHostWorld)
 			{
 				Set(JoinStage.Receiving, now);
 			}
@@ -227,10 +226,10 @@ public sealed class JoinProgress
 		{
 			_joinNo++;
 			_world = null;
-			_attempt = (_maxAttempts = (_partsReceived = (_partsTotal = (_partsBuilt = 0))));
-			_received = (_expected = 0L);
+			_attempt = _maxAttempts = _partsReceived = _partsTotal = _partsBuilt = 0;
+			_received = _expected = 0L;
 			_receivedBase = -1L;
-			_entitiesBuilt = (_entitiesTotal = 0);
+			_entitiesBuilt = _entitiesTotal = 0;
 			_inGame = false;
 			_stage = JoinStage.Connecting;
 			_stageSinceMs = now;
@@ -240,8 +239,8 @@ public sealed class JoinProgress
 
 	public override string ToString()
 	{
-		JoinText joinText = Describe(2305843009213693951L);
-		return joinText.Toast ?? joinText.Loading ?? $"({Stage})";
+		JoinText text = Describe(2305843009213693951L);
+		return text.Toast ?? text.Loading ?? $"({Stage})";
 	}
 
 	public JoinText Describe(long now)
@@ -261,11 +260,11 @@ public sealed class JoinProgress
 
 	private JoinText DescribeLocked(long now)
 	{
-		string text = Cut(_host, 20);
-		string text2 = " Open Multiplayer to retry.";
-		string text3 = ((_expected > 0) ? (Mib(Math.Min(_received, _expected)) + "/" + Mib(_expected) + " MiB") : (Mib(_received) + " MiB"));
-		bool flag = _expected > 0 && _received >= _expected;
-		string text4 = (string.IsNullOrWhiteSpace(_detail) ? null : _detail.Trim());
+		string host = Cut(_host, 20);
+		string retryHint = " Open Multiplayer to retry.";
+		string progress = _expected > 0 ? Mib(Math.Min(_received, _expected)) + "/" + Mib(_expected) + " MiB" : Mib(_received) + " MiB";
+		bool allReceived = _expected > 0 && _received >= _expected;
+		string detail = string.IsNullOrWhiteSpace(_detail) ? null : _detail.Trim();
 		switch (_stage)
 		{
 		case JoinStage.Idle:
@@ -273,89 +272,85 @@ public sealed class JoinProgress
 		case JoinStage.WaitingForSteam:
 			return Toast("Waiting for Steam to start...");
 		case JoinStage.LookingForHost:
-			return Toast(text4 ?? "Looking for a friend who is hosting...");
+			return Toast(detail ?? "Looking for a friend who is hosting...");
 		case JoinStage.Connecting:
 		{
-			string text8 = ((_attempt > 1) ? $" ({_attempt}{((_maxAttempts > 0) ? $"/{_maxAttempts}" : "")})" : "");
-			return Toast((text4 != null) ? $"Connecting to {text} ({Cut(text4, 18)})..." : ("Connecting to " + text + text8 + "..."));
+			string attempt = _attempt > 1 ? $" ({_attempt}{(_maxAttempts > 0 ? $"/{_maxAttempts}" : "")})" : "";
+			return Toast(detail != null ? $"Connecting to {host} ({Cut(detail, 18)})..." : "Connecting to " + host + attempt + "...");
 		}
 		case JoinStage.WaitingForHostWorld:
-			return Toast("Connected; " + text + " is not in a world yet.");
+			return Toast("Connected; " + host + " is not in a world yet.");
 		case JoinStage.Receiving:
-			return new JoinText(Cut("Joining: receiving " + text3, 56), Detailed(now), 0);
+			return new JoinText(Cut("Joining: receiving " + progress, 56), Detailed(now), 0);
 		case JoinStage.Loading:
 		{
-			string text5 = Clock(now - _loadingSinceMs);
-			bool flag2 = now - _loadingSinceMs > 45000;
+			string elapsed = Clock(now - _loadingSinceMs);
+			bool slow = now - _loadingSinceMs > 45000;
 			string toast;
-			if (flag2)
+			if (slow)
 			{
-				toast = "Loading (" + text5 + "). A first join can take minutes.";
+				toast = "Loading (" + elapsed + "). A first join can take minutes.";
 			}
 			else
 			{
-				toast = (flag ? ("Loading the game (" + text5 + ")...") : ("Loading the game (" + text5 + "), " + text3));
+				toast = allReceived ? "Loading the game (" + elapsed + ")..." : "Loading the game (" + elapsed + "), " + progress;
 			}
 			string line;
-			if (flag2)
+			if (slow)
 			{
-				line = "Loading " + text5 + ", please wait";
+				line = "Loading " + elapsed + ", please wait";
 			}
 			else
 			{
-				line = (flag ? ("Loading " + text5) : ("Loading " + text5 + ", " + text3));
+				line = allReceived ? "Loading " + elapsed : "Loading " + elapsed + ", " + progress;
 			}
 			return new JoinText(Cut(toast, 56), Detailed(now), 0);
 		}
 		case JoinStage.Building:
 		{
-			int num = Math.Max(_partsTotal, 1);
-			string text9 = $"part {Math.Min(_partsBuilt + 1, num)} of {num}";
-			return new JoinText(Cut("Joining: " + text9 + ((_partsReceived < _partsTotal && !flag) ? (" (" + text3 + ")") : "") + "...", 56), _inGame ? null : Detailed(now), 0);
+			int parts = Math.Max(_partsTotal, 1);
+			string part = $"part {Math.Min(_partsBuilt + 1, parts)} of {parts}";
+			return new JoinText(Cut("Joining: " + part + (_partsReceived < _partsTotal && !allReceived ? " (" + progress + ")" : "") + "...", 56), _inGame ? null : Detailed(now), 0);
 		}
 		case JoinStage.WaitingForCharacter:
 			return new JoinText("World ready. Waiting for your character...", _inGame ? null : Detailed(now), 0);
 		case JoinStage.Playing:
 		{
-			string text6 = ((_world != null) ? ("'" + Cut(_world, 28) + "'") : (text + "'s world"));
+			string world = _world != null ? "'" + Cut(_world, 28) + "'" : host + "'s world";
 			if (now - _stageSinceMs > 8000)
 			{
 				return JoinText.None;
 			}
-			return new JoinText(Cut("Joined " + text6 + "." + ((text4 != null) ? (" " + text4) : ""), 56), null, 8);
+			return new JoinText(Cut("Joined " + world + "." + (detail != null ? " " + detail : ""), 56), null, 8);
 		}
 		case JoinStage.Left:
-			return Toast("You left the game." + text2);
+			return Toast("You left the game." + retryHint);
 		case JoinStage.Lost:
 		{
-			string text7;
+			string next;
 			if (_autoRejoin)
 			{
-				text7 = (_inGame ? " Back to the menu, then rejoining." : " Rejoining in a moment...");
+				next = _inGame ? " Back to the menu, then rejoining." : " Rejoining in a moment...";
 			}
 			else
 			{
-				text7 = text2;
+				next = retryHint;
 			}
-			return Toast("Connection lost." + text7);
+			return Toast("Connection lost." + next);
 		}
 		case JoinStage.Rejected:
-			return Toast("Refused: " + Cut((text4 ?? "no reason given").TrimEnd('.'), 45) + ".");
+			return Toast("Refused: " + Cut((detail ?? "no reason given").TrimEnd('.'), 45) + ".");
 		case JoinStage.GaveUp:
-			return Toast("No answer from " + text + "." + text2);
+			return Toast("No answer from " + host + "." + retryHint);
 		case JoinStage.Failed:
-			return Toast("Load failed" + ((text4 != null) ? (" (" + Cut(text4, 18) + ")") : "") + "." + text2);
+			return Toast("Load failed" + (detail != null ? " (" + Cut(detail, 18) + ")" : "") + "." + retryHint);
 		default:
 			return JoinText.None;
 		}
-		static JoinText Both(string s, string s2)
-		{
-			return new JoinText(Cut(s, 56), Cut(s2, 32), 0);
-		}
-		static JoinText Toast(string s)
-		{
-			return new JoinText(Cut(s, 56), null, 0);
-		}
+
+		static JoinText Both(string s, string s2) => new JoinText(Cut(s, 56), Cut(s2, 32), 0);
+
+		static JoinText Toast(string s) => new JoinText(Cut(s, 56), null, 0);
 	}
 
 	/// <summary>One-line summary for logs.</summary>
@@ -464,15 +459,12 @@ public sealed class JoinProgress
 		return "";
 	}
 
-	private static string Mib(long bytes)
-	{
-		return ((double)bytes / 1048576.0).ToString((bytes < 10485760) ? "0.0" : "0", CultureInfo.InvariantCulture);
-	}
+	private static string Mib(long bytes) => (bytes / 1048576.0).ToString(bytes < 10485760 ? "0.0" : "0", CultureInfo.InvariantCulture);
 
 	private static string Clock(long ms)
 	{
-		long num = Math.Max(0L, ms) / 1000;
-		return $"{num / 60}:{num % 60:00}";
+		long seconds = Math.Max(0L, ms) / 1000;
+		return $"{seconds / 60}:{seconds % 60:00}";
 	}
 
 	public static string Sanitize(string? s, int max = 400)
@@ -481,21 +473,20 @@ public sealed class JoinProgress
 		{
 			return "";
 		}
-		StringBuilder stringBuilder = new StringBuilder(Math.Min(s.Length, max));
+		var sb = new StringBuilder(Math.Min(s.Length, max));
 		foreach (char c in s)
 		{
-			if (stringBuilder.Length >= max)
+			if (sb.Length >= max)
 			{
 				break;
 			}
-			StringBuilder stringBuilder2 = stringBuilder;
-			stringBuilder2.Append(c switch
+			sb.Append(c switch
 			{
-				'{' => '(', 
-				'}' => ')', 
-				_ => (c == (char)10 || !char.IsControl(c)) ? c : ' ', 
+				'{' => '(',
+				'}' => ')',
+				_ => c == '\n' || !char.IsControl(c) ? c : ' ',
 			});
 		}
-		return stringBuilder.ToString();
+		return sb.ToString();
 	}
 }

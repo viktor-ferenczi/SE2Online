@@ -30,7 +30,7 @@ public sealed class ClientSession
 
 	private readonly Func<long> _clock;
 
-	private readonly ConcurrentQueue<(ClientPhase Phase, string Text)> _reports = new ConcurrentQueue<(ClientPhase, string)>();
+	private readonly ConcurrentQueue<(ClientPhase Phase, string Text)> _reports = new();
 
 	private byte[]? _snapshot;
 
@@ -48,7 +48,7 @@ public sealed class ClientSession
 
 	private long _blobLogBytes;
 
-	private readonly HashSet<ushort> _transformKeys = new HashSet<ushort>();
+	private readonly HashSet<ushort> _transformKeys = new();
 
 	public long SmoothedEntries;
 
@@ -111,27 +111,27 @@ public sealed class ClientSession
 			_t.Send(Host.Value, Channel.Control, SocialMessage.Encode(SyncMsg.AdminRequest, request));
 	}
 
-	public RemoteTypeTable Types { get; } = new RemoteTypeTable();
+	public RemoteTypeTable Types { get; } = new();
 
-	public ClientStateTable State { get; } = new ClientStateTable();
+	public ClientStateTable State { get; } = new();
 
-	public LifecycleSequencer<LifecycleItem> Lifecycle { get; } = new LifecycleSequencer<LifecycleItem>();
+	public LifecycleSequencer<LifecycleItem> Lifecycle { get; } = new();
 
-	public ClientBlobStore Blobs { get; } = new ClientBlobStore();
+	public ClientBlobStore Blobs { get; } = new();
 
 	public IReadOnlyList<Guid> SnapshotBlobs { get; private set; } = Array.Empty<Guid>();
 
-	public TransformSmoother Smoother { get; } = new TransformSmoother();
+	public TransformSmoother Smoother { get; } = new();
 
 	public ushort ClientId => Accept?.ClientId ?? 0;
 
 	public (byte Status, uint NetId, string Text, long Version) Assignment { get; private set; }
 
-	public PlayerNamesInbox Names { get; } = new PlayerNamesInbox();
+	public PlayerNamesInbox Names { get; } = new();
 
-	public RemoteSignalTable RemoteSignals { get; } = new RemoteSignalTable();
+	public RemoteSignalTable RemoteSignals { get; } = new();
 
-	public ConcurrentQueue<object> StoryInbox { get; } = new ConcurrentQueue<object>();
+	public ConcurrentQueue<object> StoryInbox { get; } = new();
 
 	public IReadOnlyList<PlayerInfo> Players { get; private set; } = Array.Empty<PlayerInfo>();
 
@@ -180,22 +180,22 @@ public sealed class ClientSession
 
 	public byte[]? TryTakeSnapshot()
 	{
-		byte[] array = Volatile.Read(in _snapshot);
-		if (array == null || Interlocked.Exchange(ref _snapshotTaken, 1L) != 0L)
+		byte[] snapshot = Volatile.Read(in _snapshot);
+		if (snapshot == null || Interlocked.Exchange(ref _snapshotTaken, 1L) != 0L)
 		{
 			return null;
 		}
-		return array;
+		return snapshot;
 	}
 
 	public void Report(ClientPhase phase, string text)
 	{
 		string message = $"client: {phase}: {text}";
-		if ((int)phase >= 10)
+		if (phase >= ClientPhase.Error)
 		{
 			_log.Error(message);
 		}
-		else if ((int)phase >= 9)
+		else if (phase >= ClientPhase.Warning)
 		{
 			_log.Warn(message);
 		}
@@ -215,20 +215,19 @@ public sealed class ClientSession
 		}
 		Host = peer;
 		_phase = Phase.JoinSent;
-		JoinProgress progress = _o.Progress;
-		if (progress != null && _t.TryGetStats(peer, out PeerStats stats2) && !string.IsNullOrWhiteSpace(stats2.RemoteName))
+		if (_o.Progress is { } progress && _t.TryGetStats(peer, out PeerStats stats) && !string.IsNullOrWhiteSpace(stats.RemoteName))
 		{
-			progress.SetHost(stats2.RemoteName);
+			progress.SetHost(stats.RemoteName);
 		}
 		_o.Progress?.Set(JoinStage.Connecting, _clock(), "Connected, asking to join...");
-		JoinRequest joinRequest = new JoinRequest
+		var request = new JoinRequest
 		{
 			PluginVersion = _o.PluginVersion,
 			GameVersion = _o.GameVersion,
 			PlayerName = _o.PlayerName,
 			Password = _o.Password ?? ""
 		};
-		_t.Send(peer, Channel.Control, joinRequest.Encode());
+		_t.Send(peer, Channel.Control, request.Encode());
 		_log.Info($"sync(client): join request sent to {peer}");
 		_reports.Enqueue((ClientPhase.JoinSent, "plugin " + _o.PluginVersion + ", game " + _o.GameVersion));
 	}
@@ -257,7 +256,7 @@ public sealed class ClientSession
 		{
 			Handle(ch, data);
 		}
-		catch (Exception ex) when ((ex is ArgumentOutOfRangeException || ex is IndexOutOfRangeException || ex is ArgumentException) ? true : false)
+		catch (Exception ex) when (ex is ArgumentOutOfRangeException or IndexOutOfRangeException or ArgumentException)
 		{
 			_log.Warn($"sync(client): malformed {(SyncMsg)data[0]} ({data.Length} B on {ch}): {ex.Message}");
 		}
@@ -265,117 +264,107 @@ public sealed class ClientSession
 
 	private void Handle(Channel ch, byte[] data)
 	{
-		long num = _clock();
-		long? num3;
-		long? bulkBase;
+		long now = _clock();
 		switch ((SyncMsg)data[0])
 		{
 		case SyncMsg.JoinAccept:
 		{
-			JoinAccept joinAccept = JoinAccept.Decode(data);
-			Accept = joinAccept;
+			JoinAccept accept = JoinAccept.Decode(data);
+			Accept = accept;
 			Players = Accept.Players;
 			PlayersVersion++;
 			_phase = Phase.Accepted;
-			PeerId? host = Host;
-			if (host.HasValue)
-			{
-				PeerId valueOrDefault = host.GetValueOrDefault();
-				if (_t.TryGetStats(valueOrDefault, out PeerStats stats))
-				{
-					num3 = stats.Channels[1].BytesReceived;
-					goto IL_0163;
-				}
-			}
-			num3 = null;
-			goto IL_0163;
+			// Bulk bytes received before the accept are not world data; join progress counts from here.
+			long? bulkBase = Host is PeerId host && _t.TryGetStats(host, out PeerStats stats) ? stats.Channels[1].BytesReceived : null;
+			_o.Progress?.Accepted(Accept.WorldName, Accept.SnapshotBytes + Accept.WorldBytes + Accept.WorldBlobBytes, Accept.WorldParts, now, bulkBase);
+			_o.Progress?.SetWorldEntities(Accept.WorldEntities);
+			_log.Info($"sync(client): JOIN ACCEPTED: world '{Accept.WorldName}', snapshot {MpLogExtensions.Bytes(Accept.SnapshotBytes)}, world {MpLogExtensions.Bytes(Accept.WorldBytes)} in {Accept.WorldParts} part(s) ({Accept.WorldEntities} entities), {Accept.WorldBlobs} offloaded blobs ({MpLogExtensions.Bytes(Accept.WorldBlobBytes)}) on the way; this player is ClientId {Accept.ClientId}");
+			_log.Info($"sync(client): host settings: {Accept.Settings}; " + (Accept.IdentityId != 0L ? $"this player is IdentityId {Accept.IdentityId} (PlayerIdentity {Accept.PlayerId}); players: {DescribePlayers(Accept.Players)}" : "this player plays as the host's identity (identities off on the host)"));
+			break;
 		}
 		case SyncMsg.JoinReject:
-			var (b, text2) = TextMessage.Decode(data);
-			RejectReason = text2;
-			RejectCode = b;
+			var (code, reason) = TextMessage.Decode(data);
+			RejectReason = reason;
+			RejectCode = code;
 			RejectHostVersion = Host is PeerId rejectedBy && _t.TryGetStats(rejectedBy, out PeerStats rejectStats) ? rejectStats.RemotePluginVersion : "";
 			RejectVersion++;
-			if (b == JoinRejectCode.Removed)
+			if (code == JoinRejectCode.Removed)
 			{
-				text2 = System.Text.Json.JsonSerializer.Deserialize<RemovalNotice>(text2)?.Describe(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) ?? "Removed by an admin.";
+				reason = System.Text.Json.JsonSerializer.Deserialize<RemovalNotice>(reason)?.Describe(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) ?? "Removed by an admin.";
 			}
 			_phase = Phase.Rejected;
-			_o.Progress?.Set(JoinStage.Rejected, num, text2);
-			_log.Error("sync(client): JOIN REJECTED by host: " + text2);
+			_o.Progress?.Set(JoinStage.Rejected, now, reason);
+			_log.Error("sync(client): JOIN REJECTED by host: " + reason);
 			break;
 		case SyncMsg.JoinWait:
 		{
-			string item5 = TextMessage.Decode(data).Text;
+			string text = TextMessage.Decode(data).Text;
 			_phase = Phase.WaitingForHostWorld;
-			_o.Progress?.Set(JoinStage.WaitingForHostWorld, num, item5);
-			_log.Info("sync(client): host says wait: " + item5);
+			_o.Progress?.Set(JoinStage.WaitingForHostWorld, now, text);
+			_log.Info("sync(client): host says wait: " + text);
 			break;
 		}
 		case SyncMsg.TypeKeys:
 		{
-			List<TypeKeyDef> list3 = TypeKeysMessage.Decode(data);
-			List<string> list4 = Types.Add(list3, _resolveType);
-			foreach (TypeKeyDef item8 in list3)
+			List<TypeKeyDef> defs = TypeKeysMessage.Decode(data);
+			List<string> unusable = Types.Add(defs, _resolveType);
+			foreach (TypeKeyDef def in defs)
 			{
-				if (item8.ShortName == "WorldTransform")
+				if (def.ShortName == "WorldTransform")
 				{
 					lock (_transformKeys)
 					{
-						_transformKeys.Add(item8.Key);
+						_transformKeys.Add(def.Key);
 					}
 				}
 			}
-			_log.Info($"sync(client): {list3.Count} type key(s) received ({Types.Count} total), {list4.Count} unusable");
+			_log.Info($"sync(client): {defs.Count} type key(s) received ({Types.Count} total), {unusable.Count} unusable");
+			foreach (string problem in unusable)
 			{
-				foreach (string item9 in list4)
-				{
-					_log.Warn("sync(client): " + item9);
-				}
-				break;
+				_log.Warn("sync(client): " + problem);
 			}
+			break;
 		}
 		case SyncMsg.Snapshot:
 		{
-			byte[] array = SnapshotMessage.Decode(data, out List<Guid> requiredBlobs);
+			byte[] snapshot = SnapshotMessage.Decode(data, out List<Guid> requiredBlobs);
 			SnapshotBlobs = requiredBlobs;
-			Volatile.Write(ref _snapshot, array);
-			Blobs.Check(requiredBlobs, num, out var absent);
-			_log.Info($"sync(client): session snapshot received ({MpLogExtensions.Bytes(array.Length)}; references {requiredBlobs.Count} offloaded blobs, {absent} not here; blobs so far: {Blobs.Describe()})");
-			_reports.Enqueue((ClientPhase.SnapshotReceived, MpLogExtensions.Bytes(array.Length)));
+			Volatile.Write(ref _snapshot, snapshot);
+			Blobs.Check(requiredBlobs, now, out var absent);
+			_log.Info($"sync(client): session snapshot received ({MpLogExtensions.Bytes(snapshot.Length)}; references {requiredBlobs.Count} offloaded blobs, {absent} not here; blobs so far: {Blobs.Describe()})");
+			_reports.Enqueue((ClientPhase.SnapshotReceived, MpLogExtensions.Bytes(snapshot.Length)));
 			try
 			{
 				SnapshotReady?.Invoke();
-				break;
 			}
-			catch (Exception value2)
+			catch (Exception ex)
 			{
-				_log.Error($"sync(client): SnapshotReady handler threw: {value2}");
-				break;
+				_log.Error($"sync(client): SnapshotReady handler threw: {ex}");
 			}
+			break;
 		}
 		case SyncMsg.EntityBundle:
 		{
-			EntityBundleMessage entityBundleMessage = EntityBundleMessage.Decode(data);
-			Offer(entityBundleMessage.LifeSeq, new LifecycleItem
+			var bundle = EntityBundleMessage.Decode(data);
+			Offer(bundle.LifeSeq, new LifecycleItem
 			{
 				Type = SyncMsg.EntityBundle,
-				Bundle = entityBundleMessage,
+				Bundle = bundle,
 				WireBytes = data.Length
 			});
-			if (entityBundleMessage.Kind == 0)
+			if (bundle.Kind == 0)
 			{
 				_o.Progress?.PartReceived();
 			}
-			if (entityBundleMessage.Kind == 0)
+			if (bundle.Kind == 0)
 			{
-				_log.Info($"sync(client): world bundle received: {entityBundleMessage.Entities.Count} entities, {MpLogExtensions.Bytes(entityBundleMessage.Bundle.Length)} engine bundle, {entityBundleMessage.Data.Count} entities with data ({MpLogExtensions.Bytes(entityBundleMessage.DataBytes)}), lifeSeq {entityBundleMessage.LifeSeq}");
+				_log.Info($"sync(client): world bundle received: {bundle.Entities.Count} entities, {MpLogExtensions.Bytes(bundle.Bundle.Length)} engine bundle, {bundle.Data.Count} entities with data ({MpLogExtensions.Bytes(bundle.DataBytes)}), lifeSeq {bundle.LifeSeq}");
 			}
 			break;
 		}
 		case SyncMsg.Despawn:
-			var (seq5, despawnMode, netIds) = DespawnMessage.Decode(data);
-			Offer(seq5, new LifecycleItem
+			var (despawnSeq, despawnMode, netIds) = DespawnMessage.Decode(data);
+			Offer(despawnSeq, new LifecycleItem
 			{
 				Type = SyncMsg.Despawn,
 				NetIds = netIds,
@@ -384,8 +373,8 @@ public sealed class ClientSession
 			});
 			break;
 		case SyncMsg.DataRemove:
-			var (seq4, removes) = DataRemoveMessage.Decode(data);
-			Offer(seq4, new LifecycleItem
+			var (removeSeq, removes) = DataRemoveMessage.Decode(data);
+			Offer(removeSeq, new LifecycleItem
 			{
 				Type = SyncMsg.DataRemove,
 				Removes = removes,
@@ -394,20 +383,18 @@ public sealed class ClientSession
 			break;
 		case SyncMsg.SignalKeys:
 		{
-			List<SignalKeyDef> list6 = SignalKeysMessage.Decode(data);
-			List<string> list7 = RemoteSignals.Add(list6, _o.CheckSignal);
-			_log.Info($"sync(client): {list6.Count} host signal key(s) ({RemoteSignals.Count} total), {list7.Count} unusable");
+			List<SignalKeyDef> defs = SignalKeysMessage.Decode(data);
+			List<string> unusable = RemoteSignals.Add(defs, _o.CheckSignal);
+			_log.Info($"sync(client): {defs.Count} host signal key(s) ({RemoteSignals.Count} total), {unusable.Count} unusable");
+			foreach (string problem in unusable)
 			{
-				foreach (string item10 in list7)
-				{
-					_log.WarnOnce("client-sigkey-" + item10, "sync(client): " + item10 + "; ignored");
-				}
-				break;
+				_log.WarnOnce("client-sigkey-" + problem, "sync(client): " + problem + "; ignored");
 			}
+			break;
 		}
 		case SyncMsg.SignalBatch:
-			var (seq3, hostTick, signals) = SignalBatchMessage.Decode(data);
-			Offer(seq3, new LifecycleItem
+			var (signalSeq, hostTick, signals) = SignalBatchMessage.Decode(data);
+			Offer(signalSeq, new LifecycleItem
 			{
 				Type = SyncMsg.SignalBatch,
 				Signals = signals,
@@ -416,8 +403,8 @@ public sealed class ClientSession
 			});
 			break;
 		case SyncMsg.StringTable:
-			var (seq2, strings) = StringTableMessage.Decode(data);
-			Offer(seq2, new LifecycleItem
+			var (stringSeq, strings) = StringTableMessage.Decode(data);
+			Offer(stringSeq, new LifecycleItem
 			{
 				Type = SyncMsg.StringTable,
 				Strings = strings,
@@ -425,12 +412,12 @@ public sealed class ClientSession
 			});
 			break;
 		case SyncMsg.ObservableBatch:
-			var (seq, list5) = ObservableBatchMessage.Decode(data);
-			ObservableOpsIn += list5.Count;
-			Offer(seq, new LifecycleItem
+			var (observableSeq, ops) = ObservableBatchMessage.Decode(data);
+			ObservableOpsIn += ops.Count;
+			Offer(observableSeq, new LifecycleItem
 			{
 				Type = SyncMsg.ObservableBatch,
-				Observables = list5,
+				Observables = ops,
 				WireBytes = data.Length
 			});
 			break;
@@ -451,7 +438,7 @@ public sealed class ClientSession
 		case SyncMsg.ChatLine:
 		{
 			var line = SocialMessage.Decode<ChatLine>(data);
-			ChatLog.Add(line with { From = SocialState.Clean(line.From, 80), Text = SocialState.Clean(line.Text, ChatLog.MaxText) }, num);
+			ChatLog.Add(line with { From = SocialState.Clean(line.From, 80), Text = SocialState.Clean(line.Text, ChatLog.MaxText) }, now);
 			break;
 		}
 		case SyncMsg.InputAck:
@@ -460,10 +447,10 @@ public sealed class ClientSession
 			var sent = _inputSent[ackSeq % (uint)_inputSent.Length];
 			if (sent.Seq == ackSeq && ackSeq != InputAck.Seq && (InputAck.Seq == 0 || Seq.Newer(ackSeq, InputAck.Seq)))
 			{
-				long rtt = num - sent.LocalMs;
+				long rtt = now - sent.LocalMs;
 				InputAck = (ackSeq, sent.LocalMs, appliedHostMs, rtt);
 				if (rtt >= 0 && rtt < 2000) InputRttMs = InputRttMs < 0 ? rtt : InputRttMs + 0.1 * (rtt - InputRttMs);
-				if (num - _ackWorstSinceMs > 5000) { _ackWorstSinceMs = num; InputAckWorstMs = 0; }
+				if (now - _ackWorstSinceMs > 5000) { _ackWorstSinceMs = now; InputAckWorstMs = 0; }
 				if (rtt > InputAckWorstMs) InputAckWorstMs = rtt;
 			}
 			break;
@@ -479,17 +466,15 @@ public sealed class ClientSession
 		{
 			var state = SocialMessage.Decode<AdminState>(data);
 			// Roster updates carry no message; keep the last action's feedback readable for a while.
-			if (!string.IsNullOrEmpty(state.Message)) _adminMessageMs = num;
-			else if (num - _adminMessageMs < 10000) state.Message = Admin.Message;
+			if (!string.IsNullOrEmpty(state.Message)) _adminMessageMs = now;
+			else if (now - _adminMessageMs < 10000) state.Message = Admin.Message;
 			Admin = state;
 			break;
 		}
 		case SyncMsg.PlayerStatus:
 		{
-			(ushort ClientId, int Pcu, int MaxPcu) tuple4 = PlayerStatusMessage.Decode(data);
-			int item6 = tuple4.Pcu;
-			int item7 = tuple4.MaxPcu;
-			Status = (Pcu: item6, MaxPcu: item7, Version: Status.Version + 1);
+			var (_, pcu, maxPcu) = PlayerStatusMessage.Decode(data);
+			Status = (pcu, maxPcu, Status.Version + 1);
 			break;
 		}
 		case SyncMsg.StoryMove:
@@ -502,19 +487,19 @@ public sealed class ClientSession
 			break;
 		case SyncMsg.BlobData:
 		{
-			List<BlobPiece> list2 = BlobDataMessage.Decode(data);
+			List<BlobPiece> pieces = BlobDataMessage.Decode(data);
 			BlobMessages++;
-			int num4 = 0;
-			foreach (BlobPiece item11 in list2)
+			int rejected = 0;
+			foreach (BlobPiece piece in pieces)
 			{
-				if (!Blobs.Accept(item11, num))
+				if (!Blobs.Accept(piece, now))
 				{
-					num4++;
+					rejected++;
 				}
 			}
-			if (num4 > 0)
+			if (rejected > 0)
 			{
-				_log.Warn($"sync(client): {num4} inconsistent blob piece(s) ignored");
+				_log.Warn($"sync(client): {rejected} inconsistent blob piece(s) ignored");
 			}
 			if (Blobs.BytesReceived - _blobLogBytes >= 16777216 || BlobMessages == 1)
 			{
@@ -525,76 +510,60 @@ public sealed class ClientSession
 		}
 		case SyncMsg.StateBatch:
 		{
-			List<StateEntry> list = StateBatchMessage.Decode(data);
+			List<StateEntry> entries = StateBatchMessage.Decode(data);
 			StateMessages++;
-			StateEntries += list.Count;
+			StateEntries += entries.Count;
+			foreach (StateEntry e in entries)
 			{
-				foreach (StateEntry item12 in list)
+				if (e.NetId == StateCoalescer.WatchNetId && StateCoalescer.WatchLog.Count < 20000)
 				{
-					StateEntry e = item12;
-					if (e.NetId == StateCoalescer.WatchNetId && StateCoalescer.WatchLog.Count < 20000)
+					StateCoalescer.WatchLog.Enqueue($"arrived,{now},{e.Key},{e.HostMs}");
+				}
+				if (Smoother.Enabled && IsTransformKey(e.Key) && !State.IsTombstoned(e.NetId) && !Smoother.IsRaw(e.NetId))
+				{
+					if (Smoother.Add(e.NetId, e.HostMs, e.Bytes, now))
 					{
-						StateCoalescer.WatchLog.Enqueue($"arrived,{num},{e.Key},{e.HostMs}");
-					}
-					if (Smoother.Enabled && IsTransformKey(e.Key) && !State.IsTombstoned(e.NetId) && !Smoother.IsRaw(e.NetId))
-					{
-						if (Smoother.Add(e.NetId, e.HostMs, e.Bytes, num))
-						{
-							SmoothedEntries++;
-						}
-						else
-						{
-							SmoothedRefused++;
-						}
+						SmoothedEntries++;
 					}
 					else
 					{
-						if (Smoother.Enabled && IsTransformKey(e.Key))
-						{
-							Smoother.NoteClock(e.HostMs, num);
-						}
-						State.Put(in e, num);
+						SmoothedRefused++;
 					}
 				}
-				break;
+				else
+				{
+					if (Smoother.Enabled && IsTransformKey(e.Key))
+					{
+						Smoother.NoteClock(e.HostMs, now);
+					}
+					State.Put(in e, now);
+				}
 			}
+			break;
 		}
 		case SyncMsg.PlayerAssign:
 		{
-			(ushort ClientId, byte Status, uint NetId, string Text) tuple2 = PlayerAssignMessage.Decode(data);
-			ushort item = tuple2.ClientId;
-			byte item2 = tuple2.Status;
-			uint item3 = tuple2.NetId;
-			string item4 = tuple2.Text;
-			Assignment = (Status: item2, NetId: item3, Text: item4, Version: ++_assignVersion);
+			var (clientId, status, netId, text) = PlayerAssignMessage.Decode(data);
+			Assignment = (status, netId, text, ++_assignVersion);
 			SpawnMenu = null;
-			string value = item2 switch
+			string what = status switch
 			{
-				0 => $"CHARACTER ASSIGNED: NetworkId {item3}", 
-				2 => $"character NetworkId {item3} lost", 
-				_ => "no character", 
+				0 => $"CHARACTER ASSIGNED: NetworkId {netId}",
+				2 => $"character NetworkId {netId} lost",
+				_ => "no character",
 			};
-			_log.Info($"sync(client): ClientId {item}: {value} ({item4})");
+			_log.Info($"sync(client): ClientId {clientId}: {what} ({text})");
 			break;
 		}
 		case SyncMsg.PlayerNames:
-			var (num2, tags) = PlayerNamesMessage.Decode(data);
-			if (Names.Accept(num2, tags))
+			var (namesVersion, tags) = PlayerNamesMessage.Decode(data);
+			if (Names.Accept(namesVersion, tags))
 			{
-				_log.Info($"nametags(client): player list v{num2} from the host: {PlayerNamesMessage.Describe(tags)}");
+				_log.Info($"nametags(client): player list v{namesVersion} from the host: {PlayerNamesMessage.Describe(tags)}");
 			}
 			break;
 		default:
-			{
-				_log.WarnOnce($"client-unexpected-{data[0]}", $"sync(client): unexpected {(SyncMsg)data[0]} on {ch}");
-				break;
-			}
-			IL_0163:
-			bulkBase = num3;
-			_o.Progress?.Accepted(Accept.WorldName, Accept.SnapshotBytes + Accept.WorldBytes + Accept.WorldBlobBytes, Accept.WorldParts, num, bulkBase);
-			_o.Progress?.SetWorldEntities(Accept.WorldEntities);
-			_log.Info($"sync(client): JOIN ACCEPTED: world '{Accept.WorldName}', snapshot {MpLogExtensions.Bytes(Accept.SnapshotBytes)}, world {MpLogExtensions.Bytes(Accept.WorldBytes)} in {Accept.WorldParts} part(s) ({Accept.WorldEntities} entities), {Accept.WorldBlobs} offloaded blobs ({MpLogExtensions.Bytes(Accept.WorldBlobBytes)}) on the way; this player is ClientId {Accept.ClientId}");
-			_log.Info($"sync(client): host settings: {Accept.Settings}; " + ((Accept.IdentityId != 0L) ? $"this player is IdentityId {Accept.IdentityId} (PlayerIdentity {Accept.PlayerId}); players: {DescribePlayers(Accept.Players)}" : "this player plays as the host's identity (identities off on the host)"));
+			_log.WarnOnce($"client-unexpected-{data[0]}", $"sync(client): unexpected {(SyncMsg)data[0]} on {ch}");
 			break;
 		}
 	}
@@ -603,7 +572,7 @@ public sealed class ClientSession
 	{
 		if (players.Count != 0)
 		{
-			return string.Join(", ", players.Select((PlayerInfo p) => $"ClientId {p.ClientId} '{p.Name}' = IdentityId {p.Identity}{(p.Connected ? "" : " (away)")}"));
+			return string.Join(", ", players.Select(p => $"ClientId {p.ClientId} '{p.Name}' = IdentityId {p.Identity}{(p.Connected ? "" : " (away)")}"));
 		}
 		return "none";
 	}
@@ -614,8 +583,8 @@ public sealed class ClientSession
 		PeerId? host = Host;
 		if (host.HasValue)
 		{
-			PeerId valueOrDefault = host.GetValueOrDefault();
-			_t.Disconnect(valueOrDefault, 1000, reason);
+			PeerId hostPeer = host.GetValueOrDefault();
+			_t.Disconnect(hostPeer, 1000, reason);
 		}
 	}
 
@@ -714,9 +683,9 @@ public sealed class ClientSession
 		{
 			for (int i = 0; i < edits.Count; i += 256)
 			{
-				List<MemberEdit> edits2 = edits.Skip(i).Take(256).ToList();
-				byte[] array = ObservableEditsMessage.Encode(++_editSeq, edits2);
-				_t.Send(Host.Value, (array.Length > 8192) ? Channel.Bulk : Channel.Control, array);
+				List<MemberEdit> chunk = edits.Skip(i).Take(256).ToList();
+				byte[] msg = ObservableEditsMessage.Encode(++_editSeq, chunk);
+				_t.Send(Host.Value, msg.Length > 8192 ? Channel.Bulk : Channel.Control, msg);
 			}
 			ObservableEditsOut += edits.Count;
 		}
@@ -726,8 +695,8 @@ public sealed class ClientSession
 	{
 		if (Host.HasValue)
 		{
-			byte[] array = move.Encode();
-			_t.Send(Host.Value, (array.Length > 8192) ? Channel.Bulk : Channel.Control, array);
+			byte[] msg = move.Encode();
+			_t.Send(Host.Value, msg.Length > 8192 ? Channel.Bulk : Channel.Control, msg);
 			StoryMovesOut++;
 		}
 	}
@@ -763,26 +732,27 @@ public sealed class ClientSession
 		if (input.Count > 0)
 		{
 			_inputSent[seq % (uint)_inputSent.Length] = (seq, _clock());
-			List<InputEntry> list = new List<InputEntry>();
-			int num = 7;
-			foreach (InputEntry item in input)
+			// Split so each message stays under ~1100 B; every part shares the same seq.
+			var batch = new List<InputEntry>();
+			int batchBytes = 7;
+			foreach (InputEntry entry in input)
 			{
-				if (list.Count > 0 && num + 8 + item.Bytes.Length > 1100)
+				if (batch.Count > 0 && batchBytes + 8 + entry.Bytes.Length > 1100)
 				{
-					_t.Send(Host.Value, Channel.State, ClientInputMessage.Encode(seq, list));
-					list = new List<InputEntry>();
-					num = 7;
+					_t.Send(Host.Value, Channel.State, ClientInputMessage.Encode(seq, batch));
+					batch = new List<InputEntry>();
+					batchBytes = 7;
 				}
-				list.Add(item);
-				num += 8 + item.Bytes.Length;
+				batch.Add(entry);
+				batchBytes += 8 + entry.Bytes.Length;
 			}
-			_t.Send(Host.Value, Channel.State, ClientInputMessage.Encode(seq, list));
+			_t.Send(Host.Value, Channel.State, ClientInputMessage.Encode(seq, batch));
 			InputSent += input.Count;
 		}
 		if (commands.Count > 0)
 		{
-			byte[] array = ClientSignalsMessage.Encode(seq, commands);
-			_t.Send(Host.Value, (array.Length > 8192) ? Channel.Bulk : Channel.Control, array);
+			byte[] msg = ClientSignalsMessage.Encode(seq, commands);
+			_t.Send(Host.Value, msg.Length > 8192 ? Channel.Bulk : Channel.Control, msg);
 			CommandsSent += commands.Count;
 		}
 	}
@@ -797,10 +767,10 @@ public sealed class ClientSession
 		{
 			_o.Progress.BulkBytes(stats.Channels[1].BytesReceived);
 		}
-		(ClientPhase, string) result;
-		while (_reports.TryDequeue(out result))
+		(ClientPhase Phase, string Text) report;
+		while (_reports.TryDequeue(out report))
 		{
-			_t.Send(Host.Value, Channel.Control, TextMessage.Encode(SyncMsg.ClientStatus, (byte)result.Item1, result.Item2));
+			_t.Send(Host.Value, Channel.Control, TextMessage.Encode(SyncMsg.ClientStatus, (byte)report.Phase, report.Text));
 		}
 	}
 }

@@ -49,23 +49,23 @@ public sealed partial class HostSession : IStorySink
 
 		public long BlobBytes;
 
-		public readonly HashSet<Guid> SentBlobs = new HashSet<Guid>();
+		public readonly HashSet<Guid> SentBlobs = new();
 
 		public PlayerRecord? Player;
 
 		public (int Pcu, int Max)? LastStatus;
 
-		public readonly Dictionary<ushort, long> SentByKeyAtLastStatus = new Dictionary<ushort, long>();
+		public readonly Dictionary<ushort, long> SentByKeyAtLastStatus = new();
 
-		public readonly object Input = new object();
+		public readonly object Input = new();
 
-		public readonly RemoteTypeTable InputTypes = new RemoteTypeTable();
+		public readonly RemoteTypeTable InputTypes = new();
 
-		public readonly Dictionary<ushort, (SignalKeyDef Def, string? Problem)> Signals = new Dictionary<ushort, (SignalKeyDef, string)>();
+		public readonly Dictionary<ushort, (SignalKeyDef Def, string? Problem)> Signals = new();
 
-		public readonly Dictionary<(uint, ushort), (uint Seq, byte[] Bytes, bool Dirty)> InputData = new Dictionary<(uint, ushort), (uint, byte[], bool)>();
+		public readonly Dictionary<(uint, ushort), (uint Seq, byte[] Bytes, bool Dirty)> InputData = new();
 
-		public readonly List<(string Signal, WireCommand Command)> InputCommands = new List<(string, WireCommand)>();
+		public readonly List<(string Signal, WireCommand Command)> InputCommands = new();
 
 		public LookAccumulator? Look;
 
@@ -73,7 +73,7 @@ public sealed partial class HostSession : IStorySink
 
 		public long LookControlWrites;
 
-		public readonly Phase2Stats P2 = new Phase2Stats();
+		public readonly Phase2Stats P2 = new();
 
 		public uint LastCommandSeq;
 
@@ -155,21 +155,21 @@ public sealed partial class HostSession : IStorySink
 
 	private readonly Func<long> _clock;
 
-	private readonly object _sync = new object();
+	private readonly object _sync = new();
 
-	private readonly Dictionary<PeerId, RemoteClient> _clients = new Dictionary<PeerId, RemoteClient>();
+	private readonly Dictionary<PeerId, RemoteClient> _clients = new();
 
-	private readonly ConcurrentQueue<StateEntry> _stateIn = new ConcurrentQueue<StateEntry>();
+	private readonly ConcurrentQueue<StateEntry> _stateIn = new();
 
-	private readonly ConcurrentQueue<uint> _despawnedIn = new ConcurrentQueue<uint>();
+	private readonly ConcurrentQueue<uint> _despawnedIn = new();
 
-	private readonly Dictionary<string, PlayerRecord> _players = new Dictionary<string, PlayerRecord>();
+	private readonly Dictionary<string, PlayerRecord> _players = new();
 
 	private ushort _nextClientId = 2;
 
 	private readonly List<byte[]> _out = new List<byte[]>();
 
-	private readonly Dictionary<ushort, int> _intervalByKey = new Dictionary<ushort, int>();
+	private readonly Dictionary<ushort, int> _intervalByKey = new();
 
 	private volatile int _syncedCount;
 
@@ -183,13 +183,13 @@ public sealed partial class HostSession : IStorySink
 
 	public long PlayerTablesSent;
 
-	private readonly List<string> _hostStrings = new List<string>();
+	private readonly List<string> _hostStrings = new();
 
 	public TypeKeyTable Keys { get; }
 
 	public bool AnySynced => _syncedCount > 0;
 
-	public SignalKeyTable SignalKeys { get; } = new SignalKeyTable();
+	public SignalKeyTable SignalKeys { get; } = new();
 
 	public int HostStringCount
 	{
@@ -220,22 +220,22 @@ public sealed partial class HostSession : IStorySink
 	{
 		lock (_intervalByKey)
 		{
-			if (_intervalByKey.TryGetValue(key, out var value))
+			if (_intervalByKey.TryGetValue(key, out var interval))
 			{
-				return value;
+				return interval;
 			}
 			string shortName = $"key#{key}";
-			foreach (TypeKeyDef item in Keys.All())
+			foreach (TypeKeyDef def in Keys.All())
 			{
-				if (item.Key == key)
+				if (def.Key == key)
 				{
-					shortName = item.ShortName;
+					shortName = def.ShortName;
 					break;
 				}
 			}
-			value = _o.Caps.IntervalMsFor(shortName);
-			_intervalByKey[key] = value;
-			return value;
+			interval = _o.Caps.IntervalMsFor(shortName);
+			_intervalByKey[key] = interval;
+			return interval;
 		}
 	}
 
@@ -255,27 +255,27 @@ public sealed partial class HostSession : IStorySink
 
 	private void OnDisconnected(PeerId peer, DisconnectInfo info)
 	{
-		RemoteClient value;
+		RemoteClient client;
 		lock (_sync)
 		{
-			if (_clients.Remove(peer, out value) && value.Status == ClientStatus.Synced)
+			if (_clients.Remove(peer, out client) && client.Status == ClientStatus.Synced)
 			{
 				_syncedCount--;
 			}
 		}
-		if (value == null)
+		if (client == null)
 		{
 			return;
 		}
-		if (value.Status == ClientStatus.Synced && !value.Removed)
+		if (client.Status == ClientStatus.Synced && !client.Removed)
 		{
-			Announce(info.ByPeer ? $"{value.Name} left the server." : $"{value.Name} lost connection.");
+			Announce(info.ByPeer ? $"{client.Name} left the server." : $"{client.Name} lost connection.");
 		}
-		if (value.Status == ClientStatus.CaptureRequested)
+		if (client.Status == ClientStatus.CaptureRequested)
 		{
 			_world.CancelCapture(peer);
 		}
-		PlayerRecord player = value.Player;
+		PlayerRecord player = client.Player;
 		_world.ForgetStories(peer);
 		if (player != null)
 		{
@@ -290,12 +290,12 @@ public sealed partial class HostSession : IStorySink
 			if (player.CharacterNetId != 0 || player.CharacterRequested)
 			{
 				_log.Info($"sync(host): ClientId {player.ClientId} '{player.Name}' left; releasing its character NetworkId {player.CharacterNetId}");
-				player.CharacterNetId = 0u;
+				player.CharacterNetId = 0;
 				player.CharacterRequested = false;
 				_world.ReleaseCharacter(peer, player.ClientId);
 			}
 		}
-		_log.Info($"sync(host): client {peer} '{value.Name}' left ({info}); was {value.Status}, {value.LifecycleMessages} lifecycle msgs / {MpLogExtensions.Bytes(value.LifecycleBytes)}, state {MpLogExtensions.Bytes(value.StateBytes)}, {value.BlobsSent} blobs / {MpLogExtensions.Bytes(value.BlobBytes)}");
+		_log.Info($"sync(host): client {peer} '{client.Name}' left ({info}); was {client.Status}, {client.LifecycleMessages} lifecycle msgs / {MpLogExtensions.Bytes(client.LifecycleBytes)}, state {MpLogExtensions.Bytes(client.StateBytes)}, {client.BlobsSent} blobs / {MpLogExtensions.Bytes(client.BlobBytes)}");
 	}
 
 	private void OnMessage(PeerId peer, Channel ch, byte[] data)
@@ -326,24 +326,22 @@ public sealed partial class HostSession : IStorySink
 				break;
 			case SyncMsg.ClientStatus:
 			{
-				var (b, value) = TextMessage.Decode(data);
-				string value2;
+				var (phase, text) = TextMessage.Decode(data);
+				string name;
 				lock (_sync)
 				{
-					value2 = (_clients.TryGetValue(peer, out RemoteClient value3) ? value3.Name : "?");
-					if (value3 != null)
+					name = _clients.TryGetValue(peer, out RemoteClient client) ? client.Name : "?";
+					if (client != null)
 					{
-						RemoteClient remoteClient = value3;
-						ClientPhase clientPhase = (ClientPhase)b;
-						remoteClient.LastPhase = clientPhase.ToString();
+						client.LastPhase = ((ClientPhase)phase).ToString();
 					}
 				}
-				string message = $"client {peer} '{value2}': {(ClientPhase)b}: {value}";
-				if (b >= 10)
+				string message = $"client {peer} '{name}': {(ClientPhase)phase}: {text}";
+				if (phase >= (byte)ClientPhase.Error)
 				{
 					_log.Error(message);
 				}
-				else if (b >= 9)
+				else if (phase >= (byte)ClientPhase.Warning)
 				{
 					_log.Warn(message);
 				}
@@ -358,7 +356,7 @@ public sealed partial class HostSession : IStorySink
 				break;
 			}
 		}
-		catch (Exception ex) when ((ex is ArgumentOutOfRangeException || ex is IndexOutOfRangeException) ? true : false)
+		catch (Exception ex) when (ex is ArgumentOutOfRangeException or IndexOutOfRangeException)
 		{
 			_log.Warn($"sync(host): malformed {(SyncMsg)data[0]} from {peer} ({data.Length} B)");
 		}
@@ -366,16 +364,16 @@ public sealed partial class HostSession : IStorySink
 
 	private void HandleJoin(PeerId peer, JoinRequest req)
 	{
-		RemoteClient value;
+		RemoteClient client;
 		lock (_sync)
 		{
-			_clients.TryGetValue(peer, out value);
+			_clients.TryGetValue(peer, out client);
 		}
-		if (value == null)
+		if (client == null)
 		{
 			return;
 		}
-		value.Name = req.PlayerName;
+		client.Name = req.PlayerName;
 		_log.Info($"sync(host): join request from {peer} '{req.PlayerName}' (plugin {req.PluginVersion}, game {req.GameVersion}, sync v{req.SyncVersion})");
 		if (req.SyncVersion != SyncProtocol.Version)
 		{
@@ -391,29 +389,29 @@ public sealed partial class HostSession : IStorySink
 		{
 			_log.Warn($"sync(host): {peer} runs game {req.GameVersion}, host {_o.GameVersion}; continuing, but entity data may not match");
 		}
-		if (value.Status == ClientStatus.Connected && value.Player == null && !CheckAccess(peer, req))
+		if (client.Status == ClientStatus.Connected && client.Player == null && !CheckAccess(peer, req))
 		{
 			return;
 		}
-		if (value.Status != ClientStatus.Connected)
+		if (client.Status != ClientStatus.Connected)
 		{
-			_log.Warn($"sync(host): duplicate join request from {peer} ignored (status {value.Status})");
+			_log.Warn($"sync(host): duplicate join request from {peer} ignored (status {client.Status})");
 			return;
 		}
 		lock (_sync)
 		{
-			if (value.Player == null && _clients.Values.Count(c => c.Player != null && c.Peer != peer) >= _o.MaxPlayers - (_o.HostCountsAsPlayer ? 1 : 0))
+			if (client.Player == null && _clients.Values.Count(c => c.Player != null && c.Peer != peer) >= _o.MaxPlayers - (_o.HostCountsAsPlayer ? 1 : 0))
 			{
 				Reject(peer, "The session is full.");
 				return;
 			}
 		}
-		if (req.SyncVersion == SyncProtocol.Version && value.Player == null)
+		if (req.SyncVersion == SyncProtocol.Version && client.Player == null)
 		{
-			value.Player = Register(peer, req.PlayerName);
-			_log.Info($"sync(host): {peer} '{req.PlayerName}' is ClientId {value.Player.ClientId}" + ((value.Player.Joins > 1) ? $" again (join #{value.Player.Joins})" : " (new player)") + ", identity key " + value.Player.Key);
+			client.Player = Register(peer, req.PlayerName);
+			_log.Info($"sync(host): {peer} '{req.PlayerName}' is ClientId {client.Player.ClientId}" + (client.Player.Joins > 1 ? $" again (join #{client.Player.Joins})" : " (new player)") + ", identity key " + client.Player.Key);
 		}
-		ContinueJoin(value);
+		ContinueJoin(client);
 	}
 
 	private void ContinueJoin(RemoteClient c)
@@ -435,33 +433,34 @@ public sealed partial class HostSession : IStorySink
 	{
 		lock (_sync)
 		{
-			string text = PlayerIdentities.KeyFor(peer, string.IsNullOrWhiteSpace(name) ? "?" : name.Trim());
-			int num = 1;
+			string baseKey = PlayerIdentities.KeyFor(peer, string.IsNullOrWhiteSpace(name) ? "?" : name.Trim());
+			int n = 1;
 			string key;
-			PlayerRecord value;
+			PlayerRecord record;
 			while (true)
 			{
-				key = ((num == 1) ? text : $"{text}#{num}");
-				if (!_players.TryGetValue(key, out value))
+				key = n == 1 ? baseKey : $"{baseKey}#{n}";
+				if (!_players.TryGetValue(key, out record))
 				{
 					break;
 				}
-				if (!value.Peer.HasValue || !(value.Peer != peer))
+				// Reuse the record when it is offline or this is the same PC rejoining; otherwise try the next suffix.
+				if (!record.Peer.HasValue || !(record.Peer != peer))
 				{
-					value.Name = name;
-					value.Peer = peer;
-					value.Joins++;
-					value.CharacterNetId = 0u;
-					value.CharacterRequested = false;
-					return value;
+					record.Name = name;
+					record.Peer = peer;
+					record.Joins++;
+					record.CharacterNetId = 0;
+					record.CharacterRequested = false;
+					return record;
 				}
-				num++;
+				n++;
 			}
 			if (_nextClientId == ushort.MaxValue)
 			{
 				throw new InvalidOperationException("ClientId space exhausted");
 			}
-			value = new PlayerRecord
+			record = new PlayerRecord
 			{
 				Key = key,
 				Name = name,
@@ -469,8 +468,8 @@ public sealed partial class HostSession : IStorySink
 				Peer = peer,
 				Joins = 1
 			};
-			_players[key] = value;
-			return value;
+			_players[key] = record;
+			return record;
 		}
 	}
 
@@ -486,20 +485,20 @@ public sealed partial class HostSession : IStorySink
 	{
 		lock (_sync)
 		{
-			PlayerRecord playerRecord = null;
-			foreach (PlayerRecord value in _players.Values)
+			PlayerRecord record = null;
+			foreach (PlayerRecord p in _players.Values)
 			{
-				if (value.ClientId == clientId)
+				if (p.ClientId == clientId)
 				{
-					playerRecord = value;
+					record = p;
 				}
 			}
-			if (playerRecord == null)
+			if (record == null)
 			{
 				return;
 			}
-			playerRecord.IdentityId = identity;
-			playerRecord.PlayerId = player;
+			record.IdentityId = identity;
+			record.PlayerId = player;
 		}
 		if (identity != 0L)
 		{
@@ -509,20 +508,20 @@ public sealed partial class HostSession : IStorySink
 
 	public List<PlayerInfo> PlayerTable()
 	{
-        List<PlayerInfo> list = new List<PlayerInfo>();
-        if (_o.HostCountsAsPlayer) list.Add(new PlayerInfo(1, 1559595546L, -1559595548L, _o.HostName, Connected: true));
+		var table = new List<PlayerInfo>();
+		if (_o.HostCountsAsPlayer) table.Add(new PlayerInfo(1, 1559595546L, -1559595548L, _o.HostName, Connected: true));
 		lock (_sync)
 		{
-			foreach (PlayerRecord value in _players.Values)
+			foreach (PlayerRecord p in _players.Values)
 			{
-				if (value.IdentityId != 0L)
+				if (p.IdentityId != 0L)
 				{
-					list.Add(new PlayerInfo(value.ClientId, value.PlayerId, value.IdentityId, value.Name, value.Peer.HasValue));
+					table.Add(new PlayerInfo(p.ClientId, p.PlayerId, p.IdentityId, p.Name, p.Peer.HasValue));
 				}
 			}
 		}
-		list.Sort((PlayerInfo a, PlayerInfo b) => a.ClientId.CompareTo(b.ClientId));
-		return list;
+		table.Sort((a, b) => a.ClientId.CompareTo(b.ClientId));
+		return table;
 	}
 
 	public void SendSocial(PeerId peer, SocialSnapshot snapshot)
@@ -535,14 +534,14 @@ public sealed partial class HostSession : IStorySink
 
 	private void PushPlayerTable()
 	{
-		byte[] array = PlayerTableMessage.Encode(PlayerTable());
+		byte[] msg = PlayerTableMessage.Encode(PlayerTable());
 		lock (_sync)
 		{
-			foreach (RemoteClient value in _clients.Values)
+			foreach (RemoteClient client in _clients.Values)
 			{
-				if (value.Status == ClientStatus.Synced)
+				if (client.Status == ClientStatus.Synced)
 				{
-					_t.Send(value.Peer, Channel.Control, array);
+					_t.Send(client.Peer, Channel.Control, msg);
 					PlayerTablesSent++;
 				}
 			}
@@ -551,42 +550,24 @@ public sealed partial class HostSession : IStorySink
 
 	public bool PublishPlayerStatus(ushort clientId, int pcu, int maxPcu)
 	{
-		bool flag;
 		lock (_sync)
 		{
-			foreach (RemoteClient value in _clients.Values)
+			foreach (RemoteClient client in _clients.Values)
 			{
-				if (value.Status != ClientStatus.Synced || value.Player?.ClientId != clientId)
+				if (client.Status != ClientStatus.Synced || client.Player?.ClientId != clientId)
 				{
 					continue;
 				}
-				(int, int)? lastStatus = value.LastStatus;
-				int num = pcu;
-				flag = lastStatus.HasValue;
-				if (!flag)
+				if (client.LastStatus == (pcu, maxPcu))
 				{
-					goto IL_00e9;
+					return false;
 				}
-				if (flag)
-				{
-					(int, int) valueOrDefault = lastStatus.GetValueOrDefault();
-					if (valueOrDefault.Item1 != num || valueOrDefault.Item2 != maxPcu)
-					{
-						goto IL_00e9;
-					}
-				}
-				flag = false;
-				goto IL_0148;
-				IL_00e9:
-				value.LastStatus = (pcu, maxPcu);
-				_t.Send(value.Peer, Channel.Control, PlayerStatusMessage.Encode(clientId, pcu, maxPcu));
-				flag = true;
-				goto IL_0148;
+				client.LastStatus = (pcu, maxPcu);
+				_t.Send(client.Peer, Channel.Control, PlayerStatusMessage.Encode(clientId, pcu, maxPcu));
+				return true;
 			}
 		}
 		return false;
-		IL_0148:
-		return flag;
 	}
 
 	private void HandleUpstream(PeerId peer, Channel ch, byte[] data)
@@ -595,7 +576,7 @@ public sealed partial class HostSession : IStorySink
 		{
 			HandleUpstreamCore(peer, data);
 		}
-		catch (Exception ex) when ((!(ex is ArgumentOutOfRangeException) && !(ex is IndexOutOfRangeException)) || 1 == 0)
+		catch (Exception ex) when (ex is not ArgumentOutOfRangeException and not IndexOutOfRangeException)
 		{
 			_log.WarnOnce($"host-upstream-{data[0]}", $"sync(host): handling {(SyncMsg)data[0]} from {peer} failed: {ex.GetType().Name}: {ex.Message}");
 		}
@@ -603,187 +584,182 @@ public sealed partial class HostSession : IStorySink
 
 	private void HandleUpstreamCore(PeerId peer, byte[] data)
 	{
-		RemoteClient value;
+		RemoteClient client;
 		lock (_sync)
 		{
-			_clients.TryGetValue(peer, out value);
+			_clients.TryGetValue(peer, out client);
 		}
-		if (value == null || value.Player == null)
+		if (client == null || client.Player == null)
 		{
 			return;
 		}
 		switch ((SyncMsg)data[0])
 		{
 		case SyncMsg.ChatSend:
-			HandleChat(value, data);
+			HandleChat(client, data);
 			break;
 		case SyncMsg.AdminRequest:
-			HandleAdmin(value, data);
+			HandleAdmin(client, data);
 			break;
 		case SyncMsg.SocialRequest:
-			if (value.Status == ClientStatus.Synced && value.Player.IdentityId != 0)
-				_world.OnSocialRequest(peer, value.Player.ClientId, SocialMessage.Decode<SocialRequest>(data));
+			if (client.Status == ClientStatus.Synced && client.Player.IdentityId != 0)
+				_world.OnSocialRequest(peer, client.Player.ClientId, SocialMessage.Decode<SocialRequest>(data));
 			break;
 		case SyncMsg.TypeKeys:
 		{
-			List<TypeKeyDef> list = TypeKeysMessage.Decode(data);
+			List<TypeKeyDef> defs = TypeKeysMessage.Decode(data);
 			if (_o.ResolveType == null)
 			{
 				break;
 			}
-			List<string> list2;
-			lock (value.Input)
+			List<string> unusable;
+			lock (client.Input)
 			{
-				list2 = value.InputTypes.Add(list, _o.ResolveType);
+				unusable = client.InputTypes.Add(defs, _o.ResolveType);
 			}
-			_log.Info($"sync(host): ClientId {value.Player.ClientId}: {list.Count} input type key(s) ({string.Join(", ", list.Select((TypeKeyDef d) => d.ShortName))}), {list2.Count} unusable");
+			_log.Info($"sync(host): ClientId {client.Player.ClientId}: {defs.Count} input type key(s) ({string.Join(", ", defs.Select(d => d.ShortName))}), {unusable.Count} unusable");
+			foreach (string problem in unusable)
 			{
-				foreach (string item2 in list2)
-				{
-					_log.Warn($"sync(host): ClientId {value.Player.ClientId}: {item2}");
-				}
-				break;
+				_log.Warn($"sync(host): ClientId {client.Player.ClientId}: {problem}");
 			}
+			break;
 		}
 		case SyncMsg.SignalKeys:
 		{
-			List<SignalKeyDef> list5 = SignalKeysMessage.Decode(data);
-			int num6 = 0;
-			lock (value.Input)
+			List<SignalKeyDef> defs = SignalKeysMessage.Decode(data);
+			int unusable = 0;
+			lock (client.Input)
 			{
-				foreach (SignalKeyDef item3 in list5)
+				foreach (SignalKeyDef def in defs)
 				{
-					string text = ((_o.CheckSignal == null) ? "client signals disabled" : _o.CheckSignal(item3));
-					value.Signals[item3.Key] = (item3, text);
-					if (text != null)
+					string problem = _o.CheckSignal == null ? "client signals disabled" : _o.CheckSignal(def);
+					client.Signals[def.Key] = (def, problem);
+					if (problem != null)
 					{
-						num6++;
-						_log.Warn($"sync(host): ClientId {value.Player.ClientId}: signal {item3.Name}: {text}; ignored");
+						unusable++;
+						_log.Warn($"sync(host): ClientId {client.Player.ClientId}: signal {def.Name}: {problem}; ignored");
 					}
 				}
 			}
-			_log.Info($"sync(host): ClientId {value.Player.ClientId}: {list5.Count} signal key(s), {num6} unusable");
+			_log.Info($"sync(host): ClientId {client.Player.ClientId}: {defs.Count} signal key(s), {unusable} unusable");
 			break;
 		}
 		case SyncMsg.ClientInput:
-			var (num3, list3) = ClientInputMessage.Decode(data);
-			lock (value.Input)
+			var (inputSeq, entries) = ClientInputMessage.Decode(data);
+			lock (client.Input)
 			{
-				long num4 = _clock();
-				if (value.InputLastArrivalMs >= 0)
+				long now = _clock();
+				if (client.InputLastArrivalMs >= 0)
 				{
-					long num5 = num4 - value.InputLastArrivalMs;
-					if (num5 > 50)
+					long gap = now - client.InputLastArrivalMs;
+					if (gap > 50)
 					{
-						value.InputGaps++;
-						if (num5 > value.InputGapMaxMs)
+						client.InputGaps++;
+						if (gap > client.InputGapMaxMs)
 						{
-							value.InputGapMaxMs = num5;
+							client.InputGapMaxMs = gap;
 						}
-						if (num5 > 150 && num4 - value.InputGapLogMs > 5000)
+						if (gap > 150 && now - client.InputGapLogMs > 5000)
 						{
-							value.InputGapLogMs = num4;
-							_log.Info($"sync(host): ClientId {value.Player?.ClientId}: no input from this joiner for {num5} ms (diagnostic; {value.InputGaps} gaps > 50 ms so far)");
+							client.InputGapLogMs = now;
+							_log.Info($"sync(host): ClientId {client.Player?.ClientId}: no input from this joiner for {gap} ms (diagnostic; {client.InputGaps} gaps > 50 ms so far)");
 						}
 					}
 				}
-				value.InputLastArrivalMs = num4;
-				value.InputMessages++;
-				foreach (InputEntry item4 in list3)
+				client.InputLastArrivalMs = now;
+				client.InputMessages++;
+				foreach (InputEntry entry in entries)
 				{
-					value.InputEntries++;
-					(uint, ushort) key = (item4.NetId, item4.Key);
-					if (!value.InputData.TryGetValue(key, out (uint, byte[], bool) value2) || Seq.Newer(num3, value2.Item1))
+					client.InputEntries++;
+					(uint, ushort) key = (entry.NetId, entry.Key);
+					if (!client.InputData.TryGetValue(key, out var prev) || Seq.Newer(inputSeq, prev.Seq))
 					{
-						bool flag2 = value2.Item2 == null || !value2.Item2.AsSpan().SequenceEqual(item4.Bytes);
-						value.InputData[key] = (num3, item4.Bytes, flag2 || value2.Item3);
+						// Stays dirty until TakeInputs applies it, even if a newer copy brings the same bytes.
+						bool changed = prev.Bytes == null || !prev.Bytes.AsSpan().SequenceEqual(entry.Bytes);
+						client.InputData[key] = (inputSeq, entry.Bytes, changed || prev.Dirty);
 					}
 				}
 				break;
 			}
 		case SyncMsg.ClientLook:
 		{
-			var (seq, num, num2, x, y, z) = ClientLookMessage.Decode(data);
+			var (seq, netId, epoch, x, y, z) = ClientLookMessage.Decode(data);
 			if (!_o.LookTotals)
 			{
-				if (value.LookIgnored++ == 0L)
+				if (client.LookIgnored++ == 0L)
 				{
-					_log.Info($"sync(host): ClientId {value.Player.ClientId}: ignoring the joiner's look totals (-y51online:predict:off on the host): " + "its turning is applied from the newest ControlData per tick as in 0.7.0, its prediction will correct more often");
+					_log.Info($"sync(host): ClientId {client.Player.ClientId}: ignoring the joiner's look totals (-y51online:predict:off on the host): " + "its turning is applied from the newest ControlData per tick as in 0.7.0, its prediction will correct more often");
 				}
 				break;
 			}
-			bool flag;
-			lock (value.Input)
+			bool newEpoch;
+			lock (client.Input)
 			{
-				RemoteClient remoteClient = value;
-				if (remoteClient.Look == null)
-				{
-					remoteClient.Look = new LookAccumulator();
-				}
-				flag = value.Look.Offer(seq, num, num2, x, y, z);
+				client.Look ??= new LookAccumulator();
+				newEpoch = client.Look.Offer(seq, netId, epoch, x, y, z);
 			}
-			if (flag)
+			if (newEpoch)
 			{
-				_log.Info($"sync(host): ClientId {value.Player.ClientId}: look totals for NetworkId {num} (epoch {num2}): the joiner's turning is applied " + "exactly as it predicted it (total minus applied, once per tick)" + ((num != value.Player.CharacterNetId) ? $"; its character here is NetworkId {value.Player.CharacterNetId}, waiting" : ""));
+				_log.Info($"sync(host): ClientId {client.Player.ClientId}: look totals for NetworkId {netId} (epoch {epoch}): the joiner's turning is applied " + "exactly as it predicted it (total minus applied, once per tick)" + (netId != client.Player.CharacterNetId ? $"; its character here is NetworkId {client.Player.CharacterNetId}, waiting" : ""));
 			}
 			break;
 		}
 		case SyncMsg.ClientCommands:
-			var (lastCommandSeq, list4) = ClientSignalsMessage.Decode(data);
-			lock (value.Input)
+			var (lastCommandSeq, commands) = ClientSignalsMessage.Decode(data);
+			lock (client.Input)
 			{
-				value.LastCommandSeq = lastCommandSeq;
-				foreach (WireCommand item5 in list4)
+				client.LastCommandSeq = lastCommandSeq;
+				foreach (WireCommand command in commands)
 				{
-					value.CommandsIn++;
-					if (value.Signals.TryGetValue(item5.Key, out (SignalKeyDef, string) value3) && value3.Item2 == null && (value3.Item1.PayloadBytes == ushort.MaxValue || item5.Payload.Length == value3.Item1.PayloadBytes))
+					client.CommandsIn++;
+					if (client.Signals.TryGetValue(command.Key, out var signal) && signal.Problem == null && (signal.Def.PayloadBytes == ushort.MaxValue || command.Payload.Length == signal.Def.PayloadBytes))
 					{
-						if (value.InputCommands.Count < 4096)
+						if (client.InputCommands.Count < 4096)
 						{
-							value.InputCommands.Add((value3.Item1.Name, item5));
+							client.InputCommands.Add((signal.Def.Name, command));
 						}
 					}
 					else
 					{
-						value.CommandsRejected++;
+						client.CommandsRejected++;
 					}
 				}
 				break;
 			}
 		case SyncMsg.StoryMove:
 		{
-			StoryMove storyMove = StoryMove.Decode(data);
-			value.P2.StoriesIn++;
-			if (value.Status != ClientStatus.Synced)
+			StoryMove move = StoryMove.Decode(data);
+			client.P2.StoriesIn++;
+			if (client.Status != ClientStatus.Synced)
 			{
 				SendStoryFinish(peer, new StoryFinish
 				{
-					StoryId = storyMove.StoryId,
+					StoryId = move.StoryId,
 					Status = 2,
 					Text = "not in the world yet"
 				});
 			}
 			else
 			{
-				_world.OnClientStory(peer, value.Player.ClientId, storyMove);
+				_world.OnClientStory(peer, client.Player.ClientId, move);
 			}
 			break;
 		}
 		case SyncMsg.ObservableEdits:
 		{
-			List<MemberEdit> item = ObservableEditsMessage.Decode(data).Edits;
-			value.P2.ObservableEditsIn += item.Count;
-			if (value.Status == ClientStatus.Synced && item.Count != 0)
+			List<MemberEdit> edits = ObservableEditsMessage.Decode(data).Edits;
+			client.P2.ObservableEditsIn += edits.Count;
+			if (client.Status == ClientStatus.Synced && edits.Count != 0)
 			{
-				_world.OnObservableEdits(peer, value.Player.ClientId, item);
+				_world.OnObservableEdits(peer, client.Player.ClientId, edits);
 			}
 			break;
 		}
 		case SyncMsg.CharacterRequest:
 		{
-			var (b, choice) = CharacterRequestMessage.Decode(data);
-			PlayerRecord player = value.Player;
-			if (value.Status != ClientStatus.Synced)
+			var (reason, choice) = CharacterRequestMessage.Decode(data);
+			PlayerRecord player = client.Player;
+			if (client.Status != ClientStatus.Synced)
 			{
 				_log.Warn($"sync(host): ClientId {player.ClientId} asked for a character before its world was captured; ignored");
 				break;
@@ -794,8 +770,8 @@ public sealed partial class HostSession : IStorySink
 				break;
 			}
 			player.CharacterRequested = true;
-			_log.Info($"sync(host): ClientId {player.ClientId} '{player.Name}' requests a character ({((b == 1) ? "respawn" : "first spawn")})");
-			_world.RequestCharacter(peer, player.ClientId, player.Name, choice, b == 1);
+			_log.Info($"sync(host): ClientId {player.ClientId} '{player.Name}' requests a character ({(reason == CharacterRequestMessage.Respawn ? "respawn" : "first spawn")})");
+			_world.RequestCharacter(peer, player.ClientId, player.Name, choice, reason == CharacterRequestMessage.Respawn);
 			break;
 		}
 		}
@@ -803,22 +779,22 @@ public sealed partial class HostSession : IStorySink
 
 	public void CharacterAssigned(PeerId peer, uint netId, string detail)
 	{
-		RemoteClient value;
+		RemoteClient client;
 		lock (_sync)
 		{
-			_clients.TryGetValue(peer, out value);
+			_clients.TryGetValue(peer, out client);
 		}
-		if (value?.Player != null)
+		if (client?.Player != null)
 		{
-			value.Player.CharacterNetId = netId;
-			value.Player.CharacterRequested = false;
-			lock (value.Input)
+			client.Player.CharacterNetId = netId;
+			client.Player.CharacterRequested = false;
+			lock (client.Input)
 			{
-				value.InputData.Clear();
-				value.Look = null;
+				client.InputData.Clear();
+				client.Look = null;
 			}
-			_t.Send(peer, Channel.Control, PlayerAssignMessage.Encode(value.Player.ClientId, 0, netId, detail));
-			_log.Info($"sync(host): CHARACTER ASSIGNED: ClientId {value.Player.ClientId} '{value.Player.Name}' controls NetworkId {netId} ({detail})");
+			_t.Send(peer, Channel.Control, PlayerAssignMessage.Encode(client.Player.ClientId, 0, netId, detail));
+			_log.Info($"sync(host): CHARACTER ASSIGNED: ClientId {client.Player.ClientId} '{client.Player.Name}' controls NetworkId {netId} ({detail})");
 		}
 	}
 
@@ -826,47 +802,47 @@ public sealed partial class HostSession : IStorySink
 
 	public void CharacterFailed(PeerId peer, string why)
 	{
-		RemoteClient value;
+		RemoteClient client;
 		lock (_sync)
 		{
-			_clients.TryGetValue(peer, out value);
+			_clients.TryGetValue(peer, out client);
 		}
-		if (value?.Player != null)
+		if (client?.Player != null)
 		{
-			value.Player.CharacterRequested = false;
-			_t.Send(peer, Channel.Control, PlayerAssignMessage.Encode(value.Player.ClientId, 1, 0u, why));
-			_log.Error($"sync(host): no character for ClientId {value.Player.ClientId} '{value.Player.Name}': {why}");
+			client.Player.CharacterRequested = false;
+			_t.Send(peer, Channel.Control, PlayerAssignMessage.Encode(client.Player.ClientId, 1, 0u, why));
+			_log.Error($"sync(host): no character for ClientId {client.Player.ClientId} '{client.Player.Name}': {why}");
 		}
 	}
 
 	public void CharacterLost(PeerId peer, string why)
 	{
-		RemoteClient value;
+		RemoteClient client;
 		lock (_sync)
 		{
-			_clients.TryGetValue(peer, out value);
+			_clients.TryGetValue(peer, out client);
 		}
-		if (value?.Player != null && value.Player.CharacterNetId != 0)
+		if (client?.Player != null && client.Player.CharacterNetId != 0)
 		{
-			uint characterNetId = value.Player.CharacterNetId;
-			value.Player.CharacterNetId = 0u;
-			lock (value.Input)
+			uint characterNetId = client.Player.CharacterNetId;
+			client.Player.CharacterNetId = 0;
+			lock (client.Input)
 			{
-				value.InputData.Clear();
-				value.Look = null;
+				client.InputData.Clear();
+				client.Look = null;
 			}
-			_t.Send(peer, Channel.Control, PlayerAssignMessage.Encode(value.Player.ClientId, 2, characterNetId, why));
-			_log.Info($"sync(host): ClientId {value.Player.ClientId} '{value.Player.Name}' lost its character NetworkId {characterNetId}: {why}");
+			_t.Send(peer, Channel.Control, PlayerAssignMessage.Encode(client.Player.ClientId, 2, characterNetId, why));
+			_log.Info($"sync(host): ClientId {client.Player.ClientId} '{client.Player.Name}' lost its character NetworkId {characterNetId}: {why}");
 		}
 	}
 
 	private static bool IsControlKey(RemoteClient c, LookAccumulator look, ushort key)
 	{
-		ushort? controlKey = look.ControlKey;
-		if (controlKey.HasValue)
+		ushort? known = look.ControlKey;
+		if (known.HasValue)
 		{
-			ushort valueOrDefault = controlKey.GetValueOrDefault();
-			return valueOrDefault == key;
+			ushort controlKey = known.GetValueOrDefault();
+			return controlKey == key;
 		}
 		if (c.InputTypes.Name(key) != "ControlData" || !c.InputTypes.TryResolve(key, out var _, out var size) || size != 24)
 		{
@@ -878,143 +854,121 @@ public sealed partial class HostSession : IStorySink
 
 	public List<ClientInputBatch> TakeInputs()
 	{
-		List<ClientInputBatch> list = new List<ClientInputBatch>();
-		List<RemoteClient> list2;
+		var batches = new List<ClientInputBatch>();
+		List<RemoteClient> clients;
 		lock (_sync)
 		{
-			list2 = new List<RemoteClient>(_clients.Values);
+			clients = new List<RemoteClient>(_clients.Values);
 		}
-		foreach (RemoteClient item in list2)
+		foreach (RemoteClient client in clients)
 		{
-			PlayerRecord player = item.Player;
-			if (player == null || item.Status != ClientStatus.Synced || player.CharacterNetId == 0)
+			PlayerRecord player = client.Player;
+			if (player == null || client.Status != ClientStatus.Synced || player.CharacterNetId == 0)
 			{
 				continue;
 			}
-			ClientInputBatch clientInputBatch = null;
-			lock (item.Input)
+			ClientInputBatch batch = null;
+			lock (client.Input)
 			{
-				if (item.InputMessages == item.InputMessagesAtTake)
+				if (client.InputMessages == client.InputMessagesAtTake)
 				{
-					item.TicksWithoutInput++;
+					client.TicksWithoutInput++;
 				}
 				else
 				{
-					item.TicksWithInput++;
+					client.TicksWithInput++;
 				}
-				item.InputMessagesAtTake = item.InputMessages;
-				if (item.InputCommands.Count == 0 && item.InputData.Count == 0)
+				client.InputMessagesAtTake = client.InputMessages;
+				if (client.InputCommands.Count == 0 && client.InputData.Count == 0)
 				{
 					continue;
 				}
-				object obj;
-				if (_o.LookTotals)
+				// Look totals only count while they are for the character this client controls now.
+				LookAccumulator look = _o.LookTotals && client.Look is { } current && current.NetId == player.CharacterNetId ? current : null;
+				bool controlChanged = false;
+				foreach (var key in new List<(uint NetId, ushort Key)>(client.InputData.Keys))
 				{
-					LookAccumulator look = item.Look;
-					if (look != null && look.NetId == player.CharacterNetId)
+					var input = client.InputData[key];
+					if (look != null && key.NetId == look.NetId && IsControlKey(client, look, key.Key))
 					{
-						obj = look;
-						goto IL_0118;
-					}
-				}
-				obj = null;
-				goto IL_0118;
-				IL_0118:
-				LookAccumulator lookAccumulator = (LookAccumulator)obj;
-				bool flag = false;
-				foreach (var item2 in new List<(uint, ushort)>(item.InputData.Keys))
-				{
-					(uint, byte[], bool) tuple = item.InputData[item2];
-					if (lookAccumulator != null && item2.Item1 == lookAccumulator.NetId && IsControlKey(item, lookAccumulator, item2.Item2))
-					{
-						if (tuple.Item3 || lookAccumulator.Control == null)
+						if (input.Dirty || look.Control == null)
 						{
-							item.InputData[item2] = (tuple.Item1, tuple.Item2, false);
-							lookAccumulator.Control = tuple.Item2;
-							flag |= tuple.Item3;
-							NoteApplied(item, tuple.Item1);
+							client.InputData[key] = (input.Seq, input.Bytes, false);
+							look.Control = input.Bytes;
+							controlChanged |= input.Dirty;
+							NoteApplied(client, input.Seq);
 						}
 					}
 					else
 					{
-						if (!tuple.Item3)
+						if (!input.Dirty)
 						{
 							continue;
 						}
-						item.InputData[item2] = (tuple.Item1, tuple.Item2, false);
-						NoteApplied(item, tuple.Item1);
-						if (!item.InputTypes.TryResolve(item2.Item2, out var localTypeId, out var size) || (tuple.Item2.Length != size && tuple.Item2.Length != 0))
+						client.InputData[key] = (input.Seq, input.Bytes, false);
+						NoteApplied(client, input.Seq);
+						if (!client.InputTypes.TryResolve(key.Key, out var localTypeId, out var size) || (input.Bytes.Length != size && input.Bytes.Length != 0))
 						{
-							item.InputRejected++;
+							client.InputRejected++;
 							continue;
 						}
-						if (clientInputBatch == null)
+						batch ??= new ClientInputBatch
 						{
-							clientInputBatch = new ClientInputBatch
-							{
-								Peer = item.Peer,
-								ClientId = player.ClientId,
-								CharacterNetId = player.CharacterNetId
-							};
-						}
-						if (tuple.Item2.Length == 0)
-						{
-							clientInputBatch.Removes.Add((item2.Item1, localTypeId));
-							item.InputRemoved++;
-						}
-						else
-						{
-							clientInputBatch.Data.Add((item2.Item1, localTypeId, tuple.Item2));
-						}
-					}
-				}
-				if (lookAccumulator != null)
-				{
-					ushort? controlKey = lookAccumulator.ControlKey;
-					if (controlKey.HasValue)
-					{
-						ushort valueOrDefault = controlKey.GetValueOrDefault();
-						byte[] control = lookAccumulator.Control;
-						if (control != null && control.Length == 24 && item.InputTypes.TryResolve(valueOrDefault, out var localTypeId2, out var size2) && size2 == 24 && (lookAccumulator.Take(out var x, out var y, out var z) | flag))
-						{
-							if (clientInputBatch == null)
-							{
-								clientInputBatch = new ClientInputBatch
-								{
-									Peer = item.Peer,
-									ClientId = player.ClientId,
-									CharacterNetId = player.CharacterNetId
-								};
-							}
-							clientInputBatch.Data.Add((lookAccumulator.NetId, localTypeId2, LookAccumulator.WithRotation(control, x, y, z)));
-							item.LookControlWrites++;
-						}
-					}
-				}
-				if (item.InputCommands.Count > 0)
-				{
-					if (clientInputBatch == null)
-					{
-						clientInputBatch = new ClientInputBatch
-						{
-							Peer = item.Peer,
+							Peer = client.Peer,
 							ClientId = player.ClientId,
 							CharacterNetId = player.CharacterNetId
 						};
+						if (input.Bytes.Length == 0)
+						{
+							batch.Removes.Add((key.NetId, localTypeId));
+							client.InputRemoved++;
+						}
+						else
+						{
+							batch.Data.Add((key.NetId, localTypeId, input.Bytes));
+						}
 					}
-					clientInputBatch.Commands.AddRange(item.InputCommands);
-					item.InputCommands.Clear();
 				}
-				goto IL_042b;
+				if (look != null)
+				{
+					ushort? known = look.ControlKey;
+					if (known.HasValue)
+					{
+						ushort controlKey = known.GetValueOrDefault();
+						byte[] control = look.Control;
+						// Non-short-circuit: Take must run every tick, it consumes the turn and yields x, y, z.
+						if (control != null && control.Length == 24 && client.InputTypes.TryResolve(controlKey, out var controlTypeId, out var controlSize) && controlSize == 24 && (look.Take(out var x, out var y, out var z) | controlChanged))
+						{
+							batch ??= new ClientInputBatch
+							{
+								Peer = client.Peer,
+								ClientId = player.ClientId,
+								CharacterNetId = player.CharacterNetId
+							};
+							batch.Data.Add((look.NetId, controlTypeId, LookAccumulator.WithRotation(control, x, y, z)));
+							client.LookControlWrites++;
+						}
+					}
+				}
+				if (client.InputCommands.Count > 0)
+				{
+					batch ??= new ClientInputBatch
+					{
+						Peer = client.Peer,
+						ClientId = player.ClientId,
+						CharacterNetId = player.CharacterNetId
+					};
+					batch.Commands.AddRange(client.InputCommands);
+					client.InputCommands.Clear();
+				}
 			}
-			IL_042b:
-			if (clientInputBatch != null)
+			if (batch != null)
 			{
-				list.Add(clientInputBatch);
+				batches.Add(batch);
 			}
 		}
-		SendInputAcks(list2);
-		return list;
+		SendInputAcks(clients);
+		return batches;
 	}
 
 	private void NoteApplied(RemoteClient c, uint seq)
@@ -1059,37 +1013,38 @@ public sealed partial class HostSession : IStorySink
 			return;
 		}
 		AnnounceSignalKeys();
-		byte[] array = SignalBatchMessage.Encode(0u, hostTick, commands);
+		byte[] batch = SignalBatchMessage.Encode(0u, hostTick, commands);
 		lock (_sync)
 		{
-			foreach (RemoteClient value in _clients.Values)
+			foreach (RemoteClient client in _clients.Values)
 			{
-				if (value.Status == ClientStatus.Synced && value.P2.StringsSent < _hostStrings.Count)
+				// Signals can carry StringHash values; the joiner needs their names before the batch that uses them.
+			if (client.Status == ClientStatus.Synced && client.P2.StringsSent < _hostStrings.Count)
 				{
-					int num = _hostStrings.Count - value.P2.StringsSent;
-					byte[] array2 = StringTableMessage.Encode(value.NextLifeSeq++, _hostStrings, value.P2.StringsSent, num);
-					_t.Send(value.Peer, (array2.Length > 8192) ? Channel.Bulk : Channel.Control, array2);
-					if (value.P2.StringsSent == 0)
+					int count = _hostStrings.Count - client.P2.StringsSent;
+					byte[] names = StringTableMessage.Encode(client.NextLifeSeq++, _hostStrings, client.P2.StringsSent, count);
+					_t.Send(client.Peer, names.Length > 8192 ? Channel.Bulk : Channel.Control, names);
+					if (client.P2.StringsSent == 0)
 					{
-						_log.Info($"sync(host): {value.Peer}: sent {num} StringHash name(s) ({MpLogExtensions.Bytes(array2.Length)}) before its first signals");
+						_log.Info($"sync(host): {client.Peer}: sent {count} StringHash name(s) ({MpLogExtensions.Bytes(names.Length)}) before its first signals");
 					}
-					value.P2.StringsSent += num;
-					value.P2.StringsOut += num;
-					value.LifecycleMessages++;
-					value.LifecycleBytes += array2.Length;
+					client.P2.StringsSent += count;
+					client.P2.StringsOut += count;
+					client.LifecycleMessages++;
+					client.LifecycleBytes += names.Length;
 				}
 			}
 		}
-		PublishLifecycle(array);
+		PublishLifecycle(batch);
 		lock (_sync)
 		{
-			foreach (RemoteClient value2 in _clients.Values)
+			foreach (RemoteClient client in _clients.Values)
 			{
-				if (value2.Status == ClientStatus.Synced)
+				if (client.Status == ClientStatus.Synced)
 				{
-					value2.P2.SignalBatches++;
-					value2.P2.SignalsOut += commands.Count;
-					value2.P2.SignalBytesOut += array.Length;
+					client.P2.SignalBatches++;
+					client.P2.SignalsOut += commands.Count;
+					client.P2.SignalBytesOut += batch.Length;
 				}
 			}
 		}
@@ -1097,19 +1052,19 @@ public sealed partial class HostSession : IStorySink
 
 	private void AnnounceSignalKeys()
 	{
-		List<SignalKeyDef> list = SignalKeys.TakeUnannounced();
-		if (list.Count == 0)
+		List<SignalKeyDef> defs = SignalKeys.TakeUnannounced();
+		if (defs.Count == 0)
 		{
 			return;
 		}
-		byte[] array = SignalKeysMessage.Encode(list);
+		byte[] msg = SignalKeysMessage.Encode(defs);
 		lock (_sync)
 		{
-			foreach (RemoteClient value in _clients.Values)
+			foreach (RemoteClient client in _clients.Values)
 			{
-				if (value.Status == ClientStatus.Synced)
+				if (client.Status == ClientStatus.Synced)
 				{
-					_t.Send(value.Peer, Channel.Control, array);
+					_t.Send(client.Peer, Channel.Control, msg);
 				}
 			}
 		}
@@ -1117,46 +1072,46 @@ public sealed partial class HostSession : IStorySink
 
 	public void SendStoryMove(PeerId peer, StoryMove move)
 	{
-		byte[] array = move.Encode();
-		_t.Send(peer, (array.Length > 8192) ? Channel.Bulk : Channel.Control, array);
+		byte[] msg = move.Encode();
+		_t.Send(peer, msg.Length > 8192 ? Channel.Bulk : Channel.Control, msg);
 		lock (_sync)
 		{
-			if (_clients.TryGetValue(peer, out RemoteClient value))
+			if (_clients.TryGetValue(peer, out RemoteClient client))
 			{
-				value.P2.StoryMovesOut++;
+				client.P2.StoryMovesOut++;
 			}
 		}
 	}
 
 	public void SendStoryFinish(PeerId peer, StoryFinish finish)
 	{
-		byte[] array = finish.Encode();
-		_t.Send(peer, (array.Length > 8192) ? Channel.Bulk : Channel.Control, array);
+		byte[] msg = finish.Encode();
+		_t.Send(peer, msg.Length > 8192 ? Channel.Bulk : Channel.Control, msg);
 		lock (_sync)
 		{
-			if (_clients.TryGetValue(peer, out RemoteClient value))
+			if (_clients.TryGetValue(peer, out RemoteClient client))
 			{
-				value.P2.StoryFinishesOut++;
+				client.P2.StoryFinishesOut++;
 			}
 		}
 	}
 
 	public void InputApplied(PeerId peer, int data, int commands, int rejected)
 	{
-		RemoteClient value;
+		RemoteClient client;
 		lock (_sync)
 		{
-			_clients.TryGetValue(peer, out value);
+			_clients.TryGetValue(peer, out client);
 		}
-		if (value == null)
+		if (client == null)
 		{
 			return;
 		}
-		lock (value.Input)
+		lock (client.Input)
 		{
-			value.InputApplied += data;
-			value.CommandsApplied += commands;
-			value.InputRejected += rejected;
+			client.InputApplied += data;
+			client.CommandsApplied += commands;
+			client.InputRejected += rejected;
 		}
 	}
 
@@ -1184,27 +1139,24 @@ public sealed partial class HostSession : IStorySink
 		_t.Send(peer, Channel.Control, TextMessage.Encode(SyncMsg.JoinReject, code, why));
 	}
 
-	public bool BeginCapture(PeerId peer, out uint worldLifeSeq)
-	{
-		return BeginCapture(peer, 1, out worldLifeSeq);
-	}
+	public bool BeginCapture(PeerId peer, out uint worldLifeSeq) => BeginCapture(peer, 1, out worldLifeSeq);
 
 	public bool BeginCapture(PeerId peer, int parts, out uint firstLifeSeq)
 	{
-		firstLifeSeq = 0u;
+		firstLifeSeq = 0;
 		string name;
 		lock (_sync)
 		{
-			if (!_clients.TryGetValue(peer, out RemoteClient value) || value.Status != ClientStatus.CaptureRequested)
+			if (!_clients.TryGetValue(peer, out RemoteClient client) || client.Status != ClientStatus.CaptureRequested)
 			{
 				return false;
 			}
-			value.Status = ClientStatus.Synced;
-			value.SyncedMs = _clock();
-			firstLifeSeq = value.NextLifeSeq;
-			value.NextLifeSeq += (uint)Math.Max(1, parts);
+			client.Status = ClientStatus.Synced;
+			client.SyncedMs = _clock();
+			firstLifeSeq = client.NextLifeSeq;
+			client.NextLifeSeq += (uint)Math.Max(1, parts);
 			_syncedCount++;
-			name = value.Name;
+			name = client.Name;
 		}
 		Announce($"{name} joined the server.");
 		return true;
@@ -1214,106 +1166,101 @@ public sealed partial class HostSession : IStorySink
 	{
 		lock (_sync)
 		{
-			RemoteClient value;
-			return _clients.TryGetValue(peer, out value) && value.Status == ClientStatus.CaptureRequested;
+			return _clients.TryGetValue(peer, out RemoteClient client) && client.Status == ClientStatus.CaptureRequested;
 		}
 	}
 
 	public void CompleteCapture(PeerId peer, byte[] snapshot, EntityBundleMessage world, string summary, bool hostMissions = false, CaptureBlobs? blobs = null)
-	{
-		CompleteCapture(peer, snapshot, new List<EntityBundleMessage> { world }, summary, hostMissions, blobs);
-	}
+		=> CompleteCapture(peer, snapshot, new List<EntityBundleMessage> { world }, summary, hostMissions, blobs);
 
 	public void CompleteCapture(PeerId peer, byte[] snapshot, IReadOnlyList<EntityBundleMessage> parts, string summary, bool hostMissions = false, CaptureBlobs? blobs = null)
 	{
-		RemoteClient value;
+		RemoteClient client;
 		lock (_sync)
 		{
-			_clients.TryGetValue(peer, out value);
+			_clients.TryGetValue(peer, out client);
 		}
-		if (value == null || value.Status != ClientStatus.Synced)
+		if (client == null || client.Status != ClientStatus.Synced)
 		{
 			_log.Warn($"sync(host): capture for {peer} finished but the client is gone");
 			return;
 		}
-		List<byte[]> list = new List<byte[]>(parts.Count);
-		int num = 0;
-		int num2 = 0;
-		long num3 = 0L;
+		var encoded = new List<byte[]>(parts.Count);
+		int entities = 0;
+		int withData = 0;
+		long worldBytes = 0L;
 		foreach (EntityBundleMessage part in parts)
 		{
-			byte[] array = part.Encode();
-			list.Add(array);
-			num3 += array.Length;
-			num += part.Entities.Count;
-			num2 += part.Data.Count;
+			byte[] msg = part.Encode();
+			encoded.Add(msg);
+			worldBytes += msg.Length;
+			entities += part.Entities.Count;
+			withData += part.Data.Count;
 		}
-		JoinAccept joinAccept = new JoinAccept
+		var accept = new JoinAccept
 		{
 			WorldName = _world.WorldName,
-			HostTick = ((parts.Count > 0) ? parts[0].HostTick : 0u),
+			HostTick = parts.Count > 0 ? parts[0].HostTick : 0u,
 			SnapshotBytes = snapshot.Length,
-			WorldBytes = (int)Math.Min(2147483647L, num3),
-			WorldEntities = num,
+			WorldBytes = (int)Math.Min(2147483647L, worldBytes),
+			WorldEntities = entities,
 			WorldParts = parts.Count,
 			HostMissions = hostMissions,
-			WorldBlobs = (blobs?.Data.Count ?? 0),
-			WorldBlobBytes = (blobs?.Bytes ?? 0),
-			ClientId = (value.Player?.ClientId ?? 0),
+			WorldBlobs = blobs?.Data.Count ?? 0,
+			WorldBlobBytes = blobs?.Bytes ?? 0,
+			ClientId = client.Player?.ClientId ?? 0,
 			Settings = _o.Settings,
-			IdentityId = (value.Player?.IdentityId ?? 0),
-			PlayerId = (value.Player?.PlayerId ?? 0),
+			IdentityId = client.Player?.IdentityId ?? 0,
+			PlayerId = client.Player?.PlayerId ?? 0,
 			Players = PlayerTable()
 		};
-		_t.Send(peer, Channel.Control, joinAccept.Encode());
-		List<TypeKeyDef> list2 = Keys.All();
-		if (list2.Count > 0)
+		_t.Send(peer, Channel.Control, accept.Encode());
+		List<TypeKeyDef> typeKeys = Keys.All();
+		if (typeKeys.Count > 0)
 		{
-			_t.Send(peer, Channel.Control, TypeKeysMessage.Encode(list2));
+			_t.Send(peer, Channel.Control, TypeKeysMessage.Encode(typeKeys));
 		}
-		List<SignalKeyDef> list3 = SignalKeys.All();
-		if (list3.Count > 0)
+		List<SignalKeyDef> signalKeys = SignalKeys.All();
+		if (signalKeys.Count > 0)
 		{
-			_t.Send(peer, Channel.Control, SignalKeysMessage.Encode(list3));
+			_t.Send(peer, Channel.Control, SignalKeysMessage.Encode(signalKeys));
 		}
-		int num4;
-		long num5;
+		int blobCount;
+		long blobBytes;
 		if (blobs != null)
 		{
-			(num4, num5) = SendBlobs(value, blobs.Snapshot, blobs.Data);
+			(blobCount, blobBytes) = SendBlobs(client, blobs.Snapshot, blobs.Data);
 		}
 		else
 		{
-			num4 = 0;
-			num5 = 0L;
+			blobCount = 0;
+			blobBytes = 0L;
 		}
 		_t.Send(peer, Channel.Bulk, SnapshotMessage.Encode(snapshot, blobs?.Snapshot));
-		for (int i = 0; i < list.Count; i++)
+		for (int i = 0; i < encoded.Count; i++)
 		{
 			if (blobs != null)
 			{
-				(int Count, long Bytes) tuple2 = SendBlobs(value, parts[i].RequiredBlobs, blobs.Data);
-				int item = tuple2.Count;
-				long item2 = tuple2.Bytes;
-				num4 += item;
-				num5 += item2;
+				var (count, bytes) = SendBlobs(client, parts[i].RequiredBlobs, blobs.Data);
+				blobCount += count;
+				blobBytes += bytes;
 			}
-			_t.Send(peer, Channel.Bulk, list[i]);
+			_t.Send(peer, Channel.Bulk, encoded[i]);
 		}
 		lock (_sync)
 		{
-			value.LifecycleMessages += list.Count;
-			value.LifecycleBytes += num3 + snapshot.Length;
+			client.LifecycleMessages += encoded.Count;
+			client.LifecycleBytes += worldBytes + snapshot.Length;
 		}
-		int num6 = 0;
+		int missing = 0;
 		if (blobs != null)
 		{
-			foreach (byte[] value2 in blobs.Data.Values)
+			foreach (byte[] blob in blobs.Data.Values)
 			{
-				num6 += ((value2 == null) ? 1 : 0);
+				missing += blob == null ? 1 : 0;
 			}
 		}
-		_log.Info($"sync(host): world for {peer} '{value.Name}' queued: snapshot {MpLogExtensions.Bytes(snapshot.Length)}, world {parts.Count} part(s) {MpLogExtensions.Bytes(num3)} ({num} entities, {num2} with captured data), {list2.Count} type keys, {num4} offloaded blobs {MpLogExtensions.Bytes(num5)} ({blobs?.Snapshot.Count ?? 0} for the snapshot, {num6} missing on this PC); {summary}");
+		_log.Info($"sync(host): world for {peer} '{client.Name}' queued: snapshot {MpLogExtensions.Bytes(snapshot.Length)}, world {parts.Count} part(s) {MpLogExtensions.Bytes(worldBytes)} ({entities} entities, {withData} with captured data), {typeKeys.Count} type keys, {blobCount} offloaded blobs {MpLogExtensions.Bytes(blobBytes)} ({blobs?.Snapshot.Count ?? 0} for the snapshot, {missing} missing on this PC); {summary}");
 	}
 
 	private (int Count, long Bytes) SendBlobs(RemoteClient c, IReadOnlyList<Guid> ids, IReadOnlyDictionary<Guid, byte[]?> data)
@@ -1322,32 +1269,32 @@ public sealed partial class HostSession : IStorySink
 		{
 			return (Count: 0, Bytes: 0L);
 		}
-		List<KeyValuePair<Guid, byte[]>> list = new List<KeyValuePair<Guid, byte[]>>();
-		long num = 0L;
+		var toSend = new List<KeyValuePair<Guid, byte[]>>();
+		long bytes = 0L;
 		lock (_sync)
 		{
 			foreach (Guid id in ids)
 			{
-				if (data.TryGetValue(id, out byte[] value) && c.SentBlobs.Add(id))
+				if (data.TryGetValue(id, out byte[] blob) && c.SentBlobs.Add(id))
 				{
-					list.Add(new KeyValuePair<Guid, byte[]>(id, value));
-					num += value?.Length ?? 0;
+					toSend.Add(new KeyValuePair<Guid, byte[]>(id, blob));
+					bytes += blob?.Length ?? 0;
 				}
 			}
-			c.BlobsSent += list.Count;
-			c.BlobBytes += num;
+			c.BlobsSent += toSend.Count;
+			c.BlobBytes += bytes;
 		}
-		if (list.Count == 0)
+		if (toSend.Count == 0)
 		{
 			return (Count: 0, Bytes: 0L);
 		}
-		List<byte[]> list2 = new List<byte[]>();
-		BlobDataMessage.Pack(list, 1048576, list2);
-		foreach (byte[] item in list2)
+		var messages = new List<byte[]>();
+		BlobDataMessage.Pack(toSend, 1048576, messages);
+		foreach (byte[] msg in messages)
 		{
-			_t.Send(c.Peer, Channel.Bulk, item);
+			_t.Send(c.Peer, Channel.Bulk, msg);
 		}
-		return (Count: list.Count, Bytes: num);
+		return (Count: toSend.Count, Bytes: bytes);
 	}
 
 	public int PublishBlobs(IReadOnlyDictionary<Guid, byte[]?> data)
@@ -1356,38 +1303,38 @@ public sealed partial class HostSession : IStorySink
 		{
 			return 0;
 		}
-		List<RemoteClient> list;
+		List<RemoteClient> synced;
 		lock (_sync)
 		{
-			list = new List<RemoteClient>();
-			foreach (RemoteClient value in _clients.Values)
+			synced = new List<RemoteClient>();
+			foreach (RemoteClient client in _clients.Values)
 			{
-				if (value.Status == ClientStatus.Synced)
+				if (client.Status == ClientStatus.Synced)
 				{
-					list.Add(value);
+					synced.Add(client);
 				}
 			}
 		}
-		List<Guid> ids = new List<Guid>(data.Keys);
-		int num = 0;
-		foreach (RemoteClient item in list)
+		var ids = new List<Guid>(data.Keys);
+		int sent = 0;
+		foreach (RemoteClient client in synced)
 		{
-			num += SendBlobs(item, ids, data).Count;
+			sent += SendBlobs(client, ids, data).Count;
 		}
-		return num;
+		return sent;
 	}
 
 	public void FailCapture(PeerId peer, string reason)
 	{
 		lock (_sync)
 		{
-			if (_clients.TryGetValue(peer, out RemoteClient value))
+			if (_clients.TryGetValue(peer, out RemoteClient client))
 			{
-				if (value.Status == ClientStatus.Synced)
+				if (client.Status == ClientStatus.Synced)
 				{
 					_syncedCount--;
 				}
-				value.Status = ClientStatus.Connected;
+				client.Status = ClientStatus.Connected;
 			}
 		}
 		Reject(peer, "the host could not capture its world: " + reason);
@@ -1395,23 +1342,23 @@ public sealed partial class HostSession : IStorySink
 
 	public int PublishLifecycle(byte[] encoded)
 	{
-		int num = 0;
+		int sent = 0;
 		lock (_sync)
 		{
-			foreach (RemoteClient value in _clients.Values)
+			foreach (RemoteClient client in _clients.Values)
 			{
-				if (value.Status == ClientStatus.Synced)
+				if (client.Status == ClientStatus.Synced)
 				{
-					byte[] array = (byte[])encoded.Clone();
-					EntityBundleMessage.SetLifeSeq(array, value.NextLifeSeq++);
-					Channel channel = ((array.Length > 8192) ? Channel.Bulk : Channel.Control);
-					_t.Send(value.Peer, channel, array);
-					value.LifecycleMessages++;
-					value.LifecycleBytes += array.Length;
-					num++;
+					byte[] copy = (byte[])encoded.Clone();
+					EntityBundleMessage.SetLifeSeq(copy, client.NextLifeSeq++);
+					Channel channel = copy.Length > 8192 ? Channel.Bulk : Channel.Control;
+					_t.Send(client.Peer, channel, copy);
+					client.LifecycleMessages++;
+					client.LifecycleBytes += copy.Length;
+					sent++;
 				}
 			}
-			return num;
+			return sent;
 		}
 	}
 
@@ -1419,17 +1366,17 @@ public sealed partial class HostSession : IStorySink
 	{
 		lock (_sync)
 		{
-			if (!_clients.TryGetValue(peer, out RemoteClient value) || value.Status != ClientStatus.Synced)
+			if (!_clients.TryGetValue(peer, out RemoteClient client) || client.Status != ClientStatus.Synced)
 			{
 				return false;
 			}
-			EntityBundleMessage.SetLifeSeq(encoded, value.NextLifeSeq++);
-			Channel channel = ((encoded.Length > 8192) ? Channel.Bulk : Channel.Control);
-			_t.Send(value.Peer, channel, encoded);
-			value.LifecycleMessages++;
-			value.LifecycleBytes += encoded.Length;
-			value.P2.ObservableBatches++;
-			value.P2.ObservableBytesOut += encoded.Length;
+			EntityBundleMessage.SetLifeSeq(encoded, client.NextLifeSeq++);
+			Channel channel = encoded.Length > 8192 ? Channel.Bulk : Channel.Control;
+			_t.Send(client.Peer, channel, encoded);
+			client.LifecycleMessages++;
+			client.LifecycleBytes += encoded.Length;
+			client.P2.ObservableBatches++;
+			client.P2.ObservableBytesOut += encoded.Length;
 			return true;
 		}
 	}
@@ -1457,22 +1404,21 @@ public sealed partial class HostSession : IStorySink
 
 	public void WorldChanged(string reason)
 	{
-		List<PeerId> list = new List<PeerId>();
+		var peers = new List<PeerId>();
 		lock (_sync)
 		{
-			foreach (RemoteClient value in _clients.Values)
+			foreach (RemoteClient client in _clients.Values)
 			{
-				ClientStatus status = value.Status;
-				if ((status == ClientStatus.CaptureRequested || status == ClientStatus.Synced) ? true : false)
+				if (client.Status is ClientStatus.CaptureRequested or ClientStatus.Synced)
 				{
-					list.Add(value.Peer);
+					peers.Add(client.Peer);
 				}
 			}
 		}
-		foreach (PeerId item in list)
+		foreach (PeerId peer in peers)
 		{
-			_log.Warn($"sync(host): disconnecting {item}: {reason}");
-			_t.Disconnect(item, 1000, reason);
+			_log.Warn($"sync(host): disconnecting {peer}: {reason}");
+			_t.Disconnect(peer, 1000, reason);
 		}
 	}
 
@@ -1489,123 +1435,123 @@ public sealed partial class HostSession : IStorySink
 
 	public void Tick()
 	{
-		long num = _clock();
+		long now = _clock();
 		var sw = System.Diagnostics.Stopwatch.StartNew();
-		TickAdmin(num);
+		TickAdmin(now);
 		long admin = sw.ElapsedMilliseconds;
-		List<RemoteClient> list;
+		List<RemoteClient> synced;
 		lock (_sync)
 		{
-			list = new List<RemoteClient>(_clients.Count);
-			foreach (RemoteClient value in _clients.Values)
+			synced = new List<RemoteClient>(_clients.Count);
+			foreach (RemoteClient client in _clients.Values)
 			{
-				if (value.Status == ClientStatus.Synced)
+				if (client.Status == ClientStatus.Synced)
 				{
-					list.Add(value);
+					synced.Add(client);
 				}
 			}
 		}
-		uint result;
-		while (_despawnedIn.TryDequeue(out result))
+		uint netId;
+		while (_despawnedIn.TryDequeue(out netId))
 		{
-			foreach (RemoteClient item in list)
+			foreach (RemoteClient client in synced)
 			{
-				item.State.Remove(result);
+				client.State.Remove(netId);
 			}
 		}
 		long locked = sw.ElapsedMilliseconds;
-		StateEntry result2;
-		while (_stateIn.TryDequeue(out result2))
+		StateEntry entry;
+		while (_stateIn.TryDequeue(out entry))
 		{
-			foreach (RemoteClient item2 in list)
+			foreach (RemoteClient client in synced)
 			{
-				item2.State.Put(in result2, num);
+				client.State.Put(in entry, now);
 			}
 		}
-		List<TypeKeyDef> list2 = Keys.TakeUnannounced();
-		if (list2.Count > 0)
+		List<TypeKeyDef> newKeys = Keys.TakeUnannounced();
+		if (newKeys.Count > 0)
 		{
-			byte[] array = TypeKeysMessage.Encode(list2);
-			foreach (RemoteClient item3 in list)
+			byte[] msg = TypeKeysMessage.Encode(newKeys);
+			foreach (RemoteClient client in synced)
 			{
-				_t.Send(item3.Peer, Channel.Control, array);
+				_t.Send(client.Peer, Channel.Control, msg);
 			}
 		}
-		bool flag = num - _lastEmitMs >= _o.StateEmitIntervalMs;
-		if (flag)
+		bool emit = now - _lastEmitMs >= _o.StateEmitIntervalMs;
+		if (emit)
 		{
-			_lastEmitMs = num;
+			_lastEmitMs = now;
 		}
-		foreach (RemoteClient item4 in list)
+		foreach (RemoteClient client in synced)
 		{
-			if (flag)
+			if (emit)
 			{
 				_out.Clear();
-				item4.State.Emit(num, 1100, _out);
-				foreach (byte[] item5 in _out)
+				client.State.Emit(now, 1100, _out);
+				foreach (byte[] msg in _out)
 				{
-					_t.Send(item4.Peer, Channel.State, item5);
-					item4.StateBytes += item5.Length;
+					_t.Send(client.Peer, Channel.State, msg);
+					client.StateBytes += msg.Length;
 				}
 			}
-			if (num - item4.LastStatusMs >= _o.StatusIntervalMs)
+			if (now - client.LastStatusMs >= _o.StatusIntervalMs)
 			{
-				LogStatus(item4, num);
+				LogStatus(client, now);
 			}
 		}
 		if (sw.ElapsedMilliseconds > 100)
 		{
 			_log.Warn($"sync(host): tick took {sw.ElapsedMilliseconds} ms (admin {admin}, clients lock {locked - admin}, state drain + send {sw.ElapsedMilliseconds - locked})");
 		}
-		if (num - _lastWaitCheckMs < 1000)
+		if (now - _lastWaitCheckMs < 1000)
 		{
 			return;
 		}
-		_lastWaitCheckMs = num;
+		_lastWaitCheckMs = now;
 		if (!_world.WorldReady)
 		{
 			return;
 		}
-		List<RemoteClient> list3 = new List<RemoteClient>();
+		var waiting = new List<RemoteClient>();
 		lock (_sync)
 		{
-			foreach (RemoteClient value2 in _clients.Values)
+			foreach (RemoteClient client in _clients.Values)
 			{
-				if (value2.Status == ClientStatus.WaitingForWorld)
+				if (client.Status == ClientStatus.WaitingForWorld)
 				{
-					list3.Add(value2);
+					waiting.Add(client);
 				}
 			}
 		}
-		foreach (RemoteClient item6 in list3)
+		foreach (RemoteClient client in waiting)
 		{
-			RequestCapture(item6);
+			RequestCapture(client);
 		}
 	}
 
 	private void LogStatus(RemoteClient c, long now)
 	{
-		double num = ((c.LastStatusMs == 0L) ? Math.Max(1.0, (double)(now - c.SyncedMs) / 1000.0) : ((double)(now - c.LastStatusMs) / 1000.0));
-		List<(string, double)> list = new List<(string, double)>();
-		foreach (var (key, num4) in c.State.SentByKey)
+		double seconds = c.LastStatusMs == 0L ? Math.Max(1.0, (now - c.SyncedMs) / 1000.0) : (now - c.LastStatusMs) / 1000.0;
+		var rates = new List<(string Name, double PerSec)>();
+		foreach (var (key, sent) in c.State.SentByKey)
 		{
-			c.SentByKeyAtLastStatus.TryGetValue(key, out var value);
-			if (num4 > value)
+			c.SentByKeyAtLastStatus.TryGetValue(key, out var before);
+			if (sent > before)
 			{
-				list.Add((KeyName(key), (double)(num4 - value) / num));
+				rates.Add((KeyName(key), (sent - before) / seconds));
 			}
-			c.SentByKeyAtLastStatus[key] = num4;
+			c.SentByKeyAtLastStatus[key] = sent;
 		}
-		list.Sort(((string Name, double PerSec) a, (string Name, double PerSec) b) => b.PerSec.CompareTo(a.PerSec));
-		string value2 = ((list.Count == 0) ? "none" : string.Join(", ", list.Take(8).Select(((string Name, double PerSec) r) => $"{r.Name} {r.PerSec:0}/s")));
-		long num5 = c.StateBytes - c.StateBytesAtLastStatus;
-		long num6 = c.State.Sent - c.SentAtLastStatus;
+		rates.Sort((a, b) => b.PerSec.CompareTo(a.PerSec));
+		string topRates = rates.Count == 0 ? "none" : string.Join(", ", rates.Take(8).Select(r => $"{r.Name} {r.PerSec:0}/s"));
+		long stateBytes = c.StateBytes - c.StateBytesAtLastStatus;
+		long entries = c.State.Sent - c.SentAtLastStatus;
 		c.LastStatusMs = now;
 		c.StateBytesAtLastStatus = c.StateBytes;
 		c.SentAtLastStatus = c.State.Sent;
 		StateCoalescer state = c.State;
-		_log.Info($"sync(host) {c.Peer} '{c.Name}': state {(double)num5 / 1024.0 / num:0.0} KiB/s ({(double)num6 / num:0}/s entries, {state.Messages} msgs total), in {state.Puts} coalesced {state.Coalesced} capped {state.DeferredByCap} budget-deferred {state.DeferredByBudget} dropped(cap 0) {state.DroppedByCap}, dirty {state.DirtyCount}/{state.EntryCount}; lifecycle {c.LifecycleMessages} msgs {MpLogExtensions.Bytes(c.LifecycleBytes)}; blobs {c.BlobsSent} ({MpLogExtensions.Bytes(c.BlobBytes)}); type keys {Keys.Count}; client phase {c.LastPhase}");
-		_log.Info($"sync(host) {c.Peer} send rates: {value2}");
+		_log.Info($"sync(host) {c.Peer} '{c.Name}': state {stateBytes / 1024.0 / seconds:0.0} KiB/s ({entries / seconds:0}/s entries, {state.Messages} msgs total), in {state.Puts} coalesced {state.Coalesced} capped {state.DeferredByCap} budget-deferred {state.DeferredByBudget} dropped(cap 0) {state.DroppedByCap}, dirty {state.DirtyCount}/{state.EntryCount}; lifecycle {c.LifecycleMessages} msgs {MpLogExtensions.Bytes(c.LifecycleBytes)}; blobs {c.BlobsSent} ({MpLogExtensions.Bytes(c.BlobBytes)}); type keys {Keys.Count}; client phase {c.LastPhase}");
+		_log.Info($"sync(host) {c.Peer} send rates: {topRates}");
 		PlayerRecord player = c.Player;
 		if (player == null)
 		{
@@ -1613,112 +1559,24 @@ public sealed partial class HostSession : IStorySink
 		}
 		lock (c.Input)
 		{
-			IMpLog log = _log;
-			DefaultInterpolatedStringHandler defaultInterpolatedStringHandler = new DefaultInterpolatedStringHandler(337, 28);
-			defaultInterpolatedStringHandler.AppendLiteral("sync(host) ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.Peer);
-			defaultInterpolatedStringHandler.AppendLiteral(" ClientId ");
-			defaultInterpolatedStringHandler.AppendFormatted(player.ClientId);
-			defaultInterpolatedStringHandler.AppendLiteral(" '");
-			defaultInterpolatedStringHandler.AppendFormatted(player.Name);
-			defaultInterpolatedStringHandler.AppendLiteral("' (");
-			defaultInterpolatedStringHandler.AppendFormatted((player.IdentityId != 0L) ? $"IdentityId {player.IdentityId}" : "host's identity");
-			(int, int)? lastStatus = c.LastStatus;
-			string value3;
-			if (lastStatus.HasValue)
-			{
-				(int, int) valueOrDefault = lastStatus.GetValueOrDefault();
-				value3 = $", PCU {valueOrDefault.Item1}/{valueOrDefault.Item2}";
-			}
-			else
-			{
-				value3 = "";
-			}
-			defaultInterpolatedStringHandler.AppendFormatted(value3);
-			defaultInterpolatedStringHandler.AppendLiteral("): character ");
-			string? value4;
-			if (player.CharacterNetId != 0)
-			{
-				value4 = $"NetworkId {player.CharacterNetId}";
-			}
-			else
-			{
-				value4 = (player.CharacterRequested ? "requested" : "none");
-			}
-			defaultInterpolatedStringHandler.AppendFormatted(value4);
-			defaultInterpolatedStringHandler.AppendLiteral("; ");
-			defaultInterpolatedStringHandler.AppendLiteral("input ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.InputMessages);
-			defaultInterpolatedStringHandler.AppendLiteral(" msgs / ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.InputEntries);
-			defaultInterpolatedStringHandler.AppendLiteral(" values in, ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.InputApplied);
-			defaultInterpolatedStringHandler.AppendLiteral(" applied, ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.InputRejected);
-			defaultInterpolatedStringHandler.AppendLiteral(" rejected, ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.InputRemoved);
-			defaultInterpolatedStringHandler.AppendLiteral(" removals, ");
-			defaultInterpolatedStringHandler.AppendLiteral("arrival gaps > 50 ms ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.InputGaps);
-			defaultInterpolatedStringHandler.AppendLiteral(" (largest ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.InputGapMaxMs);
-			defaultInterpolatedStringHandler.AppendLiteral(" ms), host ticks with / without a fresh input message ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.TicksWithInput);
-			defaultInterpolatedStringHandler.AppendLiteral(" / ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.TicksWithoutInput);
-			defaultInterpolatedStringHandler.AppendLiteral("; ");
-			defaultInterpolatedStringHandler.AppendLiteral("commands ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.CommandsIn);
-			defaultInterpolatedStringHandler.AppendLiteral(" in, ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.CommandsApplied);
-			defaultInterpolatedStringHandler.AppendLiteral(" applied, ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.CommandsRejected);
-			defaultInterpolatedStringHandler.AppendLiteral(" rejected; ");
-			defaultInterpolatedStringHandler.AppendLiteral("signals out ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.P2.SignalsOut);
-			defaultInterpolatedStringHandler.AppendLiteral(" in ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.P2.SignalBatches);
-			defaultInterpolatedStringHandler.AppendLiteral(" batches (");
-			defaultInterpolatedStringHandler.AppendFormatted(MpLogExtensions.Bytes(c.P2.SignalBytesOut));
-			defaultInterpolatedStringHandler.AppendLiteral("), names ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.P2.StringsOut);
-			defaultInterpolatedStringHandler.AppendLiteral("; ");
-			defaultInterpolatedStringHandler.AppendLiteral("stories in ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.P2.StoriesIn);
-			defaultInterpolatedStringHandler.AppendLiteral(", moves out ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.P2.StoryMovesOut);
-			defaultInterpolatedStringHandler.AppendLiteral(", finished ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.P2.StoryFinishesOut);
-			defaultInterpolatedStringHandler.AppendLiteral("; ");
-			defaultInterpolatedStringHandler.AppendLiteral("observables out ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.P2.ObservableBatches);
-			defaultInterpolatedStringHandler.AppendLiteral(" batches (");
-			defaultInterpolatedStringHandler.AppendFormatted(MpLogExtensions.Bytes(c.P2.ObservableBytesOut));
-			defaultInterpolatedStringHandler.AppendLiteral("), edits in ");
-			defaultInterpolatedStringHandler.AppendFormatted(c.P2.ObservableEditsIn);
-			defaultInterpolatedStringHandler.AppendLiteral("; ");
-			IMpLog mpLog = log;
-			string text = defaultInterpolatedStringHandler.ToStringAndClear();
-			string? text2;
-			if (c.Look != null)
-			{
-				text2 = $"{c.Look.Describe()}, {c.LookControlWrites} ControlData written";
-			}
-			else
-			{
-				text2 = (_o.LookTotals ? "look totals: none yet" : $"look totals ignored ({c.LookIgnored}, -y51online:predict:off)");
-			}
-			mpLog.Info(text + text2);
+			_log.Info($"sync(host) {c.Peer} ClientId {player.ClientId} '{player.Name}' ({(player.IdentityId != 0L ? $"IdentityId {player.IdentityId}" : "host's identity")}{(c.LastStatus is { } status ? $", PCU {status.Pcu}/{status.Max}" : "")}): character {(player.CharacterNetId != 0 ? $"NetworkId {player.CharacterNetId}" : player.CharacterRequested ? "requested" : "none")}; "
+				+ $"input {c.InputMessages} msgs / {c.InputEntries} values in, {c.InputApplied} applied, {c.InputRejected} rejected, {c.InputRemoved} removals, "
+				+ $"arrival gaps > 50 ms {c.InputGaps} (largest {c.InputGapMaxMs} ms), host ticks with / without a fresh input message {c.TicksWithInput} / {c.TicksWithoutInput}; "
+				+ $"commands {c.CommandsIn} in, {c.CommandsApplied} applied, {c.CommandsRejected} rejected; "
+				+ $"signals out {c.P2.SignalsOut} in {c.P2.SignalBatches} batches ({MpLogExtensions.Bytes(c.P2.SignalBytesOut)}), names {c.P2.StringsOut}; "
+				+ $"stories in {c.P2.StoriesIn}, moves out {c.P2.StoryMovesOut}, finished {c.P2.StoryFinishesOut}; "
+				+ $"observables out {c.P2.ObservableBatches} batches ({MpLogExtensions.Bytes(c.P2.ObservableBytesOut)}), edits in {c.P2.ObservableEditsIn}; "
+				+ (c.Look != null ? $"{c.Look.Describe()}, {c.LookControlWrites} ControlData written" : _o.LookTotals ? "look totals: none yet" : $"look totals ignored ({c.LookIgnored}, -y51online:predict:off)"));
 		}
 	}
 
 	private string KeyName(ushort key)
 	{
-		foreach (TypeKeyDef item in Keys.All())
+		foreach (TypeKeyDef def in Keys.All())
 		{
-			if (item.Key == key)
+			if (def.Key == key)
 			{
-				return item.ShortName;
+				return def.ShortName;
 			}
 		}
 		return $"key#{key}";
@@ -1728,8 +1586,7 @@ public sealed partial class HostSession : IStorySink
 	{
 		lock (_sync)
 		{
-			RemoteClient value;
-			return _clients.TryGetValue(peer, out value) ? new ClientStatus?(value.Status) : ((ClientStatus?)null);
+			return _clients.TryGetValue(peer, out RemoteClient client) ? client.Status : null;
 		}
 	}
 }

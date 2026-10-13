@@ -21,17 +21,17 @@ public sealed class EntityBundleMessage
 
 	public byte[] Bundle = Array.Empty<byte>();
 
-	public List<EntityLocator> Entities = new List<EntityLocator>();
+	public List<EntityLocator> Entities = new();
 
-	public List<(uint NetId, List<DataBlob> Data)> Data = new List<(uint, List<DataBlob>)>();
+	public List<(uint NetId, List<DataBlob> Data)> Data = new();
 
-	public List<(uint Child, uint Parent)> Parents = new List<(uint, uint)>();
+	public List<(uint Child, uint Parent)> Parents = new();
 
-	public List<uint> Staged = new List<uint>();
+	public List<uint> Staged = new();
 
-	public List<uint> Skipped = new List<uint>();
+	public List<uint> Skipped = new();
 
-	public List<Guid> RequiredBlobs = new List<Guid>();
+	public List<Guid> RequiredBlobs = new();
 
 	public const byte CompressedFlag = 128;
 
@@ -45,49 +45,50 @@ public sealed class EntityBundleMessage
 	{
 		get
 		{
-			int num = 0;
-			foreach (var datum in Data)
+			int total = 0;
+			foreach (var (_, blobs) in Data)
 			{
-				foreach (DataBlob item in datum.Data)
+				foreach (DataBlob blob in blobs)
 				{
-					num += item.Bytes.Length;
+					total += blob.Bytes.Length;
 				}
 			}
-			return num;
+			return total;
 		}
 	}
 
 	public byte[] Encode()
 	{
-		WireWriter wireWriter = new WireWriter(64 + Bundle.Length + Entities.Count * 12 + DataBytes + Data.Count * 8);
-		EncodeBody(wireWriter);
-		byte[] array = wireWriter.ToArray();
-		RawBodyBytes = array.Length;
-		byte b = Kind;
-		byte[] array2 = array;
-		if (array.Length >= 65536)
+		var bodyWriter = new WireWriter(64 + Bundle.Length + Entities.Count * 12 + DataBytes + Data.Count * 8);
+		EncodeBody(bodyWriter);
+		byte[] raw = bodyWriter.ToArray();
+		RawBodyBytes = raw.Length;
+		byte kind = Kind;
+		byte[] body = raw;
+		if (raw.Length >= CompressAboveBytes)
 		{
-			using MemoryStream memoryStream = new MemoryStream(array.Length / 4 + 64);
-			using (DeflateStream deflateStream = new DeflateStream(memoryStream, CompressionLevel.Fastest, leaveOpen: true))
+			using var ms = new MemoryStream(raw.Length / 4 + 64);
+			using (var deflate = new DeflateStream(ms, CompressionLevel.Fastest, leaveOpen: true))
 			{
-				deflateStream.Write(array, 0, array.Length);
+				deflate.Write(raw, 0, raw.Length);
 			}
-			if (memoryStream.Length + 4 < array.Length)
+			// Compressed body is prefixed with the raw length; only used when it actually saves bytes.
+			if (ms.Length + 4 < raw.Length)
 			{
-				byte[] array3 = new byte[4 + memoryStream.Length];
-				BinaryPrimitives.WriteInt32LittleEndian(array3, array.Length);
-				memoryStream.Position = 0L;
-				memoryStream.Read(array3, 4, (int)memoryStream.Length);
-				array2 = array3;
-				b |= 0x80;
+				byte[] compressed = new byte[4 + ms.Length];
+				BinaryPrimitives.WriteInt32LittleEndian(compressed, raw.Length);
+				ms.Position = 0L;
+				ms.Read(compressed, 4, (int)ms.Length);
+				body = compressed;
+				kind |= CompressedFlag;
 			}
 		}
-		WireBodyBytes = array2.Length;
-		WireWriter wireWriter2 = new WireWriter(16 + array2.Length);
-		wireWriter2.U8(49).U32(LifeSeq).U8(b)
+		WireBodyBytes = body.Length;
+		var w = new WireWriter(16 + body.Length);
+		w.U8(49).U32(LifeSeq).U8(kind)
 			.U32(HostTick)
-			.Bytes(array2);
-		return wireWriter2.ToArray();
+			.Bytes(body);
+		return w.ToArray();
 	}
 
 	private void EncodeBody(WireWriter w)
@@ -97,128 +98,124 @@ public sealed class EntityBundleMessage
 		foreach (EntityLocator entity in Entities)
 		{
 			w.U32(entity.NetId).I32(entity.Root).U8((byte)entity.Path.Length);
-			int[] path = entity.Path;
-			foreach (int v in path)
+			foreach (int index in entity.Path)
 			{
-				w.I32(v);
+				w.I32(index);
 			}
 		}
 		w.I32(Data.Count);
-		foreach (var (v2, list) in Data)
+		foreach (var (netId, blobs) in Data)
 		{
-			w.U32(v2).U8((byte)list.Count);
-			foreach (DataBlob item in list)
+			w.U32(netId).U8((byte)blobs.Count);
+			foreach (DataBlob blob in blobs)
 			{
-				w.U16(item.Key).U16((ushort)item.Bytes.Length).Bytes(item.Bytes);
+				w.U16(blob.Key).U16((ushort)blob.Bytes.Length).Bytes(blob.Bytes);
 			}
 		}
 		w.I32(Parents.Count);
-		foreach (var (v3, v4) in Parents)
+		foreach (var (child, parent) in Parents)
 		{
-			w.U32(v3).U32(v4);
+			w.U32(child).U32(parent);
 		}
 		w.I32(Staged.Count);
-		foreach (uint item2 in Staged)
+		foreach (uint netId in Staged)
 		{
-			w.U32(item2);
+			w.U32(netId);
 		}
 		w.I32(Skipped.Count);
-		foreach (uint item3 in Skipped)
+		foreach (uint netId in Skipped)
 		{
-			w.U32(item3);
+			w.U32(netId);
 		}
 		WireGuids.Write(w, RequiredBlobs);
 	}
 
 	public static EntityBundleMessage Decode(ReadOnlySpan<byte> d)
 	{
-		WireReader wireReader = new WireReader(d.Slice(1));
-		EntityBundleMessage entityBundleMessage = new EntityBundleMessage
+		var header = new WireReader(d.Slice(1));
+		var msg = new EntityBundleMessage
 		{
-			LifeSeq = wireReader.U32(),
-			Kind = wireReader.U8(),
-			HostTick = wireReader.U32()
+			LifeSeq = header.U32(),
+			Kind = header.U8(),
+			HostTick = header.U32()
 		};
-		ReadOnlySpan<byte> readOnlySpan = d.Slice(10);
-		byte[] array = null;
-		if ((entityBundleMessage.Kind & 0x80) != 0)
+		ReadOnlySpan<byte> body = d.Slice(10);
+		byte[] inflated = null;
+		if ((msg.Kind & CompressedFlag) != 0)
 		{
-			entityBundleMessage.Kind &= 127;
-			int num = BinaryPrimitives.ReadInt32LittleEndian(readOnlySpan);
-			if (num < 0 || num > 536870912)
+			msg.Kind &= 127;
+			int rawLength = BinaryPrimitives.ReadInt32LittleEndian(body);
+			if (rawLength < 0 || rawLength > 536870912)
 			{
-				throw new InvalidDataException($"bundle body {num} B");
+				throw new InvalidDataException($"bundle body {rawLength} B");
 			}
-			array = new byte[num];
-			using DeflateStream deflateStream = new DeflateStream(new MemoryStream(readOnlySpan.Slice(4).ToArray()), CompressionMode.Decompress);
-			int num2;
-			for (int i = 0; i < num; i += num2)
+			inflated = new byte[rawLength];
+			using var deflate = new DeflateStream(new MemoryStream(body.Slice(4).ToArray()), CompressionMode.Decompress);
+			int read;
+			for (int pos = 0; pos < rawLength; pos += read)
 			{
-				num2 = deflateStream.Read(array, i, num - i);
-				if (num2 <= 0)
+				read = deflate.Read(inflated, pos, rawLength - pos);
+				if (read <= 0)
 				{
-					throw new InvalidDataException($"bundle body ended at {i} of {num} B");
+					throw new InvalidDataException($"bundle body ended at {pos} of {rawLength} B");
 				}
 			}
-			entityBundleMessage.WireBodyBytes = readOnlySpan.Length;
-			readOnlySpan = array;
+			msg.WireBodyBytes = body.Length;
+			body = inflated;
 		}
-		entityBundleMessage.RawBodyBytes = readOnlySpan.Length;
-		if (array == null)
+		msg.RawBodyBytes = body.Length;
+		if (inflated is null)
 		{
-			entityBundleMessage.WireBodyBytes = readOnlySpan.Length;
+			msg.WireBodyBytes = body.Length;
 		}
-		WireReader r = new WireReader(readOnlySpan);
-		entityBundleMessage.Bundle = r.Bytes(r.I32()).ToArray();
-		int num3 = r.I32();
-		entityBundleMessage.Entities = new List<EntityLocator>(num3);
-		for (int j = 0; j < num3; j++)
+		var r = new WireReader(body);
+		msg.Bundle = r.Bytes(r.I32()).ToArray();
+		int count = r.I32();
+		msg.Entities = new List<EntityLocator>(count);
+		for (int i = 0; i < count; i++)
 		{
 			uint netId = r.U32();
 			int root = r.I32();
-			int[] array2 = new int[r.U8()];
-			for (int k = 0; k < array2.Length; k++)
+			int[] path = new int[r.U8()];
+			for (int k = 0; k < path.Length; k++)
 			{
-				array2[k] = r.I32();
+				path[k] = r.I32();
 			}
-			entityBundleMessage.Entities.Add(new EntityLocator(netId, root, array2));
+			msg.Entities.Add(new EntityLocator(netId, root, path));
 		}
-		num3 = r.I32();
-		entityBundleMessage.Data = new List<(uint, List<DataBlob>)>(num3);
-		for (int l = 0; l < num3; l++)
+		count = r.I32();
+		msg.Data = new List<(uint, List<DataBlob>)>(count);
+		for (int i = 0; i < count; i++)
 		{
-			uint item = r.U32();
-			int num4 = r.U8();
-			List<DataBlob> list = new List<DataBlob>(num4);
-			for (int m = 0; m < num4; m++)
+			uint netId = r.U32();
+			int blobCount = r.U8();
+			var blobs = new List<DataBlob>(blobCount);
+			for (int k = 0; k < blobCount; k++)
 			{
 				ushort key = r.U16();
-				int n = r.U16();
-				list.Add(new DataBlob(key, r.Bytes(n).ToArray()));
+				int length = r.U16();
+				blobs.Add(new DataBlob(key, r.Bytes(length).ToArray()));
 			}
-			entityBundleMessage.Data.Add((item, list));
+			msg.Data.Add((netId, blobs));
 		}
-		num3 = r.I32();
-		for (int num5 = 0; num5 < num3; num5++)
+		count = r.I32();
+		for (int i = 0; i < count; i++)
 		{
-			entityBundleMessage.Parents.Add((r.U32(), r.U32()));
+			msg.Parents.Add((r.U32(), r.U32()));
 		}
-		num3 = r.I32();
-		for (int num6 = 0; num6 < num3; num6++)
+		count = r.I32();
+		for (int i = 0; i < count; i++)
 		{
-			entityBundleMessage.Staged.Add(r.U32());
+			msg.Staged.Add(r.U32());
 		}
-		num3 = r.I32();
-		for (int num7 = 0; num7 < num3; num7++)
+		count = r.I32();
+		for (int i = 0; i < count; i++)
 		{
-			entityBundleMessage.Skipped.Add(r.U32());
+			msg.Skipped.Add(r.U32());
 		}
-		entityBundleMessage.RequiredBlobs = WireGuids.Read(ref r);
-		return entityBundleMessage;
+		msg.RequiredBlobs = WireGuids.Read(ref r);
+		return msg;
 	}
 
-	public static void SetLifeSeq(byte[] encoded, uint seq)
-	{
-		BinaryPrimitives.WriteUInt32LittleEndian(encoded.AsSpan(1), seq);
-	}
+	public static void SetLifeSeq(byte[] encoded, uint seq) => BinaryPrimitives.WriteUInt32LittleEndian(encoded.AsSpan(1), seq);
 }

@@ -8,55 +8,55 @@ public static class BlobDataMessage
 {
 	public static byte[] Encode(IReadOnlyList<BlobPiece> pieces)
 	{
-		int num = 5;
+		int size = 5;
 		foreach (BlobPiece piece in pieces)
 		{
-			num += 28 + piece.Bytes.Length;
+			size += 28 + piece.Bytes.Length;
 		}
-		WireWriter wireWriter = new WireWriter(num).U8(52).I32(pieces.Count);
-		Span<byte> span = stackalloc byte[16];
-		foreach (BlobPiece piece2 in pieces)
+		WireWriter w = new WireWriter(size).U8(52).I32(pieces.Count);
+		Span<byte> idBytes = stackalloc byte[16];
+		foreach (BlobPiece piece in pieces)
 		{
-			piece2.Id.TryWriteBytes(span);
-			wireWriter.Bytes(span).I32(piece2.Total).I32(piece2.Offset)
-				.I32(piece2.Bytes.Length)
-				.Bytes(piece2.Bytes);
+			piece.Id.TryWriteBytes(idBytes);
+			w.Bytes(idBytes).I32(piece.Total).I32(piece.Offset)
+				.I32(piece.Bytes.Length)
+				.Bytes(piece.Bytes);
 		}
-		return wireWriter.ToArray();
+		return w.ToArray();
 	}
 
 	public static List<BlobPiece> Decode(ReadOnlySpan<byte> d)
 	{
-		WireReader wireReader = new WireReader(d.Slice(1));
-		int num = wireReader.I32();
-		if (num < 0 || num > wireReader.Remaining / 28)
+		var r = new WireReader(d.Slice(1));
+		int count = r.I32();
+		if (count < 0 || count > r.Remaining / 28)
 		{
-			throw new ArgumentOutOfRangeException("n", $"{num} blob pieces in {wireReader.Remaining} B");
+			throw new ArgumentOutOfRangeException("n", $"{count} blob pieces in {r.Remaining} B");
 		}
-		List<BlobPiece> list = new List<BlobPiece>(num);
-		for (int i = 0; i < num; i++)
+		var pieces = new List<BlobPiece>(count);
+		for (int i = 0; i < count; i++)
 		{
-			Guid guid = new Guid(wireReader.Bytes(16));
-			int num2 = wireReader.I32();
-			int num3 = wireReader.I32();
-			int num4 = wireReader.I32();
-			if (num4 < 0 || (num2 >= 0 && (num3 < 0 || (long)num3 + (long)num4 > num2)))
+			var id = new Guid(r.Bytes(16));
+			int total = r.I32();
+			int offset = r.I32();
+			int length = r.I32();
+			if (length < 0 || (total >= 0 && (offset < 0 || (long)offset + length > total)))
 			{
-				throw new ArgumentOutOfRangeException("len", $"blob {guid}: piece {num3}+{num4} of {num2}");
+				throw new ArgumentOutOfRangeException("len", $"blob {id}: piece {offset}+{length} of {total}");
 			}
-			list.Add(new BlobPiece(guid, num2, num3, wireReader.Bytes(num4).ToArray()));
+			pieces.Add(new BlobPiece(id, total, offset, r.Bytes(length).ToArray()));
 		}
-		return list;
+		return pieces;
 	}
 
 	public static void Pack(IEnumerable<KeyValuePair<Guid, byte[]?>> blobs, int maxBytes, List<byte[]> output)
 	{
 		maxBytes = Math.Max(1024, maxBytes);
-		List<BlobPiece> cur = new List<BlobPiece>();
+		var cur = new List<BlobPiece>();
 		int curBytes = 0;
-		foreach (var (id, array2) in blobs)
+		foreach (var (id, bytes) in blobs)
 		{
-			if (array2 == null)
+			if (bytes is null)
 			{
 				if (curBytes + 28 > maxBytes)
 				{
@@ -66,23 +66,24 @@ public static class BlobDataMessage
 				curBytes += 28;
 				continue;
 			}
-			int num = 0;
+			int offset = 0;
 			do
 			{
-				int num2 = maxBytes - curBytes - 28;
-				if (num2 < Math.Min(4096, array2.Length - num))
+				int room = maxBytes - curBytes - 28;
+				if (room < Math.Min(4096, bytes.Length - offset))
 				{
 					Flush();
-					num2 = maxBytes - 28;
+					room = maxBytes - 28;
 				}
-				int num3 = Math.Min(num2, array2.Length - num);
-				cur.Add(new BlobPiece(id, array2.Length, num, array2.AsSpan(num, num3).ToArray()));
-				curBytes += 28 + num3;
-				num += num3;
+				int take = Math.Min(room, bytes.Length - offset);
+				cur.Add(new BlobPiece(id, bytes.Length, offset, bytes.AsSpan(offset, take).ToArray()));
+				curBytes += 28 + take;
+				offset += take;
 			}
-			while (num < array2.Length);
+			while (offset < bytes.Length);
 		}
 		Flush();
+
 		void Flush()
 		{
 			if (cur.Count != 0)
