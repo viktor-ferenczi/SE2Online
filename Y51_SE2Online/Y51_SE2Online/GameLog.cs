@@ -7,8 +7,6 @@ namespace Y51_SE2Online;
 
 internal sealed class GameLog : IMpLog
 {
-	public const string Tag = "[Y51_SE2Online]";
-
 	public static readonly GameLog Instance = new GameLog();
 
 	public void Info(string message)
@@ -31,7 +29,7 @@ internal sealed class GameLog : IMpLog
 		Dedicated.DedicatedConsoleLog.Write(severity.ToString(), message);
 		try
 		{
-			string text = "[Y51_SE2Online] " + message.Replace("\n", "\n[Y51_SE2Online]   ");
+			string text = LogFormat.Line(LogFormat.Level(severity.ToString()), message);
 			Log log = Log.Default;
 			if (log != null)
 			{

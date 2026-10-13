@@ -100,6 +100,8 @@ internal static class DedicatedRuntime
     private static TimeSpan _lastGcPause;
     private static readonly object StatusFileLock = new();
 
+    private static int _statusFailures;
+
     public static void Tick(GameAppComponent app)
     {
         long tickMs = MpClock.NowMs();
@@ -445,8 +447,24 @@ internal static class DedicatedRuntime
             {
                 lock (StatusFileLock)
                 {
-                    try { File.WriteAllText(temp, json); File.Move(temp, path, true); }
-                    catch (Exception ex) { GameLog.Instance.Warn("dedicated: status write failed: " + ex.Message); }
+                    try
+                    {
+                        File.WriteAllText(temp, json);
+                        File.Move(temp, path, true);
+                        if (_statusFailures > 0)
+                        {
+                            GameLog.Instance.Info($"dedicated: status file written again after {_statusFailures} failed write(s)");
+                            _statusFailures = 0;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Something reading the file (an SMB poll) blocks every once-a-second write: one line per outage.
+                        if (_statusFailures++ == 0)
+                        {
+                            GameLog.Instance.Warn("dedicated: status write failed: " + ex.Message + " (further failures are counted until it recovers)");
+                        }
+                    }
                 }
             }
             // The once-a-second write goes off the game thread (a slow or locked file stalled the server frame); state

@@ -37,6 +37,8 @@ internal sealed class NetSession
 
 	private long _lastDetailedMs;
 
+	private bool _idleLogged;
+
 	private HostAdvertiser? _advertiser;
 	private DirectoryPublisher _directory;
 	private ulong _localIdentity;
@@ -751,7 +753,7 @@ internal sealed class NetSession
 					LogDetailed(steam, entry.Key);
 				}
 			}
-			if (now - lastStatusMs >= 10000)
+			if (now - lastStatusMs >= LogFormat.StatusIntervalMs)
 			{
 				lastStatusMs = now;
 				LogStatus(steam, tcp, transport, now);
@@ -809,7 +811,7 @@ internal sealed class NetSession
 			}
 			_log.Info($"net status {remote} conn {conn} {(connected ? "connected" : "pending")}: {quickStatus}{app}");
 		}
-		if (steam != null && any && now - _lastDetailedMs >= 60000)
+		if (steam != null && any && now - _lastDetailedMs >= LogFormat.DetailedStatusIntervalMs)
 		{
 			_lastDetailedMs = now;
 			foreach (var c in steam.Connections())
@@ -821,10 +823,11 @@ internal sealed class NetSession
 				}
 			}
 		}
-		if (!any)
+		if (!any && !_idleLogged)
 		{
 			_log.Info(_o.Host ? "net status: no clients connected (waiting)" : "net status: not connected");
 		}
+		_idleLogged = !any;
 
 		static IEnumerable<(uint, ulong, bool, string)> Steam(SteamLink l)
 		{

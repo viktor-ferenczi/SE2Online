@@ -1855,6 +1855,10 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 			{
 				fail = "not forwardable here";
 			}
+			else if (layout.DownstreamOnly)
+			{
+				fail = "host to joiner only";
+			}
 			else if (AdminGuard.IsAdminSignal(signal) && !IsAdminClient(b.ClientId))
 			{
 				fail = "admin only";

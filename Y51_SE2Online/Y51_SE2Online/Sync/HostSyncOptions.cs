@@ -14,7 +14,7 @@ public sealed class HostSyncOptions
 
 	public RateCapPolicy Caps = new RateCapPolicy();
 
-	public int StatusIntervalMs = 10000;
+	public int StatusIntervalMs = Y51_SE2Online.Core.LogFormat.StatusIntervalMs;
 
 	public int StateEmitIntervalMs = 8;
 

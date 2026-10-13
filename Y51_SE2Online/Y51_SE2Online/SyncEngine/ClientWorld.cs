@@ -328,6 +328,8 @@ internal sealed class ClientWorld
 
 	private long _gameTimeSyncs;
 
+	private TimeSpan _clockSlewBack;
+
 	private readonly List<(Delegate Move, InProcessReplicationSessionComponent Comp)> _earlyStories = new List<(Delegate, InProcessReplicationSessionComponent)>();
 
 	private bool _earlyStoriesSent;
@@ -1537,7 +1539,7 @@ internal sealed class ClientWorld
 		BuildInbound(comp);
 		UpdateNametags(comp);
 		long now = MpClock.NowMs();
-		if (now - _lastStatusMs < 10000)
+		if (now - _lastStatusMs < LogFormat.StatusIntervalMs)
 		{
 			return;
 		}
@@ -1687,24 +1689,54 @@ internal sealed class ClientWorld
 		return mine?.Data.FirstOrDefault(p => type.IsInstanceOfType(p) && !_observables.IsReplica(p));
 	}
 
-	private void SyncGameTime(uint hostTick)
+	private void SyncGameTime()
 	{
 		var gameTime = _comp?.Session.SessionComponents.TryGet<Keen.Game2.Simulation.GameSystems.GameTimes.GameTimeSessionComponent>();
-		if (_hostGameTime0 is not TimeSpan hostTime0 || gameTime?._timeProvider == null)
+		if (_hostGameTime0 is not TimeSpan hostTime0 || gameTime?._timeProvider == null || _session?.NewestHostTick is not { } mark)
 		{
 			return;
 		}
+		// Measure against the newest tick on the wire: a replayed batch can be one buffered during the join, many seconds old.
 		// CommitFrame is [DoNotPause]: host ticks include the host's own paused frames (video screens), which show here as a lead.
-		TimeSpan drift = hostTime0 + Keen.Game2.Simulation.UpdateTime.TIME_PER_FRAME * (hostTick - _hostTick0) - gameTime.FrameTime;
-		if (drift.Duration() < TimeSpan.FromSeconds(1.0))
+		long sinceMs = Math.Clamp(MpClock.NowMs() - mark.AtMs, 0L, 1000L);
+		TimeSpan drift = hostTime0 + Keen.Game2.Simulation.UpdateTime.TIME_PER_FRAME * (mark.Tick - _hostTick0) + TimeSpan.FromMilliseconds(sinceMs) - gameTime.FrameTime;
+		if (drift > TimeSpan.FromSeconds(1.0))
 		{
+			gameTime._elapsedTimeOffset += drift;
+			_clockSlewBack = TimeSpan.Zero;
+			if (++_gameTimeSyncs <= 5 || _gameTimeSyncs % 60 == 0)
+			{
+				_log.Info($"client: game clock moved {drift.TotalSeconds:+0.0} s to the host's ({_gameTimeSyncs} corrections; weather and other timed events follow the host)");
+			}
+		}
+		else if (drift < TimeSpan.FromSeconds(-1.0) || (drift < TimeSpan.FromSeconds(-0.1) && _clockSlewBack > TimeSpan.Zero))
+		{
+			// Never step the clock back: animation controllers advance by CurrentGameTime - previous, and a negative delta turns every bone NaN.
+			if (_clockSlewBack == TimeSpan.Zero && (++_gameTimeSyncs <= 5 || _gameTimeSyncs % 60 == 0))
+			{
+				_log.Info($"client: game clock {(-drift).TotalSeconds:0.0} s ahead of the host's; running it at {1.0 - ClockSlewRate:P0} until it matches ({_gameTimeSyncs} corrections)");
+			}
+			_clockSlewBack = -drift;
+		}
+		else
+		{
+			_clockSlewBack = TimeSpan.Zero;
+		}
+	}
+
+	private const double ClockSlewRate = 0.05;
+
+	private void SlewGameTime()
+	{
+		var gameTime = _comp?.Session.SessionComponents.TryGet<Keen.Game2.Simulation.GameSystems.GameTimes.GameTimeSessionComponent>();
+		if (gameTime?._timeProvider == null)
+		{
+			_clockSlewBack = TimeSpan.Zero;
 			return;
 		}
-		gameTime._elapsedTimeOffset += drift;
-		if (++_gameTimeSyncs <= 5 || _gameTimeSyncs % 60 == 0)
-		{
-			_log.Info($"client: game clock moved {drift.TotalSeconds:+0.0;-0.0} s to the host's ({_gameTimeSyncs} corrections; weather and other timed events follow the host)");
-		}
+		TimeSpan step = TimeSpan.FromTicks(Math.Min(_clockSlewBack.Ticks, (long)(gameTime.DeltaTime.Ticks * ClockSlewRate)));
+		gameTime._elapsedTimeOffset -= step;
+		_clockSlewBack -= step;
 	}
 
 	private void ApplyObservables(List<ObservableOp> ops)
@@ -2240,6 +2272,11 @@ internal sealed class ClientWorld
 		long now = MpClock.NowMs();
 		uint seq;
 		LifecycleItem item;
+		if (_clockSlewBack > TimeSpan.Zero)
+		{
+			w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<SceneContext>)(_ => SlewGameTime()));
+			cmds++;
+		}
 		if (_backgroundBuild is { } pending)
 		{
 			if (!pending.Job.IsCompleted)
@@ -2279,8 +2316,7 @@ internal sealed class ClientWorld
 				if (_hostGameTime0.HasValue && now - _gameTimeCheckMs >= 1000)
 				{
 					_gameTimeCheckMs = now;
-					uint hostTick = next.HostTick;
-					w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<SceneContext>)(_ => SyncGameTime(hostTick)));
+					w.Write_Keen_VRage_Multiplayer_Replications_InProcess_InProcessReplicationSessionComponent_PostInvokeInternalSignal(baseIndex, _sessionProxy, (Action<SceneContext>)(_ => SyncGameTime()));
 					cmds++;
 				}
 				try

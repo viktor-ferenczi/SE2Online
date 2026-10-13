@@ -22,6 +22,8 @@ internal sealed class CommandLayout
 
 	public bool Forwardable;
 
+	public bool DownstreamOnly;
+
 	public string? Why;
 
 	public Type? SignalType;

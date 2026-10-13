@@ -123,6 +123,11 @@ public sealed class ClientSession
 
 	public TransformSmoother Smoother { get; } = new();
 
+	/// <summary>Newest host tick seen on the wire and when it arrived (net thread writes, game thread reads).</summary>
+	public HostTickMark? NewestHostTick => Volatile.Read(ref _newestHostTick);
+
+	private HostTickMark? _newestHostTick;
+
 	public ushort ClientId => Accept?.ClientId ?? 0;
 
 	public (byte Status, uint NetId, string Text, long Version) Assignment { get; private set; }
@@ -399,6 +404,10 @@ public sealed class ClientSession
 		}
 		case SyncMsg.SignalBatch:
 			var (signalSeq, hostTick, signals) = SignalBatchMessage.Decode(data);
+			if (Volatile.Read(ref _newestHostTick) is not { } mark || hostTick > mark.Tick)
+			{
+				Volatile.Write(ref _newestHostTick, new HostTickMark(hostTick, _clock()));
+			}
 			Offer(signalSeq, new LifecycleItem
 			{
 				Type = SyncMsg.SignalBatch,
@@ -779,3 +788,5 @@ public sealed class ClientSession
 		}
 	}
 }
+
+public sealed record HostTickMark(uint Tick, long AtMs);

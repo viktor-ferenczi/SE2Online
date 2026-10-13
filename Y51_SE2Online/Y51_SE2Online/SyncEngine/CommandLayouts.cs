@@ -31,6 +31,9 @@ internal static class CommandLayouts
 
 	private static readonly HashSet<Type> ForwardableStructs = new() { typeof(LocalizableText), typeof(Keen.Game2.Simulation.GameSystems.Explosions.AudioParameter?) };
 
+	// Host to joiner only: voxel destruction craters and thruster flame classes. A joiner must never send these to the server.
+	private static readonly HashSet<Type> DownstreamStructs = new() { typeof(Keen.VRage.Voxels.Storage.Operations.CutOutCapsulesBuilder), typeof(Keen.Game2.Simulation.WorldObjects.CubeGrids.Movement.ThrusterSyncData) };
+
 	private static readonly MethodInfo SizeOfMethod = typeof(Unsafe).GetMethod("SizeOf");
 
 	private static readonly MethodInfo IsRefMethod = typeof(RuntimeHelpers).GetMethod("IsReferenceOrContainsReferences");
@@ -235,7 +238,11 @@ internal static class CommandLayouts
 				{
 					offset += 4;
 					segments.Add(new Segment(SegmentKind.Ref, 4, i, type));
-					if (!ForwardableStructs.Contains(type))
+					if (DownstreamStructs.Contains(type))
+					{
+						layout.DownstreamOnly = true;
+					}
+					else if (!ForwardableStructs.Contains(type))
 					{
 						layout.Why ??= $"managed struct argument {parameters[i].Name} ({type.Name})";
 					}

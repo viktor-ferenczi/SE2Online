@@ -237,7 +237,7 @@ internal sealed class ClientUpstream
 					}
 					break;
 				}
-				if (!layout.Forwardable)
+				if (!layout.Forwardable || layout.DownstreamOnly)
 				{
 					if (layout.PayloadBytes < 0 && !layout.Dynamic)
 					{
@@ -249,7 +249,7 @@ internal sealed class ClientUpstream
 						return false;
 					}
 					NotForwardable++;
-					Drop(layout.Name, layout.Why ?? "not forwardable");
+					Drop(layout.Name, layout.Why ?? "host to joiner only");
 					break;
 				}
 				SignalKeyDef signal = _signals.GetOrAdd(layout.Name, layout.Def(0).PayloadBytes, layout.Signature);
