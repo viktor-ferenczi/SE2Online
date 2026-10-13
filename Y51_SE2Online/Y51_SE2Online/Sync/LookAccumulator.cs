@@ -58,13 +58,13 @@ public sealed class LookAccumulator
 	public bool Offer(uint seq, uint netId, ushort epoch, double x, double y, double z)
 	{
 		Messages++;
-		bool flag = !_seen || netId != NetId || epoch != Epoch;
-		if (!flag && !Seq.Newer(seq, _seq))
+		bool restart = !_seen || netId != NetId || epoch != Epoch;
+		if (!restart && !Seq.Newer(seq, _seq))
 		{
 			Stale++;
 			return false;
 		}
-		if (flag)
+		if (restart)
 		{
 			if (netId != NetId)
 			{
@@ -72,7 +72,7 @@ public sealed class LookAccumulator
 			}
 			NetId = netId;
 			Epoch = epoch;
-			_ax = (_ay = (_az = 0.0));
+			_ax = _ay = _az = 0.0;
 			_lastNonZero = false;
 			Epochs++;
 		}
@@ -84,39 +84,40 @@ public sealed class LookAccumulator
 			_ty = y;
 			_tz = z;
 		}
-		return flag;
+		return restart;
 	}
 
 	public bool Take(out float x, out float y, out float z)
 	{
-		double num = _tx - _ax;
-		double num2 = _ty - _ay;
-		double num3 = _tz - _az;
-		double num4 = Math.Max(Math.Abs(num), Math.Max(Math.Abs(num2), Math.Abs(num3)));
-		if (num4 > Math.PI)
+		double dx = _tx - _ax;
+		double dy = _ty - _ay;
+		double dz = _tz - _az;
+		double catchUp = Math.Max(Math.Abs(dx), Math.Max(Math.Abs(dy), Math.Abs(dz)));
+		if (catchUp > Math.PI)
 		{
 			Resyncs++;
 			_ax = _tx;
 			_ay = _ty;
 			_az = _tz;
-			num = (num2 = (num3 = 0.0));
-			num4 = 0.0;
+			dx = dy = dz = 0.0;
+			catchUp = 0.0;
 		}
-		x = ((Math.Abs(num) >= 1E-06) ? ((float)num) : 0f);
-		y = ((Math.Abs(num2) >= 1E-06) ? ((float)num2) : 0f);
-		z = ((Math.Abs(num3) >= 1E-06) ? ((float)num3) : 0f);
+		x = Math.Abs(dx) >= 1E-06 ? (float)dx : 0f;
+		y = Math.Abs(dy) >= 1E-06 ? (float)dy : 0f;
+		z = Math.Abs(dz) >= 1E-06 ? (float)dz : 0f;
 		_ax += x;
 		_ay += y;
 		_az += z;
-		bool flag = x != 0f || y != 0f || z != 0f;
-		bool result = flag || _lastNonZero;
-		_lastNonZero = flag;
-		if (flag)
+		bool turned = x != 0f || y != 0f || z != 0f;
+		// One extra tick after the last turn so the game sees the rotation go back to zero.
+		bool result = turned || _lastNonZero;
+		_lastNonZero = turned;
+		if (turned)
 		{
 			Injected++;
-			if (num4 > MaxCatchUpRad)
+			if (catchUp > MaxCatchUpRad)
 			{
-				MaxCatchUpRad = num4;
+				MaxCatchUpRad = catchUp;
 			}
 		}
 		return result;
@@ -124,11 +125,11 @@ public sealed class LookAccumulator
 
 	public static byte[] WithRotation(byte[] control, float x, float y, float z)
 	{
-		byte[] array = (byte[])control.Clone();
-		BinaryPrimitives.WriteSingleLittleEndian(array.AsSpan(12), x);
-		BinaryPrimitives.WriteSingleLittleEndian(array.AsSpan(16), y);
-		BinaryPrimitives.WriteSingleLittleEndian(array.AsSpan(20), z);
-		return array;
+		byte[] copy = (byte[])control.Clone();
+		BinaryPrimitives.WriteSingleLittleEndian(copy.AsSpan(12), x);
+		BinaryPrimitives.WriteSingleLittleEndian(copy.AsSpan(16), y);
+		BinaryPrimitives.WriteSingleLittleEndian(copy.AsSpan(20), z);
+		return copy;
 	}
 
 	public string Describe()

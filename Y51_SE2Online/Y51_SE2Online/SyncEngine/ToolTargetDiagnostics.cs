@@ -30,17 +30,17 @@ internal static class ToolTargetDiagnostics
 				return;
 			}
 			Interlocked.Increment(ref Refused);
-			Entity topLevelParent = __instance.Entity.GetTopLevelParent();
-			CubeBlockComponent cubeBlockComponent = interactedEntity.TryGet<CubeBlockComponent>();
-			Entity grid = cubeBlockComponent?.Grid?.Entity ?? interactedEntity;
+			Entity actor = __instance.Entity.GetTopLevelParent();
+			CubeBlockComponent block = interactedEntity.TryGet<CubeBlockComponent>();
+			Entity grid = block?.Grid?.Entity ?? interactedEntity;
 			Entity gridRoot = grid.GetTopLevelParent();
-			bool flag = false;
-			CharacterSupportTrackerComponent characterSupportTrackerComponent = topLevelParent.TryGet<CharacterSupportTrackerComponent>();
-			if (characterSupportTrackerComponent != null)
+			bool standingOnIt = false;
+			CharacterSupportTrackerComponent support = actor.TryGet<CharacterSupportTrackerComponent>();
+			if (support != null)
 			{
-				flag = characterSupportTrackerComponent.SupportingEntities.Any((Entity s) => s == grid || s.GetTopLevelParent() == gridRoot);
+				standingOnIt = support.SupportingEntities.Any(s => s == grid || s.GetTopLevelParent() == gridRoot);
 			}
-			if (flag)
+			if (standingOnIt)
 			{
 				Interlocked.Increment(ref RefusedStandingOnTarget);
 			}
@@ -48,28 +48,18 @@ internal static class ToolTargetDiagnostics
 			{
 				return;
 			}
-			HostWorld current = HostWorld.Current;
-			string value = current?.DescribeActor(topLevelParent) ?? topLevelParent.ToString() ?? "?";
-			long valueOrDefault = ((long?)grid.TryGet<OwnershipComponent>()?.Owner).GetValueOrDefault();
-			string value2 = "nothing hit";
-			Vector3D? vector3D = __instance._origin?.WorldTransform.Position;
-			Vector3D? invalidIntersection = __instance._invalidIntersection;
-			if (invalidIntersection.HasValue)
+			HostWorld host = HostWorld.Current;
+			string actorName = host?.DescribeActor(actor) ?? actor.ToString() ?? "?";
+			long owner = (long?)grid.TryGet<OwnershipComponent>()?.Owner ?? 0;
+			string lineOfSight = "nothing hit";
+			Vector3D? origin = __instance._origin?.WorldTransform.Position;
+			if (__instance._invalidIntersection is { } hit)
 			{
-				Vector3D valueOrDefault2 = invalidIntersection.GetValueOrDefault();
-				string text;
-				if (vector3D.HasValue)
-				{
-					Vector3D valueOrDefault3 = vector3D.GetValueOrDefault();
-					text = $"its ray stopped {Math.Sqrt((valueOrDefault2 - valueOrDefault3).LengthSquared()):0.00} m from the tool origin";
-				}
-				else
-				{
-					text = "its ray stopped early";
-				}
-				value2 = text;
+				lineOfSight = origin is { } from
+					? $"its ray stopped {Math.Sqrt((hit - from).LengthSquared()):0.00} m from the tool origin"
+					: "its ray stopped early";
 			}
-			GameLog.Instance.Info($"host world sync: the server refused a tool target: {value} aimed at {((cubeBlockComponent != null) ? "a block" : "an entity")} of grid {current?.DescribeNetId(gridRoot) ?? gridRoot.ToString()} (owner IdentityId {valueOrDefault}); standing on that grid: {(flag ? "YES" : "no")}; line-of-sight check: {value2} (0.7.6 diagnostics; {Refused} refused so far, {RefusedStandingOnTarget} while standing on the target)");
+			GameLog.Instance.Info($"host world sync: the server refused a tool target: {actorName} aimed at {(block != null ? "a block" : "an entity")} of grid {host?.DescribeNetId(gridRoot) ?? gridRoot.ToString()} (owner IdentityId {owner}); standing on that grid: {(standingOnIt ? "YES" : "no")}; line-of-sight check: {lineOfSight} (0.7.6 diagnostics; {Refused} refused so far, {RefusedStandingOnTarget} while standing on the target)");
 		}
 		catch (Exception ex)
 		{
@@ -101,7 +91,7 @@ internal static class ToolTargetDiagnostics
 			}
 			Entity gridRoot = grid.GetTopLevelParent();
 			CharacterSupportTrackerComponent? support = __instance.Entity.GetTopLevelParent().TryGet<CharacterSupportTrackerComponent>();
-			if (support != null && support.SupportingEntities.Any((Entity s) => s.GetTopLevelParent() == gridRoot))
+			if (support != null && support.SupportingEntities.Any(s => s.GetTopLevelParent() == gridRoot))
 			{
 				__result = true;
 				Interlocked.Increment(ref StandingAccepted);
@@ -112,8 +102,5 @@ internal static class ToolTargetDiagnostics
 		}
 	}
 
-	public static string Describe()
-	{
-		return $"tool targets refused by the server {Refused} ({RefusedStandingOnTarget} while standing on the target grid), accepted while standing on it {StandingAccepted}";
-	}
+	public static string Describe() => $"tool targets refused by the server {Refused} ({RefusedStandingOnTarget} while standing on the target grid), accepted while standing on it {StandingAccepted}";
 }

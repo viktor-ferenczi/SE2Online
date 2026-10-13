@@ -27,16 +27,15 @@ internal static class TeamPermissions
 		{
 			return OwnerOverride(e);
 		}
-		int num = 0;
-		while (e != null && num < 64)
+		// The nearest ownership up the hierarchy (a block's grid, a subgrid's parent grid).
+		for (int depth = 0; e != null && depth < 64; depth++)
 		{
-			OwnershipComponent ownershipComponent = e.TryGet<OwnershipComponent>();
-			if (ownershipComponent != null)
+			OwnershipComponent ownership = e.TryGet<OwnershipComponent>();
+			if (ownership != null)
 			{
-				return ownershipComponent.Owner;
+				return ownership.Owner;
 			}
 			e = e.TryGet<HierarchyComponent>()?.Parent;
-			num++;
 		}
 		return 0L;
 	}
@@ -56,10 +55,10 @@ internal static class TeamPermissions
 		if (ApplyAccess(entity, owner, ref __result)) return;
 		if (!__result && Enabled)
 		{
-			long num = OwnerOf(entity);
-			if (PlayerIdentities.SameTeam(num, owner))
+			long gridOwner = OwnerOf(entity);
+			if (PlayerIdentities.SameTeam(gridOwner, owner))
 			{
-				Grant(ref __result, "ownership check", num, owner);
+				Grant(ref __result, "ownership check", gridOwner, owner);
 			}
 		}
 	}
@@ -69,10 +68,10 @@ internal static class TeamPermissions
 		if (ApplyAccess(target, identity, ref __result)) return;
 		if (!__result && Enabled)
 		{
-			long num = OwnerOf(target);
-			if (PlayerIdentities.SameTeam(num, identity))
+			long owner = OwnerOf(target);
+			if (PlayerIdentities.SameTeam(owner, identity))
 			{
-				Grant(ref __result, "building", num, identity);
+				Grant(ref __result, "building", owner, identity);
 			}
 		}
 	}
@@ -82,10 +81,10 @@ internal static class TeamPermissions
 		if (ApplyAccess(grid, identity, ref __result)) return;
 		if (!__result && Enabled)
 		{
-			long num = OwnerOf(grid);
-			if (PlayerIdentities.SameTeam(num, identity))
+			long owner = OwnerOf(grid);
+			if (PlayerIdentities.SameTeam(owner, identity))
 			{
-				Grant(ref __result, "block use", num, identity);
+				Grant(ref __result, "block use", owner, identity);
 			}
 		}
 	}
@@ -95,11 +94,11 @@ internal static class TeamPermissions
 		if (ApplyLink(firstGrid, secondGrid, false, ref __result)) return;
 		if (!__result && Enabled)
 		{
-			long num = OwnerOf(firstGrid);
-			long num2 = OwnerOf(secondGrid);
-			if (PlayerIdentities.SameTeam(num, num2))
+			long firstOwner = OwnerOf(firstGrid);
+			long secondOwner = OwnerOf(secondGrid);
+			if (PlayerIdentities.SameTeam(firstOwner, secondOwner))
 			{
-				Grant(ref __result, "connecting grids", num2, num);
+				Grant(ref __result, "connecting grids", secondOwner, firstOwner);
 			}
 		}
 	}
@@ -109,11 +108,11 @@ internal static class TeamPermissions
 		if (ApplyLink(firstGrid, secondGrid, true, ref __result)) return;
 		if (!__result && Enabled && firstGrid != secondGrid)
 		{
-			long num = OwnerOf(firstGrid);
-			long num2 = OwnerOf(secondGrid);
-			if (PlayerIdentities.SameTeam(num, num2))
+			long firstOwner = OwnerOf(firstGrid);
+			long secondOwner = OwnerOf(secondGrid);
+			if (PlayerIdentities.SameTeam(firstOwner, secondOwner))
 			{
-				Grant(ref __result, "merging grids", num2, num);
+				Grant(ref __result, "merging grids", secondOwner, firstOwner);
 			}
 		}
 	}
@@ -123,15 +122,19 @@ internal static class TeamPermissions
 		bool? access = WorldSocial.Access(target, actor);
 		if (!access.HasValue) return false;
 		if (access.Value && !result) Interlocked.Increment(ref Overrides);
-		result = access.Value; return true;
+		result = access.Value;
+		return true;
 	}
+
 	private static bool ApplyLink(Entity first, Entity second, bool merge, ref bool result)
 	{
-		bool? firstAccess = WorldSocial.Access(first, OwnerOf(second)), secondAccess = WorldSocial.Access(second, OwnerOf(first));
+		bool? firstAccess = WorldSocial.Access(first, OwnerOf(second));
+		bool? secondAccess = WorldSocial.Access(second, OwnerOf(first));
 		if (!firstAccess.HasValue || !secondAccess.HasValue) return false;
 		result = first == second ? !merge : firstAccess.Value && secondAccess.Value;
 		return true;
 	}
+
 	public static void IsFriendlyPostfix(IdentityId source, Entity target, ref bool __result)
 	{
 		long owner = OwnerOf(target);

@@ -22,9 +22,9 @@ public sealed class MpPlugin : IPlugin, IDisposable
 {
 	public static readonly string Version = typeof(MpPlugin).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? typeof(MpPlugin).Assembly.GetName().Version?.ToString() ?? "?";
 
-	private readonly Harmony _harmony = new Harmony("y51.se2online");
+	private readonly Harmony _harmony = new("y51.se2online");
 
-	private readonly Harmony _modeHarmony = new Harmony("y51.se2online.session");
+	private readonly Harmony _modeHarmony = new("y51.se2online.session");
 	private bool _installingMode;
 	private static bool _steamReady;
 	private static WorldSessionComponent _observedWorld;
@@ -37,7 +37,7 @@ public sealed class MpPlugin : IPlugin, IDisposable
 
 	private readonly IMpLog _log = GameLog.Instance;
 
-	private MpOptions _options = new MpOptions();
+	private MpOptions _options = new();
 
 	private bool _disposed;
 
@@ -80,9 +80,9 @@ public sealed class MpPlugin : IPlugin, IDisposable
 		{
 			Init(host);
 		}
-		catch (Exception value)
+		catch (Exception ex)
 		{
-			_log.Error($"plugin init failed, plugin inactive (game unaffected): {value}");
+			_log.Error($"plugin init failed, plugin inactive (game unaffected): {ex}");
 			if ((host.Args ?? Array.Empty<string>()).Contains("-y51headless")) throw;
 		}
 	}
@@ -91,11 +91,11 @@ public sealed class MpPlugin : IPlugin, IDisposable
 
 	private void Init(PluginHost host)
 	{
-		string text = GameVersion();
-		_log.Info($"Y51_SE2Online {Version} loaded from {(PluginPaths.InMemory ? "memory" : typeof(MpPlugin).Assembly.Location)} as {typeof(MpPlugin).Assembly.GetName().Name}, data in {PluginPaths.DataDir}; game {text} (built against {"2.4.0.95"}); {RuntimeInformation.FrameworkDescription} {RuntimeInformation.ProcessArchitecture}");
-		if (text != "2.4.0.95")
+		string gameVersion = GameVersion();
+		_log.Info($"Y51_SE2Online {Version} loaded from {(PluginPaths.InMemory ? "memory" : typeof(MpPlugin).Assembly.Location)} as {typeof(MpPlugin).Assembly.GetName().Name}, data in {PluginPaths.DataDir}; game {gameVersion} (built against {"2.4.0.95"}); {RuntimeInformation.FrameworkDescription} {RuntimeInformation.ProcessArchitecture}");
+		if (gameVersion != "2.4.0.95")
 		{
-			_log.Warn($"game version {text} differs from the build this plugin was compiled and verified against ({"2.4.0.95"})");
+			_log.Warn($"game version {gameVersion} differs from the build this plugin was compiled and verified against ({"2.4.0.95"})");
 		}
 		Instance = this;
 		LaunchArgs = host.Args ?? Array.Empty<string>();
@@ -164,14 +164,14 @@ public sealed class MpPlugin : IPlugin, IDisposable
 		PvpRules.Pvp = TurretRelations.PlayersHostile = options.Host && options.Pvp;
 		PvpRules.OfflineRaid = options.OfflineRaidProtection;
 		NametagOverlay.Configure(options);
-		List<(string, bool, string)> list = new List<(string, bool, string)>();
-		bool flag = _options.Networking && _options.Host && _options.Sync;
-		bool flag2 = _options.Networking && _options.Join && _options.Sync;
-		if (_options.Probe | flag | flag2)
+		var hooks = new List<(string, bool, string)>();
+		bool hosting = _options.Networking && _options.Host && _options.Sync;
+		bool joining = _options.Networking && _options.Join && _options.Sync;
+		if (_options.Probe | hosting | joining)
 		{
-			list.AddRange(ReplicationProbe.Install(_modeHarmony, _options.ProbeBundleSize, _log, _options.Probe));
+			hooks.AddRange(ReplicationProbe.Install(_modeHarmony, _options.ProbeBundleSize, _log, _options.Probe));
 		}
-		if (flag)
+		if (hosting)
 		{
 			if (!ReplicationProbe.MeterArmed)
 			{
@@ -180,8 +180,8 @@ public sealed class MpPlugin : IPlugin, IDisposable
 			HostWorld hostWorld = HostWorld.Install(_log);
 			hostWorld.SpawnNearHost = _options.SpawnNearHost;
 			hostWorld.OnePilot = _options.OnePilot;
-			list.Add(Patch("host:CommitFrame", HookTargets.CommitFrame, new HarmonyMethod(typeof(HostWorld), "CommitPrefix"), new HarmonyMethod(typeof(HostWorld), "CommitPostfix")));
-			list.Add(Patch("host:BuildAndReset", HookTargets.BuildAndReset, null, new HarmonyMethod(typeof(HostWorld), "BundlePostfix")));
+			hooks.Add(Patch("host:CommitFrame", HookTargets.CommitFrame, new HarmonyMethod(typeof(HostWorld), "CommitPrefix"), new HarmonyMethod(typeof(HostWorld), "CommitPostfix")));
+			hooks.Add(Patch("host:BuildAndReset", HookTargets.BuildAndReset, null, new HarmonyMethod(typeof(HostWorld), "BundlePostfix")));
 			if (!DedicatedRuntime.Headless)
 			{
 				// Encounters spawn through ReplicateStagedEntitiesAsync, which never passes BuildAndReset; its bundle reaches the local client here.
@@ -192,88 +192,88 @@ public sealed class MpPlugin : IPlugin, IDisposable
 			if (settings.Identities)
 			{
 				if (!DedicatedRuntime.Headless)
-					list.Add(Patch("host:PerPlayerData.Init", HookTargets.PerPlayerInit, new HarmonyMethod(typeof(HostIdentities), "InitPrefix"), new HarmonyMethod(typeof(HostIdentities), "InitPostfix")));
-				list.Add(Patch("host:ServerNarrator.MoveToClient", HookTargets.NarratorMoveToClient, new HarmonyMethod(typeof(HostIdentities), "MoveToClientPrefix")));
-				list.AddRange(PatchPermissions("host"));
+					hooks.Add(Patch("host:PerPlayerData.Init", HookTargets.PerPlayerInit, new HarmonyMethod(typeof(HostIdentities), "InitPrefix"), new HarmonyMethod(typeof(HostIdentities), "InitPostfix")));
+				hooks.Add(Patch("host:ServerNarrator.MoveToClient", HookTargets.NarratorMoveToClient, new HarmonyMethod(typeof(HostIdentities), "MoveToClientPrefix")));
+				hooks.AddRange(PatchPermissions("host"));
 			}
 		}
-		if (flag2)
+		if (joining)
 		{
 			ClientWorld.Install(_log, _options);
-			list.Add(Patch("client:GameAppComponent.GameUpdate", HookTargets.GameUpdate, new HarmonyMethod(typeof(ClientWorld), "GameUpdatePrefix")));
-			list.Add(Patch("client:NetworkGameClientCoreComponent.ConfigureSession", HookTargets.NetClientConfigure, new HarmonyMethod(typeof(ClientWorld), "ConfigurePrefix")));
-			list.Add(Patch("client:NetworkGameClientComponent.PullDataFromServerAsync", HookTargets.NetClientPull, new HarmonyMethod(typeof(ClientWorld), "PullPrefix")));
-			list.Add(Patch("client:CommitFrame", HookTargets.CommitFrame, new HarmonyMethod(typeof(ClientWorld), "CommitPrefix")));
-			list.Add(Patch("client:Session.Update", HookTargets.SessionUpdate, new HarmonyMethod(typeof(ClientWorld), "SessionUpdatePrefix"), new HarmonyMethod(typeof(ClientWorld), "SessionUpdatePostfix")));
+			hooks.Add(Patch("client:GameAppComponent.GameUpdate", HookTargets.GameUpdate, new HarmonyMethod(typeof(ClientWorld), "GameUpdatePrefix")));
+			hooks.Add(Patch("client:NetworkGameClientCoreComponent.ConfigureSession", HookTargets.NetClientConfigure, new HarmonyMethod(typeof(ClientWorld), "ConfigurePrefix")));
+			hooks.Add(Patch("client:NetworkGameClientComponent.PullDataFromServerAsync", HookTargets.NetClientPull, new HarmonyMethod(typeof(ClientWorld), "PullPrefix")));
+			hooks.Add(Patch("client:CommitFrame", HookTargets.CommitFrame, new HarmonyMethod(typeof(ClientWorld), "CommitPrefix")));
+			hooks.Add(Patch("client:Session.Update", HookTargets.SessionUpdate, new HarmonyMethod(typeof(ClientWorld), "SessionUpdatePrefix"), new HarmonyMethod(typeof(ClientWorld), "SessionUpdatePostfix")));
 			SlowTicks.Log = _log;
 			SlowTicks.Enabled = true;
-			list.Add(Patch("client:IEntityReplication.AwaitReplication", HookTargets.AwaitReplication, new HarmonyMethod(typeof(ClientWorld), "AwaitReplicationPrefix")));
-			list.Add(Patch("client:Spectating.GetNextCharacter", HookTargets.NextCharacter, null, new HarmonyMethod(typeof(ClientWorld), "GetNextCharacterPostfix")));
-			list.Add(Patch("client:Spectating.SetEntityTypeToPossess", HookTargets.EntityTypeToPossess, new HarmonyMethod(typeof(ClientWorld), "SetEntityTypeToPossessPrefix")));
+			hooks.Add(Patch("client:IEntityReplication.AwaitReplication", HookTargets.AwaitReplication, new HarmonyMethod(typeof(ClientWorld), "AwaitReplicationPrefix")));
+			hooks.Add(Patch("client:Spectating.GetNextCharacter", HookTargets.NextCharacter, null, new HarmonyMethod(typeof(ClientWorld), "GetNextCharacterPostfix")));
+			hooks.Add(Patch("client:Spectating.SetEntityTypeToPossess", HookTargets.EntityTypeToPossess, new HarmonyMethod(typeof(ClientWorld), "SetEntityTypeToPossessPrefix")));
 			foreach (EngineMember key in HookTargets.SpectatorKeys)
 			{
-				list.Add(Patch("client:Spectating." + key.Name, key, new HarmonyMethod(typeof(ClientWorld), "SpectatorKeyPrefix")));
+				hooks.Add(Patch("client:Spectating." + key.Name, key, new HarmonyMethod(typeof(ClientWorld), "SpectatorKeyPrefix")));
 			}
-			list.AddRange(PatchPermissions("client"));
+			hooks.AddRange(PatchPermissions("client"));
 		}
-		if (flag2 || (flag && !DedicatedRuntime.Headless))
+		if (joining || (hosting && !DedicatedRuntime.Headless))
 		{
-			list.Add(Patch("game:ToolsRenderAdapter.TrySpawnFirstPersonToolShadowCaster", HookTargets.ToolShadowSpawn, null, G(typeof(ToolShadowGuard), "SpawnPostfix")));
-			list.Add(Patch("game:ToolsRenderAdapter.TryDespawnFirstPersonToolShadowCaster", HookTargets.ToolShadowDespawn, G(typeof(ToolShadowGuard), "DespawnPrefix")));
-			list.Add(Patch("game:ToolsComponent.UnregisterTool", HookTargets.ToolsUnregister, G(typeof(ToolShadowGuard), "UnregisterPrefix"), G(typeof(ToolShadowGuard), "UnregisterPostfix")));
-			list.Add(Patch("game:PCUClientSessionComponent.HasPCU", HookTargets.PcuHas, G(typeof(PcuOwnerGuard), "Prefix")));
-			list.Add(Patch("game:PCUClientSessionComponent.GetPCU", HookTargets.PcuGet, G(typeof(PcuOwnerGuard), "Prefix")));
+			hooks.Add(Patch("game:ToolsRenderAdapter.TrySpawnFirstPersonToolShadowCaster", HookTargets.ToolShadowSpawn, null, G(typeof(ToolShadowGuard), "SpawnPostfix")));
+			hooks.Add(Patch("game:ToolsRenderAdapter.TryDespawnFirstPersonToolShadowCaster", HookTargets.ToolShadowDespawn, G(typeof(ToolShadowGuard), "DespawnPrefix")));
+			hooks.Add(Patch("game:ToolsComponent.UnregisterTool", HookTargets.ToolsUnregister, G(typeof(ToolShadowGuard), "UnregisterPrefix"), G(typeof(ToolShadowGuard), "UnregisterPostfix")));
+			hooks.Add(Patch("game:PCUClientSessionComponent.HasPCU", HookTargets.PcuHas, G(typeof(PcuOwnerGuard), "Prefix")));
+			hooks.Add(Patch("game:PCUClientSessionComponent.GetPCU", HookTargets.PcuGet, G(typeof(PcuOwnerGuard), "Prefix")));
 			if (_options.AudioFix)
 			{
-				(string, bool, string) item = Patch("audio:AudioEngineComponent.Play", HookTargets.AudioPlay2D, G(typeof(AudioGate), "Play2DPrefix"));
-				list.Add(item);
-				AudioGate.Enabled = item.Item2;
-				list.Add(Patch("audio:CharacterMovementEffects.OnCrouchingUpdate", HookTargets.CrouchAudio, G(typeof(AudioGate), "CrouchPrefix"), null, G(typeof(AudioGate), "CrouchFinalizer")));
+				var audioHook = Patch("audio:AudioEngineComponent.Play", HookTargets.AudioPlay2D, G(typeof(AudioGate), "Play2DPrefix"));
+				hooks.Add(audioHook);
+				AudioGate.Enabled = audioHook.Item2;
+				hooks.Add(Patch("audio:CharacterMovementEffects.OnCrouchingUpdate", HookTargets.CrouchAudio, G(typeof(AudioGate), "CrouchPrefix"), null, G(typeof(AudioGate), "CrouchFinalizer")));
 			}
 		}
-		if (flag)
+		if (hosting)
 		{
-			list.Add(Patch("host:InteractedEntityProviderServerComponent.TrySetEntity", HookTargets.ServerTrySetEntity, null, new HarmonyMethod(typeof(ToolTargetDiagnostics), "Postfix")));
-			list.Add(Patch("host:InteractedEntityProviderServerComponent.Validate", HookTargets.ServerValidateHit, null, new HarmonyMethod(typeof(ToolTargetDiagnostics), "ValidatePostfix")));
-			list.Add(Patch("host:ControlPanel.DetachControlPanelList", HookTargets.PanelDetachList, G(typeof(ControlGuard), "PanelDetachPrefix"), null, G(typeof(ControlGuard), "PanelDetachFinalizer")));
-			list.Add(Patch("host:ControlPanel.DetachAllBlockDetailsFromEntity", HookTargets.PanelDetachDetails, G(typeof(ControlGuard), "PanelDetailsPrefix")));
+			hooks.Add(Patch("host:InteractedEntityProviderServerComponent.TrySetEntity", HookTargets.ServerTrySetEntity, null, new HarmonyMethod(typeof(ToolTargetDiagnostics), "Postfix")));
+			hooks.Add(Patch("host:InteractedEntityProviderServerComponent.Validate", HookTargets.ServerValidateHit, null, new HarmonyMethod(typeof(ToolTargetDiagnostics), "ValidatePostfix")));
+			hooks.Add(Patch("host:ControlPanel.DetachControlPanelList", HookTargets.PanelDetachList, G(typeof(ControlGuard), "PanelDetachPrefix"), null, G(typeof(ControlGuard), "PanelDetachFinalizer")));
+			hooks.Add(Patch("host:ControlPanel.DetachAllBlockDetailsFromEntity", HookTargets.PanelDetachDetails, G(typeof(ControlGuard), "PanelDetailsPrefix")));
 		}
-		if (flag2)
+		if (joining)
 		{
-			list.Add(Patch("client:Spectating.SetNextCharacterAsFocused", HookTargets.NextCharacterFocus, new HarmonyMethod(typeof(ClientWorld), "NextCharacterFocusPrefix")));
+			hooks.Add(Patch("client:Spectating.SetNextCharacterAsFocused", HookTargets.NextCharacterFocus, new HarmonyMethod(typeof(ClientWorld), "NextCharacterFocusPrefix")));
 		}
-		if ((flag | flag2) && _options.ControlFix)
+		if ((hosting | joining) && _options.ControlFix)
 		{
 			ControlGuard.Start(_log);
-			if (flag)
+			if (hosting)
 			{
-				list.Add(Patch("host:Spectating.GetNextCharacter", HookTargets.NextCharacter, null, new HarmonyMethod(typeof(ControlGuard), "HostNextCharacterPostfix")));
+				hooks.Add(Patch("host:Spectating.GetNextCharacter", HookTargets.NextCharacter, null, new HarmonyMethod(typeof(ControlGuard), "HostNextCharacterPostfix")));
 			}
 		}
-		if ((flag | flag2) && _options.Nametags && !DedicatedRuntime.Headless)
+		if ((hosting | joining) && _options.Nametags && !DedicatedRuntime.Headless)
 		{
-			list.Add(Patch("game:GPSMarkerRender.DrawHUDMarkers", HookTargets.GpsDrawHud, new HarmonyMethod(typeof(NametagOverlay), "DrawPrefix")));
+			hooks.Add(Patch("game:GPSMarkerRender.DrawHUDMarkers", HookTargets.GpsDrawHud, new HarmonyMethod(typeof(NametagOverlay), "DrawPrefix")));
 		}
-		if (flag && _options.OnePilot)
+		if (hosting && _options.OnePilot)
 		{
 			if (ControlGuard.Log == null)
 			{
 				ControlGuard.Log = _log;
 			}
 			ControlGuard.HostFlightGate = true;
-			list.Add(Patch("host:Cockpit.TogglePower", HookTargets.CockpitTogglePower, CP()));
-			list.Add(Patch("host:Cockpit.ToggleDampeners", HookTargets.CockpitToggleDampeners, CP()));
-			list.Add(Patch("host:Cockpit.ToggleLights", HookTargets.CockpitToggleLights, CP()));
-			list.Add(Patch("host:Cockpit.ToggleParkingBrakes", HookTargets.CockpitToggleBrakes, CP()));
-			list.Add(Patch("host:Cockpit.HandleBoost", HookTargets.CockpitBoost, CP()));
+			hooks.Add(Patch("host:Cockpit.TogglePower", HookTargets.CockpitTogglePower, CP()));
+			hooks.Add(Patch("host:Cockpit.ToggleDampeners", HookTargets.CockpitToggleDampeners, CP()));
+			hooks.Add(Patch("host:Cockpit.ToggleLights", HookTargets.CockpitToggleLights, CP()));
+			hooks.Add(Patch("host:Cockpit.ToggleParkingBrakes", HookTargets.CockpitToggleBrakes, CP()));
+			hooks.Add(Patch("host:Cockpit.HandleBoost", HookTargets.CockpitBoost, CP()));
 		}
-		if ((flag | flag2) && _options.BuildFix && !DedicatedRuntime.Headless)
+		if ((hosting | joining) && _options.BuildFix && !DedicatedRuntime.Headless)
 		{
 			BuildGuards.Log = _log;
-			if (flag2)
+			if (joining)
 			{
-				list.Add(Patch("client:ToppedMechanicalBlock.RequestSpawnTop", HookTargets.SpawnTop, new HarmonyMethod(typeof(BuildGuards), "SpawnTopPrefix")));
-				list.Add(Patch("client:PaintToolControllable.OnAddedToScene", HookTargets.PaintToolAdded, new HarmonyMethod(typeof(BuildGuards), "PaintToolAddedPrefix")));
+				hooks.Add(Patch("client:ToppedMechanicalBlock.RequestSpawnTop", HookTargets.SpawnTop, new HarmonyMethod(typeof(BuildGuards), "SpawnTopPrefix")));
+				hooks.Add(Patch("client:PaintToolControllable.OnAddedToScene", HookTargets.PaintToolAdded, new HarmonyMethod(typeof(BuildGuards), "PaintToolAddedPrefix")));
 				try { _harmony.Patch(AccessTools.PropertyGetter(typeof(Keen.Game2.Simulation.WorldObjects.Tools.PaintToolPerPlayerData), "Color"), prefix: new HarmonyMethod(typeof(BuildGuards), nameof(BuildGuards.PaintColorPrefix))); }
 				catch (Exception ex) { _log.Warn("client: paint colour guard not installed: " + ex.Message); }
 				try
@@ -284,35 +284,22 @@ public sealed class MpPlugin : IPlugin, IDisposable
 				}
 				catch (Exception ex) { _log.Warn("client: sprint/crouch prediction hooks not installed: " + ex.Message); }
 			}
-			list.Add(Patch("render:SceneManager.DestroyEntity", HookTargets.RenderDestroyEntity, null, null, new HarmonyMethod(typeof(BuildGuards), "RenderDestroyFinalizer")));
+			hooks.Add(Patch("render:SceneManager.DestroyEntity", HookTargets.RenderDestroyEntity, null, null, new HarmonyMethod(typeof(BuildGuards), "RenderDestroyFinalizer")));
 		}
-		foreach (var (value, flag3, value2) in list)
+		foreach (var (name, ok, detail) in hooks)
 		{
-			if (flag3)
-			{
-				_log.Info($"Harmony patch {value}: OK ({value2})");
-			}
-			else
-			{
-				_log.Error($"Harmony patch {value}: FAILED ({value2})");
-			}
+			if (ok) _log.Info($"Harmony patch {name}: OK ({detail})");
+			else _log.Error($"Harmony patch {name}: FAILED ({detail})");
 		}
-		if (list.Any(hook => !hook.Item2)) throw new InvalidOperationException("Multiplayer could not initialize for this game build. Check the game log for the failed hook.");
-		List<string> list2 = (from m in _modeHarmony.GetPatchedMethods()
-			select m.DeclaringType?.Name + "." + m.Name).ToList();
-		_log.Info($"Harmony patched {list2.Count} method(s): {string.Join(", ", list2)}");
+		if (hooks.Any(hook => !hook.Item2)) throw new InvalidOperationException("Multiplayer could not initialize for this game build. Check the game log for the failed hook.");
+		List<string> patched = _modeHarmony.GetPatchedMethods().Select(m => m.DeclaringType?.Name + "." + m.Name).ToList();
+		_log.Info($"Harmony patched {patched.Count} method(s): {string.Join(", ", patched)}");
 		if (_options.Networking)
 		{
 			NetSession.Start(_options, _log, Version, GameVersion());
 		}
-		static HarmonyMethod CP()
-		{
-			return new HarmonyMethod(typeof(ControlGuard), "HostCockpitPrefix");
-		}
-		static HarmonyMethod G(Type t, string name)
-		{
-			return new HarmonyMethod(t, name);
-		}
+		static HarmonyMethod CP() => new HarmonyMethod(typeof(ControlGuard), "HostCockpitPrefix");
+		static HarmonyMethod G(Type t, string name) => new HarmonyMethod(t, name);
 	}
 
 	public static void Tick(Keen.Game2.GameAppComponent app)
@@ -376,24 +363,18 @@ public sealed class MpPlugin : IPlugin, IDisposable
 		}
 	}
 
-	private static HarmonyMethod M(string name)
-	{
-		return new HarmonyMethod(typeof(MpPlugin), name);
-	}
+	private static HarmonyMethod M(string name) => new HarmonyMethod(typeof(MpPlugin), name);
 
 	private IEnumerable<(string, bool, string)> PatchPermissions(string side)
 	{
 		TeamPermissions.Log = _log;
-		(_installingMode ? _modeHarmony : _harmony).Patch(HarmonyLib.AccessTools.Method(typeof(Keen.Game2.Simulation.GameSystems.Permissions.PermissionsSessionComponent), "IsFriendly"), postfix: P("IsFriendlyPostfix"));
+		(_installingMode ? _modeHarmony : _harmony).Patch(AccessTools.Method(typeof(Keen.Game2.Simulation.GameSystems.Permissions.PermissionsSessionComponent), "IsFriendly"), postfix: P("IsFriendlyPostfix"));
 		yield return Patch(side + ":Permissions.IsOwner", HookTargets.PermIsOwner, null, P("IsOwnerPostfix"));
 		yield return Patch(side + ":Permissions.CanPlaceBlock", HookTargets.PermCanPlace, null, P("CanPlaceBlockPostfix"));
 		yield return Patch(side + ":Permissions.CanUseBlockAction", HookTargets.PermCanUse, null, P("CanUseBlockActionPostfix"));
 		yield return Patch(side + ":Permissions.CanLinkGrids", HookTargets.PermCanLink, null, P("CanLinkGridsPostfix"));
 		yield return Patch(side + ":Permissions.CanMergeGrids", HookTargets.PermCanMerge, null, P("CanMergeGridsPostfix"));
-		static HarmonyMethod P(string name)
-		{
-			return new HarmonyMethod(typeof(TeamPermissions), name);
-		}
+		static HarmonyMethod P(string name) => new HarmonyMethod(typeof(TeamPermissions), name);
 	}
 
 	private static void SprintPostfix(bool sprint) => ClientWorld.SprintRequested(sprint);
@@ -427,10 +408,7 @@ public sealed class MpPlugin : IPlugin, IDisposable
 		}
 	}
 
-	private void OnBeforeProjectsLoaded(List<VRageProject> projects)
-	{
-		_log.Info($"OnBeforeProjectsLoaded: {projects.Count} project(s)");
-	}
+	private void OnBeforeProjectsLoaded(List<VRageProject> projects) => _log.Info($"OnBeforeProjectsLoaded: {projects.Count} project(s)");
 
 	private void OnBeforeEngineInstantiated(EngineBuilder engine)
 	{
@@ -448,8 +426,8 @@ public sealed class MpPlugin : IPlugin, IDisposable
 	{
 		try
 		{
-			int value = Interlocked.Increment(ref _worldInits);
-			GameLog.Instance.Info($"canary: WorldSessionComponent.InitAsync #{value} IsServer={ob.IsServer} (Harmony prefix on R2R code works)");
+			int initCount = Interlocked.Increment(ref _worldInits);
+			GameLog.Instance.Info($"canary: WorldSessionComponent.InitAsync #{initCount} IsServer={ob.IsServer} (Harmony prefix on R2R code works)");
 			if (ob.IsServer)
 			{
 				_observedWorld = __instance;
@@ -470,7 +448,7 @@ public sealed class MpPlugin : IPlugin, IDisposable
 			ClientWorld.Current?.CaptureMainQueue("SteamGameServiceComponent.Initialize");
 			if (_steamActive == null)
 			{
-				_steamActive = EngineMembers.Getter<bool>(EngineMembers.Property(HookTargets.Reflected.Single((EngineMember m) => m.Id == "steam-active")));
+				_steamActive = EngineMembers.Getter<bool>(EngineMembers.Property(HookTargets.Reflected.Single(m => m.Id == "steam-active")));
 			}
 			if (_steamActive(__instance))
 			{
@@ -501,10 +479,7 @@ public sealed class MpPlugin : IPlugin, IDisposable
 
 	public void Dispose()
 	{
-		if (_disposed)
-		{
-			return;
-		}
+		if (_disposed) return;
 		_disposed = true;
 		try
 		{

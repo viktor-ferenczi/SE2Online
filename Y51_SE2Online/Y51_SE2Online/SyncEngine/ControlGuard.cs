@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Keen.Game2.Client.GameSystems.PlayerControl;
 using Keen.Game2.Client.GameSystems.PlayerControl.PlayerInput.InputHandlers;
+using Keen.Game2.Client.WorldObjects.Character;
 using Keen.Game2.Client.WorldObjects.Spectators;
 using Keen.Game2.Simulation.StreamedUI.Terminal.ControlPanel;
 using Keen.Game2.Simulation.Utils;
@@ -64,15 +66,12 @@ internal static class ControlGuard
 	{
 		Log = log;
 		Enabled = true;
-		Task.Run(() =>
-		{
-			BuildIndex(typeof(InteractedEntityProviderServerComponent).Assembly);
-		});
+		Task.Run(() => BuildIndex(typeof(InteractedEntityProviderServerComponent).Assembly));
 	}
 
 	internal static void BuildIndex(Assembly asm)
 	{
-		HashSet<Type> hashSet = new HashSet<Type>();
+		var signals = new HashSet<Type>();
 		try
 		{
 			Type[] types;
@@ -84,44 +83,43 @@ internal static class ControlGuard
 			{
 				types = ex.Types;
 			}
-			Type[] array = types;
-			foreach (Type type in array)
+			// Types that failed to load come back as null entries.
+			foreach (Type type in types)
 			{
 				if (type == null)
 				{
 					continue;
 				}
-				MethodInfo[] methods = type.GetMethods(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-				foreach (MethodInfo methodInfo in methods)
+				foreach (MethodInfo method in type.GetMethods(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
 				{
-					bool flag = false;
-					foreach (CustomAttributeData customAttribute in methodInfo.CustomAttributes)
+					bool validatesController = false;
+					foreach (CustomAttributeData attr in method.CustomAttributes)
 					{
-						if (customAttribute.AttributeType == typeof(Server) && customAttribute.ConstructorArguments.Count == 1 && customAttribute.ConstructorArguments[0].Value as string == "ValidateControlled")
+						if (attr.AttributeType == typeof(Server) && attr.ConstructorArguments.Count == 1 && attr.ConstructorArguments[0].Value as string == "ValidateControlled")
 						{
-							flag = true;
+							validatesController = true;
 						}
 					}
-					if (!flag)
+					if (!validatesController)
 					{
 						continue;
 					}
-					foreach (CustomAttributeData customAttribute2 in methodInfo.CustomAttributes)
+					foreach (CustomAttributeData attr in method.CustomAttributes)
 					{
-						if (typeof(SignalAttribute).IsAssignableFrom(customAttribute2.AttributeType))
+						if (typeof(SignalAttribute).IsAssignableFrom(attr.AttributeType))
 						{
-							hashSet.Add(customAttribute2.AttributeType);
+							signals.Add(attr.AttributeType);
 						}
 					}
 				}
 			}
-			_index = hashSet;
-			IndexState = $"{hashSet.Count} controller-only signals";
+			_index = signals;
+			IndexState = $"{signals.Count} controller-only signals";
 			Log?.Info("control guard: " + IndexState + " (handlers with [Server(\"ValidateControlled\")]); only a character's own player sends them");
 		}
-		catch (Exception ex2)
+		catch (Exception ex)
 		{
-			IndexState = "index failed (" + ex2.GetType().Name + "); TrySetEntity only";
+			IndexState = "index failed (" + ex.GetType().Name + "); TrySetEntity only";
 			Log?.Warn("control guard: " + IndexState);
 		}
 	}
@@ -137,17 +135,17 @@ internal static class ControlGuard
 		{
 			return index.Contains(l.SignalType);
 		}
-		return l.Name.EndsWith("InteractedEntityProviderServerComponent+TrySetEntitySignal", StringComparison.Ordinal);
+		return l.Name.EndsWith(TrySetEntity, StringComparison.Ordinal);
 	}
 
 	internal static bool DropUpstream(CommandLayout l, object? target)
 	{
-		if (!Enabled || !(target is Entity arg) || !IsControllerOnly(l))
+		if (!Enabled || target is not Entity entity || !IsControllerOnly(l))
 		{
 			return false;
 		}
-		Func<Entity, bool> isForeignCharacterHere = IsForeignCharacterHere;
-		if (isForeignCharacterHere == null || !isForeignCharacterHere(arg))
+		Func<Entity, bool>? isForeign = IsForeignCharacterHere;
+		if (isForeign == null || !isForeign(entity))
 		{
 			return false;
 		}
@@ -155,10 +153,7 @@ internal static class ControlGuard
 		return true;
 	}
 
-	internal static void SetJoinerCharacters(Entity[] characters)
-	{
-		_joinerCharacters = characters;
-	}
+	internal static void SetJoinerCharacters(Entity[] characters) => _joinerCharacters = characters;
 
 	internal static bool IsJoinerCharacter(Entity? e)
 	{
@@ -166,10 +161,10 @@ internal static class ControlGuard
 		{
 			return false;
 		}
-		Entity[] joinerCharacters = _joinerCharacters;
-		for (int i = 0; i < joinerCharacters.Length; i++)
+		Entity[] characters = _joinerCharacters;
+		for (int i = 0; i < characters.Length; i++)
 		{
-			if (joinerCharacters[i] == e)
+			if (characters[i] == e)
 			{
 				return true;
 			}
@@ -183,29 +178,31 @@ internal static class ControlGuard
 		{
 			return -1;
 		}
-		byte[] array = _stubKinds;
+		byte[] kinds = _stubKinds;
 		if (stub < 0)
 		{
 			return -1;
 		}
-		if (stub >= array.Length)
+		if (stub >= kinds.Length)
 		{
-			byte[] array2 = new byte[Math.Max(stub + 1, 1024)];
-			Array.Copy(array, array2, array.Length);
-			array = (_stubKinds = array2);
+			byte[] grown = new byte[Math.Max(stub + 1, 1024)];
+			Array.Copy(kinds, grown, kinds.Length);
+			kinds = _stubKinds = grown;
 		}
-		byte b = array[stub];
-		CommandLayout commandLayout = null;
-		if (b == 0)
+		// Per stub: 0 = not classified yet, 1 = controller-only signal whose first segment is the target entity, 2 = anything else.
+		byte kind = kinds[stub];
+		CommandLayout layout = null;
+		if (kind == 0)
 		{
-			commandLayout = CommandLayouts.ByStub(stub);
-			b = (byte)((IsControllerOnly(commandLayout) && commandLayout.Segments.Length != 0 && commandLayout.Segments[0].Kind == SegmentKind.Ref) ? 1 : 2);
-			if (_index != null || b == 1)
+			layout = CommandLayouts.ByStub(stub);
+			kind = (byte)(IsControllerOnly(layout) && layout.Segments.Length != 0 && layout.Segments[0].Kind == SegmentKind.Ref ? 1 : 2);
+			// Until the signal index is built a "2" may be wrong, so it is not cached.
+			if (_index != null || kind == 1)
 			{
-				array[stub] = b;
+				kinds[stub] = kind;
 			}
 		}
-		if (b != 1 || _joinerCharacters.Length == 0)
+		if (kind != 1 || _joinerCharacters.Length == 0)
 		{
 			return -1;
 		}
@@ -213,25 +210,25 @@ internal static class ControlGuard
 		{
 			return -1;
 		}
-		int num = *(int*)payload;
-		if (num < 0 || !(cb.ReadObject(num) is Entity e) || !IsJoinerCharacter(e))
+		int objectIndex = *(int*)payload;
+		if (objectIndex < 0 || cb.ReadObject(objectIndex) is not Entity e || !IsJoinerCharacter(e))
 		{
 			return -1;
 		}
-		if (commandLayout == null)
+		if (layout == null)
 		{
-			commandLayout = CommandLayouts.ByStub(stub);
+			layout = CommandLayouts.ByStub(stub);
 		}
-		int num2 = commandLayout?.Frame(new ReadOnlySpan<byte>(payload, (int)Math.Min(int.MaxValue, available)), _scratch ?? (_scratch = new List<(int, Segment)>())) ?? (-1);
-		if (num2 < 0 || num2 > available)
+		int length = layout?.Frame(new ReadOnlySpan<byte>(payload, (int)Math.Min(int.MaxValue, available)), _scratch ??= new List<(int, Segment)>()) ?? -1;
+		if (length < 0 || length > available)
 		{
 			return -1;
 		}
 		if (Interlocked.Increment(ref HostClientDropped) <= 3)
 		{
-			Log?.Info("control guard: the host's game sent " + ClientUpstream.Short(commandLayout.Name) + " for a joiner's character; skipped (only its own player sets that)");
+			Log?.Info("control guard: the host's game sent " + ClientUpstream.Short(layout.Name) + " for a joiner's character; skipped (only its own player sets that)");
 		}
-		return num2;
+		return length;
 	}
 
 	public static void HostNextCharacterPostfix(SpectatingModesSessionComponent __instance, PlayerControllerComponent controller, ref IControllable? __result)
@@ -246,34 +243,35 @@ internal static class ControlGuard
 			{
 				return;
 			}
-			Entity entity = __result.Entity;
-			IControllable controllable = null;
-			List<Entity> list = new List<Entity>();
+			Entity skipped = __result.Entity;
+			IControllable next = null;
+			var alive = new List<Entity>();
 			Session session = HostWorld.Current?.HostClientSession;
-			if (session != null && session.TryFillAliveCharacters(list, preserveOrder: true))
+			if (session != null && session.TryFillAliveCharacters(alive, preserveOrder: true))
 			{
-				int num = Math.Max(0, list.IndexOf(entity));
-				for (int i = 1; i <= list.Count; i++)
+				// Walk the alive characters after the skipped one, wrapping, for the first free non-joiner character.
+				int start = Math.Max(0, alive.IndexOf(skipped));
+				for (int i = 1; i <= alive.Count; i++)
 				{
-					if (controllable != null)
+					if (next != null)
 					{
 						break;
 					}
-					Entity entity2 = list[(num + i) % list.Count];
-					if (!IsJoinerCharacter(entity2))
+					Entity candidate = alive[(start + i) % alive.Count];
+					if (!IsJoinerCharacter(candidate))
 					{
-						IControllable controllable2 = entity2.AsInterface<IControllable>();
-						if (controllable2 != null && (controllable2.Controller == null || controllable2.Controller == controller))
+						IControllable controllable = candidate.AsInterface<IControllable>();
+						if (controllable != null && (controllable.Controller == null || controllable.Controller == controller))
 						{
-							controllable = controllable2;
+							next = controllable;
 						}
 					}
 				}
 			}
-			__result = controllable;
+			__result = next;
 			if (Interlocked.Increment(ref HostF6Refused) <= 3)
 			{
-				Log?.Info($"host: F6 / spectator keys would take a joiner's character ({entity}); " + ((controllable != null) ? "going to the host's own character instead" : "ignored"));
+				Log?.Info($"host: F6 / spectator keys would take a joiner's character ({skipped}); " + (next != null ? "going to the host's own character instead" : "ignored"));
 			}
 		}
 		catch (Exception ex)
@@ -282,10 +280,7 @@ internal static class ControlGuard
 		}
 	}
 
-	internal static void SetJoinerDriven(Entity[] grids)
-	{
-		_joinerDriven = grids;
-	}
+	internal static void SetJoinerDriven(Entity[] grids) => _joinerDriven = grids;
 
 	internal static bool IsJoinerDriven(Entity? e)
 	{
@@ -293,10 +288,10 @@ internal static class ControlGuard
 		{
 			return false;
 		}
-		Entity[] joinerDriven = _joinerDriven;
-		for (int i = 0; i < joinerDriven.Length; i++)
+		Entity[] grids = _joinerDriven;
+		for (int i = 0; i < grids.Length; i++)
 		{
-			if (joinerDriven[i] == e)
+			if (grids[i] == e)
 			{
 				return true;
 			}
@@ -306,19 +301,13 @@ internal static class ControlGuard
 
 	private static int[] FlightTypeIds()
 	{
-		object obj = _flightTypeIds;
-		if (obj == null)
+		return _flightTypeIds ??= new int[]
 		{
-			obj = new int[4]
-			{
-				RuntimeDataInfo.Of(typeof(ControlData)).TypeId,
-				RuntimeDataInfo.Of(typeof(AngularControlData)).TypeId,
-				RuntimeDataInfo.Of(typeof(TargetControlData)).TypeId,
-				RuntimeDataInfo.Of(typeof(ControlReferenceOrientation)).TypeId
-			};
-			_flightTypeIds = (int[]?)obj;
-		}
-		return (int[])obj;
+			RuntimeDataInfo.Of(typeof(ControlData)).TypeId,
+			RuntimeDataInfo.Of(typeof(AngularControlData)).TypeId,
+			RuntimeDataInfo.Of(typeof(TargetControlData)).TypeId,
+			RuntimeDataInfo.Of(typeof(ControlReferenceOrientation)).TypeId
+		};
 	}
 
 	internal unsafe static int HostFlightSkip(bool removal, byte* payload, nint available, ReplicationCommandBuffer cb)
@@ -327,21 +316,21 @@ internal static class ControlGuard
 		{
 			return -1;
 		}
-		int num = ((int*)payload)[1];
-		int value = ((int*)payload)[2];
-		if (Array.IndexOf(FlightTypeIds(), value) < 0 || num < 0 || !(cb.ReadObject(num) is Entity e) || !IsJoinerDriven(e))
+		int objectIndex = ((int*)payload)[1];
+		int typeId = ((int*)payload)[2];
+		if (Array.IndexOf(FlightTypeIds(), typeId) < 0 || objectIndex < 0 || cb.ReadObject(objectIndex) is not Entity e || !IsJoinerDriven(e))
 		{
 			return -1;
 		}
 		int result = 12;
 		if (!removal)
 		{
-			int num2 = ((int*)payload)[3];
-			if (num2 < 0 || (nint)16 + (nint)num2 > available)
+			int dataLength = ((int*)payload)[3];
+			if (dataLength < 0 || 16 + (nint)dataLength > available)
 			{
 				return -1;
 			}
-			result = 16 + num2;
+			result = 16 + dataLength;
 		}
 		if (Interlocked.Increment(ref HostFlightSkipped) == 1)
 		{
@@ -396,9 +385,9 @@ internal static class ControlGuard
 		}
 	}
 
-	private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Entity, object> _watchedBlocks = new();
+	private static readonly ConditionalWeakTable<Entity, object> _watchedBlocks = new();
 
-	public static bool PanelDetailsPrefix(Keen.Game2.Simulation.StreamedUI.Terminal.ControlPanel.StreamedControlPanelSessionComponent __instance, Entity entity)
+	public static bool PanelDetailsPrefix(StreamedControlPanelSessionComponent __instance, Entity entity)
 	{
 		if (t_panelClose <= 0)
 		{
@@ -434,9 +423,9 @@ internal static class ControlGuard
 		{
 			return false;
 		}
-		for (Entity? p = e?.TryGet<Keen.VRage.Core.Game.Components.HierarchyComponent>()?.Parent; p != null; p = p.TryGet<Keen.VRage.Core.Game.Components.HierarchyComponent>()?.Parent)
+		for (Entity? p = e?.TryGet<HierarchyComponent>()?.Parent; p != null; p = p.TryGet<HierarchyComponent>()?.Parent)
 		{
-			if (p.TryGet<Keen.Game2.Client.WorldObjects.Character.CharacterControllableComponent>() != null)
+			if (p.TryGet<CharacterControllableComponent>() != null)
 			{
 				return foreign(p);
 			}
@@ -444,8 +433,5 @@ internal static class ControlGuard
 		return false;
 	}
 
-	public static string Describe()
-	{
-		return $"0.8.2 control guard ({IndexState}): dropped here {JoinerDropped} (joiner, other players' characters), host: joiners' {HostInjectDropped}, host game's {HostClientDropped}, F6 refused {HostF6Refused}; host passenger seat: flight data skipped {HostFlightSkipped}, ship actions skipped {HostShipActionsSkipped}; control panel close kept others' details {PanelDetailsKept}";
-	}
+	public static string Describe() => $"0.8.2 control guard ({IndexState}): dropped here {JoinerDropped} (joiner, other players' characters), host: joiners' {HostInjectDropped}, host game's {HostClientDropped}, F6 refused {HostF6Refused}; host passenger seat: flight data skipped {HostFlightSkipped}, ship actions skipped {HostShipActionsSkipped}; control panel close kept others' details {PanelDetailsKept}";
 }

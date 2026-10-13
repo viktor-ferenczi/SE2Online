@@ -34,19 +34,19 @@ internal sealed class NametagOverlay
 
 	public const string MarkerIdentifier = "Y51_SE2Online.Nametag";
 
-	private static readonly FieldInfo EntityBackingField = EngineMembers.Field(HookTargets.Reflected.Single((EngineMember m) => m.Id == "component-entity"));
+	private static readonly FieldInfo EntityBackingField = EngineMembers.Field(HookTargets.Reflected.Single(m => m.Id == "component-entity"));
 
-	private static readonly FieldInfo GpsConfigField = EngineMembers.Field(HookTargets.Reflected.Single((EngineMember m) => m.Id == "gps-render-config"));
+	private static readonly FieldInfo GpsConfigField = EngineMembers.Field(HookTargets.Reflected.Single(m => m.Id == "gps-render-config"));
 
 	private readonly IMpLog _log;
 
 	private readonly string _side;
 
-	private readonly Dictionary<ushort, Tag> _tags = new Dictionary<ushort, Tag>();
+	private readonly Dictionary<ushort, Tag> _tags = new();
 
 	private volatile Tag[] _active = Array.Empty<Tag>();
 
-	private static readonly List<WeakReference<NametagOverlay>> Overlays = new List<WeakReference<NametagOverlay>>();
+	private static readonly List<WeakReference<NametagOverlay>> Overlays = new();
 
 	public static long DrawRefreshes;
 
@@ -72,12 +72,12 @@ internal sealed class NametagOverlay
 		_side = side;
 		lock (Overlays)
 		{
-			Overlays.RemoveAll((WeakReference<NametagOverlay> w) => !w.TryGetTarget(out NametagOverlay _));
+			Overlays.RemoveAll(w => !w.TryGetTarget(out _));
 			Overlays.Add(new WeakReference<NametagOverlay>(this));
 		}
 	}
 
-	public static void DrawPrefix(Keen.Game2.Client.GameSystems.GPS.GPSMarkerRenderSessionComponent __instance)
+	public static void DrawPrefix(GPSMarkerRenderSessionComponent __instance)
 	{
 		try
 		{
@@ -112,16 +112,15 @@ internal sealed class NametagOverlay
 
 	private void PlacePositions()
 	{
-		Tag[] active = _active;
-		foreach (Tag tag in active)
+		foreach (Tag tag in _active)
 		{
 			Entity target = tag.Target;
 			if (target != null && !EngineCodec.IsDead(target))
 			{
-				Vector3D value = HeadPosition(target);
-				if (tag.Marker.Position != value)
+				Vector3D head = HeadPosition(target);
+				if (tag.Marker.Position != head)
 				{
-					tag.Marker.Position = value;
+					tag.Marker.Position = head;
 				}
 			}
 		}
@@ -129,9 +128,9 @@ internal sealed class NametagOverlay
 
 	private static Vector3D HeadPosition(Entity e)
 	{
-		WorldTransform worldTransform = e.Data.GetWorldTransform();
-		Vector3 up = Quaternion.GetUp(worldTransform.Orientation);
-		return worldTransform.Position + new Vector3D(up.X, up.Y, up.Z) * 2.1;
+		WorldTransform transform = e.Data.GetWorldTransform();
+		Vector3 up = Quaternion.GetUp(transform.Orientation);
+		return transform.Position + new Vector3D(up.X, up.Y, up.Z) * HeadOffset;
 	}
 
 	public static void ResetAll()
@@ -164,10 +163,10 @@ internal sealed class NametagOverlay
 		{
 			UpdateCore(session, sessionEntity, players);
 		}
-		catch (Exception value)
+		catch (Exception ex)
 		{
 			_failed = true;
-			_log.Error($"nametags({_side}): failed and switched off for this session (the game is unaffected): {value}");
+			_log.Error($"nametags({_side}): failed and switched off for this session (the game is unaffected): {ex}");
 			try
 			{
 				if (_provider != null)
@@ -196,60 +195,56 @@ internal sealed class NametagOverlay
 			}
 		}
 		Updates++;
-		bool flag = false;
-		HashSet<ushort> seen = new HashSet<ushort>();
-		foreach (var (num, text, entity) in players)
+		bool changed = false;
+		var seen = new HashSet<ushort>();
+		foreach (var (clientId, name, target) in players)
 		{
-			if (entity != null && !EngineCodec.IsDead(entity))
+			if (target != null && !EngineCodec.IsDead(target))
 			{
-				seen.Add(num);
-				if (!_tags.TryGetValue(num, out Tag value))
+				seen.Add(clientId);
+				if (!_tags.TryGetValue(clientId, out Tag tag))
 				{
-					GPSMarkersConfiguration gPSMarkersConfiguration = (GPSMarkersConfiguration)_styleConfig;
-					GPSMarker marker = new GPSMarker(_type, text, "Y51_SE2Online player", entity.Data.GetWorldTransform().Position, PlayerIcon.Get(gPSMarkersConfiguration.DefaultIcon), new ColorSRGB(140, 210, 255), alwaysShow: true, hidden: false, removeWithEntity: false, "Y51_SE2Online.Nametag", showOnMap: false);
-					Dictionary<ushort, Tag> tags = _tags;
-					ushort key = num;
-					Tag tag = new Tag
+					var style = (GPSMarkersConfiguration)_styleConfig;
+					var marker = new GPSMarker(_type, name, "Y51_SE2Online player", target.Data.GetWorldTransform().Position, PlayerIcon.Get(style.DefaultIcon), new ColorSRGB(140, 210, 255), alwaysShow: true, hidden: false, removeWithEntity: false, MarkerIdentifier, showOnMap: false);
+					_tags[clientId] = tag = new Tag
 					{
 						Marker = marker,
-						Name = text
+						Name = name
 					};
-					value = tag;
-					tags[key] = tag;
-					flag = true;
+					changed = true;
 				}
-				else if (value.Name != text)
+				else if (tag.Name != name)
 				{
-					value.Name = text;
-					value.Marker.Name = text;
+					tag.Name = name;
+					tag.Marker.Name = name;
 				}
-				value.Target = entity;
-				value.Marker.Color = MarkerColors.For(TeamPermissions.OwnerOf(entity)) ?? new ColorSRGB(140, 210, 255);
+				tag.Target = target;
+				tag.Marker.Color = MarkerColors.For(TeamPermissions.OwnerOf(target)) ?? new ColorSRGB(140, 210, 255);
 			}
 		}
-		foreach (ushort item in _tags.Keys.Where((ushort k) => !seen.Contains(k)).ToList())
+		foreach (ushort gone in _tags.Keys.Where(k => !seen.Contains(k)).ToList())
 		{
-			_tags.Remove(item);
-			flag = true;
+			_tags.Remove(gone);
+			changed = true;
 		}
-		if (flag)
+		if (changed)
 		{
-			ObservableList<GPSMarker> observableList = new ObservableList<GPSMarker>();
-			foreach (Tag value3 in _tags.Values)
+			var markers = new ObservableList<GPSMarker>();
+			foreach (Tag tag in _tags.Values)
 			{
-				observableList.Add(value3.Marker);
+				markers.Add(tag.Marker);
 			}
-			_provider.Current = observableList;
-			string text2 = string.Join(", ", from kv in _tags
+			_provider.Current = markers;
+			string shown = string.Join(", ", from kv in _tags
 				orderby kv.Key
 				select $"'{kv.Value.Name}' (ClientId {kv.Key})");
-			if (text2 != _lastShown)
+			if (shown != _lastShown)
 			{
-				_lastShown = text2;
-				_log.Info($"nametags({_side}): showing {_tags.Count} tag(s){((_tags.Count > 0) ? (": " + text2) : "")} (within {Range:0} m)");
+				_lastShown = shown;
+				_log.Info($"nametags({_side}): showing {_tags.Count} tag(s){(_tags.Count > 0 ? ": " + shown : "")} (within {Range:0} m)");
 			}
 		}
-		if (flag || _active.Length != _tags.Count)
+		if (changed || _active.Length != _tags.Count)
 		{
 			_active = _tags.Values.ToArray();
 		}
@@ -257,36 +252,36 @@ internal sealed class NametagOverlay
 		{
 			return;
 		}
-		Vector3D? vector3D = null;
+		Vector3D? anchor = null;
 		try
 		{
-			PlayerControllerComponent playerControllerComponent = session.SessionComponents.TryGet<ClientPlayersSessionComponent>()?.LocalPlayerController;
-			if (playerControllerComponent != null)
+			PlayerControllerComponent controller = session.SessionComponents.TryGet<ClientPlayersSessionComponent>()?.LocalPlayerController;
+			if (controller != null)
 			{
-				vector3D = GPSMarkerHelpers.GetAnchorPosition(playerControllerComponent);
+				anchor = GPSMarkerHelpers.GetAnchorPosition(controller);
 			}
 		}
 		catch (Exception)
 		{
 		}
-		foreach (Tag value4 in _tags.Values)
+		foreach (Tag tag in _tags.Values)
 		{
-			Entity target = value4.Target;
+			Entity target = tag.Target;
 			if (target == null || EngineCodec.IsDead(target))
 			{
-				value4.Marker.Hidden = true;
+				tag.Marker.Hidden = true;
 				continue;
 			}
-			Vector3D value2 = HeadPosition(target);
+			Vector3D head = HeadPosition(target);
 			// CommitFrame is not ordered after Physics.RigidPositionUpdate (seated pilots re-attach there) and races the HUD draw.
 			if (_drawFailed != 0 || DrawRefreshes == 0)
 			{
-				value4.Marker.Position = value2;
+				tag.Marker.Position = head;
 			}
-			bool flag2 = vector3D.HasValue && Vector3D.Distance(vector3D.GetValueOrDefault(), in value2) > Range;
-			if (value4.Marker.Hidden != flag2)
+			bool tooFar = anchor.HasValue && Vector3D.Distance(anchor.GetValueOrDefault(), in head) > Range;
+			if (tag.Marker.Hidden != tooFar)
 			{
-				value4.Marker.Hidden = flag2;
+				tag.Marker.Hidden = tooFar;
 			}
 		}
 	}
@@ -296,44 +291,42 @@ internal sealed class NametagOverlay
 		_sessionEntity = sessionEntity;
 		_tags.Clear();
 		_lastShown = "";
-		GPSMarkerRenderSessionComponent gPSMarkerRenderSessionComponent = session.SessionComponents.TryGet<GPSMarkerRenderSessionComponent>();
-		if (gPSMarkerRenderSessionComponent == null)
+		GPSMarkerRenderSessionComponent renderer = session.SessionComponents.TryGet<GPSMarkerRenderSessionComponent>();
+		if (renderer == null)
 		{
 			_failed = true;
 			_log.Warn("nametags(" + _side + "): this client session has no GPSMarkerRenderSessionComponent (HUD markers); nametags off");
 			return;
 		}
-		if (!(GpsConfigField.GetValue(gPSMarkerRenderSessionComponent) is GPSMarkersConfiguration gPSMarkersConfiguration))
+		if (GpsConfigField.GetValue(renderer) is not GPSMarkersConfiguration config)
 		{
 			_failed = true;
 			_log.Warn("nametags(" + _side + "): the HUD marker renderer has no GPSMarkersConfiguration yet; nametags off");
 			return;
 		}
-		_styleConfig = gPSMarkersConfiguration;
+		_styleConfig = config;
 		_type = null;
-		using (HashSet<GPSMarkerTypeDefinition>.Enumerator enumerator = gPSMarkersConfiguration.FullDisplayMarkerTypes.GetEnumerator())
+		// The first full-display marker type, else the player-made one.
+		using (HashSet<GPSMarkerTypeDefinition>.Enumerator types = config.FullDisplayMarkerTypes.GetEnumerator())
 		{
-			if (enumerator.MoveNext())
+			if (types.MoveNext())
 			{
-				GPSMarkerTypeDefinition current = enumerator.Current;
-				_type = current;
+				_type = types.Current;
 			}
 		}
-		if (_type == null)
+		_type ??= config.PlayerMadeMarkerType;
+		NametagMarkerProvider existing = sessionEntity.Components.OfType<NametagMarkerProvider>().FirstOrDefault();
+		if (existing != null)
 		{
-			_type = gPSMarkersConfiguration.PlayerMadeMarkerType;
-		}
-		NametagMarkerProvider nametagMarkerProvider = sessionEntity.Components.OfType<NametagMarkerProvider>().FirstOrDefault();
-		if (nametagMarkerProvider != null)
-		{
-			_provider = nametagMarkerProvider;
+			_provider = existing;
 		}
 		else
 		{
-			NametagMarkerProvider nametagMarkerProvider2 = new NametagMarkerProvider();
-			EntityBackingField.SetValue(nametagMarkerProvider2, sessionEntity);
-			sessionEntity.Components = sessionEntity.Components.Add(nametagMarkerProvider2);
-			_provider = nametagMarkerProvider2;
+			var created = new NametagMarkerProvider();
+			// The component is attached by hand, outside the DCS factory, so its Entity back-reference is set directly.
+			EntityBackingField.SetValue(created, sessionEntity);
+			sessionEntity.Components = sessionEntity.Components.Add(created);
+			_provider = created;
 		}
 		_log.Info($"nametags({_side}): HUD marker provider attached to the client session ({sessionEntity.Components.Length} components; marker type '{_type?.Name ?? "?"}'); tags show other players' names within {Range:0} m");
 	}
