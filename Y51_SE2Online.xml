@@ -30,7 +30,7 @@
 
     <!-- Empty stand-in that keeps the game's VRage.Library.Generator.dll out of the compile (its ~100 duplicated
          VRage.Library types make every use ambiguous). Built from Pulsar/GeneratorStub; see Pulsar/README.md. -->
-    <Asset Name="GeneratorStub" Path="Pulsar/VRage.Library.Generator.dll" Reference="true" />
+    <Asset Name="GeneratorStub" Path="Pulsar/VRage.Library.Generator.dll" Reference="true" Sha256="379c2109e35d660709feb5f45fec19ba5df36e462f8ade75790ef828fa3b224f" />
 
     <!-- The current plugin version's commit hash -->
     <Commit>TODO Git commit hash</Commit>
