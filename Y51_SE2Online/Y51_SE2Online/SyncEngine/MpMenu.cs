@@ -86,11 +86,11 @@ internal static class MpMenu
         if (____buttonsPanel == null) return;
         if (__instance.DataContext is MainMenuScreenViewModel main) _mainMenu = main;
         if (__instance.DataContext is not MainMenuScreenViewModel && __instance.DataContext is not InGameMenuScreenViewModel) return;
-        if (__instance.DataContext is InGameMenuScreenViewModel world && Joined && !____buttonsPanel.Children.OfType<Button>().Any(b => b.Name == "MenuMultiplayer"))
+        if (__instance.DataContext is InGameMenuScreenViewModel && Joined)
         {
-            // Fresh native list: Continue, separator, Save, Save as, [Publish], Load. The world belongs to the host.
-            var native = ____buttonsPanel.Children.OfType<Button>().Skip(1).Take(world.CanPublish ? 4 : 3);
-            foreach (var hostOnly in native) hostOnly.IsEnabled = false;
+            // The world belongs to the host. GameMenu names its buttons after their text ids; HostOnlyPrefix blocks the actions too.
+            foreach (var hostOnly in ____buttonsPanel.Children.OfType<Button>().Where(b => b.Name is "MenuSave" or "MenuSaveAs" or "MenuPublish" or "MenuLoad"))
+                hostOnly.IsEnabled = false;
         }
         var button = ____buttonsPanel.Children.OfType<Button>().FirstOrDefault(b => b.Name == "MenuMultiplayer");
         if (button == null)
