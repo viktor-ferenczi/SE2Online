@@ -339,6 +339,7 @@ public sealed partial class HostSession : IStorySink
 			case SyncMsg.SocialRequest:
 			case SyncMsg.ChatSend:
 			case SyncMsg.AdminRequest:
+			case SyncMsg.GpsShare:
 				HandleUpstream(peer, ch, data);
 				break;
 			case SyncMsg.ClientStatus:
@@ -618,6 +619,9 @@ public sealed partial class HostSession : IStorySink
 			break;
 		case SyncMsg.AdminRequest:
 			HandleAdmin(client, data);
+			break;
+		case SyncMsg.GpsShare:
+			HandleGpsShare(client, data);
 			break;
 		case SyncMsg.SocialRequest:
 			if (client.Status == ClientStatus.Synced && client.Player.IdentityId != 0)

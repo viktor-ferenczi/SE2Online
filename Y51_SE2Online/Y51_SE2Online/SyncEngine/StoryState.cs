@@ -49,6 +49,9 @@ internal static class StoryState
 
 	private static readonly ConcurrentDictionary<Type, StoryType?> Stories = new();
 
+	// The plugin's only story: joiners resolve host EntityIds (terminal inventories, trade, respawn) through it.
+	private static readonly Type OwnStory = typeof(SecureEntities).GetMethod(nameof(SecureEntities.ResolveSecureEntity))!.GetCustomAttribute<AsyncStateMachineAttribute>()!.StateMachineType;
+
 	public static StoryType? Find(string wireName, out string why)
 	{
 		Type? type = GameType(wireName);
@@ -72,6 +75,11 @@ internal static class StoryState
 		if (comma <= 0 || wireName.Length > 1024 || wireName.IndexOf('[') >= 0)
 		{
 			return null;
+		}
+		// Matched by name only: Pulsar gives each install's plugin assembly its own random name.
+		if (wireName[..comma] == OwnStory.FullName)
+		{
+			return OwnStory;
 		}
 		string assembly = wireName[(comma + 1)..].Trim();
 		if (!assembly.StartsWith("Game2.", StringComparison.Ordinal) && !assembly.StartsWith("VRage.", StringComparison.Ordinal))

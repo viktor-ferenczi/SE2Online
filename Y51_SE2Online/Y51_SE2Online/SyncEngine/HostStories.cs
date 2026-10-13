@@ -93,10 +93,11 @@ internal sealed class HostStories
 				string? fail = null;
 				_space.ClearLocalIds();
 				_space.Observed.Clear();
-				finish.Result = ObjectCodec.Encode(result, typeof(TResult), _space, ref fail);
+				object? sent = HostWorld.OreListFor(_entry.Peer, result);
+				finish.Result = ObjectCodec.Encode(sent, typeof(TResult), _space, ref fail);
 				if (fail == null && _space.LocalIds.Count > 0)
 				{
-					_owner.Defer(_entry, result, typeof(TResult));
+					_owner.Defer(_entry, sent, typeof(TResult));
 					return;
 				}
 				if (fail != null)

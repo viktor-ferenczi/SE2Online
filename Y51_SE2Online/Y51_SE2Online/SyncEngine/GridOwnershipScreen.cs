@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Threading;
+using Keen.Game2.Client.UI.TerminalScreen.ControlPanel;
 using Keen.VRage.UI.Screens;
 using Y51_SE2Online.Sync;
 
@@ -19,13 +20,16 @@ internal sealed class GridOwnershipView
     private SocialSnapshot _snapshot = new();
     private string _signature, _playersSignature;
     private bool _closed;
+    private readonly Func<SocialGrid> _focus;
 
-    internal Control Navigation, Body, Actions, EmbeddedActions;
+    internal Control Navigation, Body, Actions, EmbeddedActions, Focused;
     internal TextBlock Status => _status;
     internal bool Closed { set => _closed = value; }
 
-    public GridOwnershipView()
+    /// <param name="focus">One fixed grid (the control panel's selection) instead of the searchable list.</param>
+    public GridOwnershipView(Func<SocialGrid> focus = null)
     {
+        _focus = focus;
         _grids.ItemTemplate = new FuncDataTemplate<SocialGrid>((g, _) => g == null ? null : OnlineUi.ListCells("*,220,150", g.Name, PlayerName(g.Owner), g.Sharing.ToString()));
         _players.ItemTemplate = new FuncDataTemplate<SocialPlayer>((p, _) => p == null ? null : OnlineUi.ListCells("*", p.Name));
         _search.Width = 480; _search.TextChanged += (_, _) => RefreshPage(0);
@@ -55,13 +59,15 @@ internal sealed class GridOwnershipView
         Body = OnlineUi.Columns(OnlineUi.Panel(left), OnlineUi.Panel(right), "*,24,640");
         Actions = OnlineUi.Row(OnlineUi.Button("Factions", SocialUi.OpenFactions, "OwnershipFactions"));
         EmbeddedActions = OnlineUi.Row();
+        if (focus != null) { Focused = OnlineUi.Panel(right, new Thickness(20)); RefreshControls(); return; }
         RefreshControls(); RefreshPage(0);
     }
+    private SocialGrid SelectedGrid => _focus != null ? _focus() : _grids.SelectedItem as SocialGrid;
     internal void QueueRefresh() => Dispatcher.UIThread.Post(() => { if (!_closed) RefreshControls(); });
     private void RefreshPage(int offset) => SocialUi.Send(new(SocialAction.Refresh, Name: _search.Text ?? "", Offset: Math.Max(0, offset)));
     private string PlayerName(long id) => id == 0 ? "Unowned" : PlayerIdentities.IsNpc(id) ? "NPC / Scenario" : _snapshot.Players.FirstOrDefault(p => p.Identity == id)?.Name ?? "Player " + id;
     private void Share(GridSharing sharing) => Send(SocialAction.ShareGrid, sharing);
-    private SocialRequest Request(SocialAction action, GridSharing sharing = GridSharing.Private) => new(action, Player: (_players.SelectedItem as SocialPlayer)?.Identity ?? 0, Grid: (_grids.SelectedItem as SocialGrid)?.NetId ?? 0, Sharing: sharing);
+    private SocialRequest Request(SocialAction action, GridSharing sharing = GridSharing.Private) => new(action, Player: (_players.SelectedItem as SocialPlayer)?.Identity ?? 0, Grid: SelectedGrid?.NetId ?? 0, Sharing: sharing);
     private void Send(SocialAction action, GridSharing sharing = GridSharing.Private) => SocialUi.Send(Request(action, sharing));
     private void Confirm(string title, string text, SocialAction action)
     {
@@ -91,7 +97,7 @@ internal sealed class GridOwnershipView
     private void RefreshActions()
     {
         if (_claim == null) return;
-        var grid = _grids.SelectedItem as SocialGrid;
+        var grid = SelectedGrid;
         bool owner = grid != null && _snapshot.Actor != 0 && grid.Owner == _snapshot.Actor;
         _private.IsEnabled = _everyone.IsEnabled = owner;
         _faction.IsEnabled = owner && _snapshot.Factions.Any(f => f.Members.Contains(_snapshot.Actor));
@@ -117,5 +123,107 @@ public sealed class GridOwnershipScreen : ScreenView
         base.OnDataContextChanged(e);
         if (_model != null) _model.Refresh -= _view.QueueRefresh;
         _model = DataContext as SocialScreenViewModel; if (_model != null) _model.Refresh += _view.QueueRefresh;
+    }
+}
+
+/// <summary>
+/// The terminal control panel: selecting the grid's own row shows its ownership controls, selecting one block shows
+/// that block's whitelist and blacklist.
+/// </summary>
+internal static class ControlPanelOwnership
+{
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ControlPanelScreen, object> Built = new();
+
+    // A class handler, not a constructor patch: the screen's constructor is a one-line InitializeComponent call that
+    // the precompiled caller inlines, so a Harmony patch on it never runs.
+    internal static void Install() => Control.LoadedEvent.AddClassHandler<ControlPanelScreen>((screen, _e) =>
+    {
+        if (Built.TryGetValue(screen, out object _)) return;
+        Built.Add(screen, null);
+        Build(screen);
+    });
+
+    private static void Build(ControlPanelScreen __instance)
+    {
+        try
+        {
+            if (__instance.Content is not Grid root || root.Children.OfType<Grid>().FirstOrDefault(g => g.ColumnDefinitions.Count == 3) is not { } columns)
+            {
+                GameLog.Instance.Warn("grid ownership: the control panel layout was not recognised; ownership and block access controls are unavailable");
+                return;
+            }
+            string gridName = null;
+            Guid gridId = Guid.Empty;
+            long askedMs = 0;
+            var grids = new GridOwnershipView(() => gridName != null && SocialUi.Snapshot.Focus is { } focus && focus.Name == gridName ? focus : null);
+            var blocks = new BlockAccessView();
+            var gridPanel = grids.Focused;
+            var blockPanel = blocks.Panel;
+            foreach (var panel in new[] { gridPanel, blockPanel })
+            {
+                panel.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Bottom;
+                panel.MaxHeight = 600; panel.Margin = new Thickness(16); panel.IsVisible = false;
+                Grid.SetColumn(panel, 1);
+                columns.Children.Add(panel);
+            }
+            // The block panel sits over the block's own controls, so it opens on demand.
+            var toggle = OnlineUi.Button("Block access", () => { blockPanel.IsVisible = !blockPanel.IsVisible; blocks.Refresh(); }, "BlockAccessToggle");
+            toggle.FontSize = 20; toggle.MinHeight = 44; toggle.Padding = new Thickness(14, 6);
+            toggle.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right; toggle.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Bottom;
+            toggle.Margin = new Thickness(16); toggle.IsVisible = false;
+            Grid.SetColumn(toggle, 1);
+            columns.Children.Add(toggle);
+            blockPanel.Margin = new Thickness(16, 16, 16, 76);
+
+            ControlPanelViewModel model = null;
+            void Select()
+            {
+                bool online = SocialUi.Ready;
+                var grid = online ? model?.SelectedGridModel : null;
+                var selection = model?.BlockTerminalSelection;
+                var block = online && grid == null && selection is { Count: 1 } && selection[0] is ControlPanelEntityViewModel entity ? entity : null;
+                gridPanel.IsVisible = grid != null;
+                gridName = grid == null ? null : SocialState.Clean(grid.DisplayName, 100);
+                var id = grid?.EntityId.EntityGuid ?? Guid.Empty;
+                if (id != gridId) askedMs = 0;
+                gridId = id;
+                toggle.IsVisible = block != null;
+                if (block == null) blockPanel.IsVisible = false;
+                blocks.Select(block?.Model.EntityId.EntityGuid ?? Guid.Empty);
+                grids.QueueRefresh();
+            }
+            void Changed(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+            {
+                if (e.PropertyName is nameof(ControlPanelViewModel.SelectedGridModel) or nameof(ControlPanelViewModel.BlockTerminalSelection)) Select();
+            }
+            // Polled as well: clearing the selection raises no property change.
+            var timer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, (_, _) =>
+            {
+                Select();
+                if (gridPanel.IsVisible)
+                {
+                    long now = Core.MpClock.NowMs();
+                    // The host drops requests closer than 200 ms apart; ask again until this grid is the focus.
+                    if ((SocialUi.Snapshot.Focus?.Name != gridName) && now - askedMs > 1000) { askedMs = now; SocialUi.Send(new SocialRequest(SocialAction.Refresh, Secure: gridId)); }
+                    grids.QueueRefresh();
+                }
+                if (toggle.IsVisible) blocks.Refresh();
+            });
+            timer.Stop();
+            void Bind()
+            {
+                if (model != null) model.PropertyChanged -= Changed;
+                model = __instance.DataContext as ControlPanelViewModel;
+                if (model != null) model.PropertyChanged += Changed;
+                Select();
+            }
+            __instance.DataContextChanged += (_, _) => Bind();
+            __instance.AttachedToVisualTree += (_, _) => timer.Start();
+            __instance.DetachedFromVisualTree += (_, _) => timer.Stop();
+            Bind();
+            timer.Start();
+            GameLog.Instance.Info("grid ownership: control panel ownership and block access controls added");
+        }
+        catch (Exception ex) { GameLog.Instance.Warn("grid ownership: control panel hook failed: " + ex.Message); }
     }
 }

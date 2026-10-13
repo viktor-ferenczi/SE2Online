@@ -134,7 +134,7 @@ internal static class OnlineUi
         var footer = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), MinHeight = 68, Margin = new Thickness(72, 0, 72, 20) };
         var back = Back(screen, () => (screen.DataContext as OnlineScreenViewModel)?.Close());
         if (screen is PlayersScreen) back = Back(screen, () => (screen.DataContext as PlayersScreenViewModel)?.Close());
-        if (screen is FactionsScreen || screen is GridOwnershipScreen) back = Back(screen, () => (screen.DataContext as SocialScreenViewModel)?.Close());
+        if (screen is FactionsScreen || screen is GridOwnershipScreen || screen is GpsShareScreen) back = Back(screen, () => (screen.DataContext as SocialScreenViewModel)?.Close());
         if (screen is AdminScreen) back = Back(screen, () => (screen.DataContext as AdminScreenViewModel)?.Close());
         if (screen is RespawnScreen) back.IsVisible = false;
         footer.Children.Add(back); Grid.SetColumn(actions, 2); footer.Children.Add(actions);

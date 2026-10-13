@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace Y51_SE2Online.Core;
 
-/// <summary>A rebindable hotkey such as "Enter", "F3" or "Alt+F10", read through Windows virtual-key codes.</summary>
+/// <summary>A rebindable hotkey such as "Enter", "F3" or "Alt+F10", stored as Windows virtual-key codes (the game numbers its keyboard inputs the same way).</summary>
 public readonly record struct KeyBinding(int Vk, bool Ctrl, bool Shift, bool Alt)
 {
     private const int VkShift = 0x10, VkCtrl = 0x11, VkAlt = 0x12;

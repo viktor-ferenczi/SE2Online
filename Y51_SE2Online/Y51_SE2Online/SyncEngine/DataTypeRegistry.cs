@@ -86,7 +86,18 @@ internal static class DataTypeRegistry
 						continue;
 					}
 					Collect(type, found);
-					foreach (MemberInfo member in type.GetMembers(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+					MemberInfo[] members;
+					// Native Linux installs lack some editor assemblies; one unloadable member signature must not end the scan.
+					try
+					{
+						members = type.GetMembers(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+					}
+					catch (Exception)
+					{
+						Failed++;
+						continue;
+					}
+					foreach (MemberInfo member in members)
 					{
 						Collect(member, found);
 					}

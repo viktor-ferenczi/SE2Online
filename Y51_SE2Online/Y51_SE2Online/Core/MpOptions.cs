@@ -51,7 +51,9 @@ public sealed class MpOptions
 
 	public const string Prefix = "-y51online:";
 
-	public const int DefaultInterpMs = 60;
+	// Floor of the adaptive playout delay: two 60 Hz host samples plus margin. Live sessions sat pinned at the old 60 ms
+	// floor (p97 lateness + 12 ms margin stayed below it, extrapolation 0.3-0.4%), so the floor alone delayed every remote body.
+	public const int DefaultInterpMs = 35;
 
 	public const double DefaultNametagRange = 200.0;
 
@@ -83,7 +85,7 @@ public sealed class MpOptions
 
 	public string? PlayerName { get; private set; }
 
-	public int InterpMs { get; private set; } = 60;
+	public int InterpMs { get; private set; } = DefaultInterpMs;
 
 	public bool Character { get; private set; } = true;
 
@@ -535,7 +537,7 @@ public sealed class MpOptions
 			{
 				parts.Add($"name='{PlayerName}'");
 			}
-			if (Join && InterpMs != 60)
+			if (Join && InterpMs != DefaultInterpMs)
 			{
 				parts.Add($"interp={InterpMs}ms");
 			}

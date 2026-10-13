@@ -239,7 +239,7 @@ internal sealed partial class HostWorld
                     foreach (var e in spawner.SpawnedEntities.ToList()) { spawner.SpawnedEntities.Remove(e); e.Data.TryRemove<ProcedurallyGeneratedTag>(); ship.Add(e); }
                 foreach (var grid in ship.Where(e => e.TryGet<CubeGridComponent>() != null && e.TryGet<OwnershipComponent>() != null))
                 {
-                    grid.Get<OwnershipComponent>().Owner = identity;
+                    WorldSocial.SetOwner(grid, (long)identity);
                     WorldSocial.SetSharing(grid, GridSharing.Private);
                 }
                 foreach (var root in roots) if (!EngineCodec.IsDead(root)) session.Get<IEntitySpawner>().DeleteEntity(root);

@@ -117,6 +117,7 @@ public sealed class MpPlugin : IPlugin, IDisposable
 		_options = new MpOptions();
 		host.OnBeforeProjectsLoaded += OnBeforeProjectsLoaded;
 		host.OnBeforeEngineInstantiated += OnBeforeEngineInstantiated;
+		AssertHandler.Install();
 		Controller = new OnlineSessionController(new OnlineRuntime(this));
 		var bootstrap = new[]
 		{
@@ -143,7 +144,12 @@ public sealed class MpPlugin : IPlugin, IDisposable
 			HeadlessWorldLoading.Install(_harmony);
 			HeadlessReplication.Install(_harmony, _log);
 		}
-		else MpMenu.Install(_harmony);
+		else
+		{
+			MpMenu.Install(_harmony);
+			GpsShareUi.Install();
+			PermissionFeedback.Install(_harmony);
+		}
 		_log.Info(DedicatedRuntime.Headless ? "Y51_SE2Online dedicated bootstrap installed" : "Y51_SE2Online ready: use Multiplayer in the main or pause menu");
 	}
 
@@ -197,6 +203,7 @@ public sealed class MpPlugin : IPlugin, IDisposable
 			hostWorld.OnePilot = _options.OnePilot;
 			hooks.Add(Patch("host:CommitFrame", HookTargets.CommitFrame, new HarmonyMethod(typeof(HostWorld), "CommitPrefix"), new HarmonyMethod(typeof(HostWorld), "CommitPostfix")));
 			hooks.Add(Patch("host:BuildAndReset", HookTargets.BuildAndReset, null, new HarmonyMethod(typeof(HostWorld), "BundlePostfix")));
+			HostWorld.InstallOreMarkers(_installingMode ? _modeHarmony : _harmony);
 			if (!DedicatedRuntime.Headless)
 			{
 				// Encounters spawn through ReplicateStagedEntitiesAsync, which never passes BuildAndReset; its bundle reaches the local client here.
@@ -310,6 +317,7 @@ public sealed class MpPlugin : IPlugin, IDisposable
 					var weather = typeof(Keen.Game2.Client.WorldObjects.Weather.WeatherModifierRenderComponent);
 					_modeHarmony.Patch(AccessTools.Method(weather, "OnAddedToScene"), prefix: new HarmonyMethod(typeof(WeatherRenderGuard), nameof(WeatherRenderGuard.AddedPrefix)));
 					_modeHarmony.Patch(AccessTools.Method(weather, "OnBeforeRemovedFromScene"), prefix: new HarmonyMethod(typeof(WeatherRenderGuard), nameof(WeatherRenderGuard.RemovedPrefix)));
+					_modeHarmony.Patch(AccessTools.GetDeclaredMethods(typeof(Keen.Game2.Client.WorldObjects.PlanetEnvironmentRenderComponent)).Single(m => m.Name.EndsWith(".OnAddedToScene", StringComparison.Ordinal)), postfix: new HarmonyMethod(typeof(WeatherRenderGuard), nameof(WeatherRenderGuard.PlanetAddedPostfix)));
 				}
 				catch (Exception ex) { _log.Warn("client: weather render guard not installed: " + ex.Message); }
 			}

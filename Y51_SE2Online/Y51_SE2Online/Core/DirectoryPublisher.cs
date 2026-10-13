@@ -18,7 +18,7 @@ public sealed class DirectoryPublisher
     {
         if (_stopping || !_flight.IsCompleted || now < _next) return;
         _next = now + 30000;
-        _flight = Publish(listing);
+        _flight = Task.Run(() => Publish(listing));
     }
     private async Task Publish(DirectoryListing listing)
     {

@@ -56,6 +56,8 @@ public sealed class MpTransport : ITransport, IDisposable
 
 		public int EarlyBytes;
 
+		public int HelloResends;
+
 		public bool StateAckDirty;
 
 		public long LastStateSentMs;
@@ -211,9 +213,11 @@ public sealed class MpTransport : ITransport, IDisposable
 			return;
 		}
 		long now = _clock();
+		long started = System.Diagnostics.Stopwatch.GetTimestamp();
 		_events.Clear();
 		_messages.Clear();
 		_link.Pump(_events, _messages);
+		double pumpMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 		// Connects first so a message arriving in the same pump finds its peer; disconnects last so
 		// the peer's final messages are still delivered.
 		foreach (var linkEvent in _events)
@@ -236,11 +240,18 @@ public sealed class MpTransport : ITransport, IDisposable
 				OnLinkEvent(in e, now);
 			}
 		}
+		double handleMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds - pumpMs;
 		OutRequest request;
+		int dispatched = 0;
+		long dispatchedBytes = 0;
 		while (_out.TryDequeue(out request))
 		{
+			dispatched++;
+			dispatchedBytes += request.Payload.Length;
 			Dispatch(in request, now);
 		}
+		double dispatchMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds - pumpMs - handleMs;
+		_lastPoll = (pumpMs, _messages.Count, handleMs, dispatched, dispatchedBytes, dispatchMs);
 		if (_byConn.Count == 0)
 		{
 			return;
@@ -253,6 +264,11 @@ public sealed class MpTransport : ITransport, IDisposable
 			}
 		}
 	}
+
+	private (double PumpMs, int In, double HandleMs, int Sends, long SendBytes, double DispatchMs) _lastPoll;
+
+	/// <summary>Where the last Poll spent its time, for slow-loop warnings.</summary>
+	public string LastPollDetail => $"pump {_lastPoll.PumpMs:0} ms, {_lastPoll.In} msgs in handled in {_lastPoll.HandleMs:0} ms, {_lastPoll.Sends} sends ({_lastPoll.SendBytes} B) in {_lastPoll.DispatchMs:0} ms";
 
 	private PeerState[] ToArray()
 	{
@@ -277,6 +293,13 @@ public sealed class MpTransport : ITransport, IDisposable
 		}
 		if (now - p.LastPingSentMs >= _o.PingIntervalMs)
 		{
+			// Our Hello was seemingly never taken (the other side answers nothing until it has it): send it again.
+			if (p.Stats.PongsReceived == 0 && p.Stats.PingsSent >= 3 * (p.HelloResends + 1) && p.HelloResends < 3)
+			{
+				p.HelloResends++;
+				_log.Warn($"peer {p.Id}: no answer to {p.Stats.PingsSent} pings; sending our Hello again ({p.HelloResends}/3)");
+				SendHello(p);
+			}
 			p.LastPingSentMs = now;
 			var ping = new WireWriter(16).U32(p.NextPingId++).I64(_clock());
 			SendFrame(p, Channel.Control, FrameKind.Ping, ping.ToArray(), reliable: true);
@@ -441,15 +464,7 @@ public sealed class MpTransport : ITransport, IDisposable
 				p.Stats.ConnectedMs = now;
 				_byConn[e.Conn] = p;
 				_byPeer[peerId] = p;
-				var hello = new WireWriter(128)
-					.U16(Frame.ProtocolVersion)
-					.U8(_o.Role)
-					.U64(_o.LocalId)
-					.Str(_o.PluginVersion)
-					.Str(_o.GameVersion)
-					.Str(_o.LocalName)
-					.U64(_o.InstanceId);
-				SendFrame(p, Channel.Control, FrameKind.Hello, hello.ToArray(), reliable: true);
+				SendHello(p);
 				_log.Info($"link up to {peerId} (conn {e.Conn}), Hello sent");
 			}
 		}
@@ -457,6 +472,19 @@ public sealed class MpTransport : ITransport, IDisposable
 		{
 			Close(closing, e.Code, e.Reason, e.ByPeer, "link", notifyPeer: false);
 		}
+	}
+
+	private void SendHello(PeerState p)
+	{
+		var hello = new WireWriter(128)
+			.U16(Frame.ProtocolVersion)
+			.U8(_o.Role)
+			.U64(_o.LocalId)
+			.Str(_o.PluginVersion)
+			.Str(_o.GameVersion)
+			.Str(_o.LocalName)
+			.U64(_o.InstanceId);
+		SendFrame(p, Channel.Control, FrameKind.Hello, hello.ToArray(), reliable: true);
 	}
 
 	private void OnLinkMessage(in LinkMessage m, long now)
@@ -653,7 +681,11 @@ public sealed class MpTransport : ITransport, IDisposable
 	{
 		if (p.Ready)
 		{
-			ProtocolError(p, "second Hello");
+			// A peer that heard nothing back repeats its Hello (see Service); the same game instance is not an error.
+			if (payload.Length < 8 || new WireReader(payload[^8..]).U64() != p.InstanceId || p.InstanceId == 0)
+			{
+				ProtocolError(p, "second Hello");
+			}
 			return;
 		}
 		ushort protocol;

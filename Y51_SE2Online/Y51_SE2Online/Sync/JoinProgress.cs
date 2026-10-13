@@ -8,8 +8,6 @@ public sealed class JoinProgress
 {
 	public const int PlayingToastSeconds = 8;
 
-	public const string RejoinKeyName = "F3";
-
 	private readonly object _sync = new();
 
 	private JoinStage _stage;

@@ -3894,7 +3894,7 @@ internal sealed class ClientWorld
 		if (done && _o.Rejoin && atMenu && !transitioning && !clientUp)
 		{
 			string why = Interlocked.Exchange(ref _rejoinAsk, null);
-			if (why == null && RejoinKey.Pressed())
+			if (why == null && GameKeys.MenuJoinPressed())
 			{
 				why = "F3 pressed at the main menu";
 			}

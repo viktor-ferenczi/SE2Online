@@ -331,8 +331,9 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 					continue;
 				}
 				if (!roster.Any(p => p.Identity == actor)) continue;
-				if (command.Request.Action == SocialAction.Refresh) _socialViews[actor] = command.Request;
-				else _socialMessages[actor] = social.Apply(actor, command.Request, id => _ids.TryGet(id, out Entity entity) && !EngineCodec.IsDead(entity) ? entity : null);
+				var request = WithSecureTarget(session, actor, command.Request);
+				if (request.Action == SocialAction.Refresh) _socialViews[actor] = request;
+				else _socialMessages[actor] = social.Apply(actor, request, id => _ids.TryGet(id, out Entity entity) && !EngineCodec.IsDead(entity) ? entity : null);
 				changed = true;
 			}
 			long now = MpClock.NowMs();
@@ -345,6 +346,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 				var view = _socialViews.TryGetValue(player.Identity, out var current) ? current : new SocialRequest(SocialAction.Refresh);
 				var message = _socialMessages.TryGetValue(player.Identity, out var text) ? text : "";
 				var snapshot = social.Snapshot(player.Identity, grids, view, message);
+				snapshot.FocusBlock = FocusBlockOf(player.Identity);
 				var peer = _host.Players().FirstOrDefault(p => p.ClientId == player.ClientId)?.Peer;
 				if (peer.HasValue) _host.SendSocial(peer.Value, snapshot);
 			}
@@ -1551,6 +1553,7 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 		OnServer(() => UpdateSocial(server.Session));
 		OnServer(() => UpdateAdmin(server.Session));
+		OnServer(() => UpdateGps(server.Session));
 		Registration next;
 		while (_registrations.TryDequeue(out next))
 		{

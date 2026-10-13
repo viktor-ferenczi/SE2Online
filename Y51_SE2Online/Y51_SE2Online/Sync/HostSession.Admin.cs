@@ -180,7 +180,11 @@ public sealed partial class HostSession
 		case AdminAction.Unban: result = _o.Access.Unban(account); break;
 		case AdminAction.Promote:
 		case AdminAction.Demote:
-			if (actorRole != OnlineRole.Host && r.Action == AdminAction.Demote && r.Target != actorId) return "Only the host can demote another admin.";
+			if (actorRole != OnlineRole.Host && r.Action == AdminAction.Demote)
+			{
+				if (account == PeerAlias.SteamOf(actorId)) return "You cannot demote yourself.";
+				if (account == _o.HostSteamId) return "You cannot demote the host.";
+			}
 			result = _o.Access.SetAdmin(account, name, r.Action == AdminAction.Promote); break;
 		case AdminAction.WhitelistAdd: result = _o.Access.SetWhitelisted(account, name, true); break;
 		case AdminAction.WhitelistRemove: result = _o.Access.SetWhitelisted(account, name, false); break;

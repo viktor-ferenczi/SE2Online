@@ -12,6 +12,7 @@ using Keen.Game2.Simulation.GameSystems.Ownership;
 using Keen.Game2.Simulation.GameSystems.Permissions;
 using Keen.Game2.Simulation.WorldObjects.CubeBlocks;
 using Keen.Game2.Simulation.WorldObjects.CubeGrids;
+using Keen.VRage.Core.Game.Systems;
 using Keen.VRage.Core.Worlds;
 using Keen.VRage.Core.Game.Components;
 using Keen.VRage.DCS.Components;
@@ -102,7 +103,7 @@ internal sealed class WorldSocial
             // Dedicated worlds have no host player to manage legacy host-owned grids.
             if (DedicatedRuntime.Requested && TeamPermissions.OwnerOf(entity) == PlayerIdentities.HotfixIdentity)
             {
-                entity.Get<OwnershipComponent>().Owner = new IdentityId(0);
+                SetOwner(entity, 0);
                 SetSharing(entity, GridSharing.Everyone);
                 continue;
             }
@@ -123,6 +124,26 @@ internal sealed class WorldSocial
         }
         return null;
     }
+    internal static Entity BlockOf(Entity entity)
+    {
+        for (int depth = 0; entity != null && depth < 64; depth++)
+        {
+            if (entity.TryGet<CubeBlockComponent>() != null) return entity;
+            if (entity.TryGet<CubeGridComponent>() != null) return null;
+            entity = entity.TryGet<HierarchyComponent>()?.Parent;
+        }
+        return null;
+    }
+    // ponytail: parsed lists cached by their exact text, never evicted; a world has at most a few thousand distinct lists.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, BlockAcl> Acls = new(StringComparer.Ordinal);
+    internal static BlockAcl AclOf(Entity entity)
+    {
+        string group = BlockOf(entity)?.TryGet<BlockPermissionsComponent>()?.AccessGroup.String;
+        return BlockAcl.IsAcl(group) ? Acls.GetOrAdd(group, BlockAcl.Parse) : BlockAcl.Empty;
+    }
+    private static bool EveryoneMayUse(Entity entity)
+        => BlockOf(entity)?.TryGet<BlockPermissionsComponent>()?.AccessGroup is { } group && group == Singleton<DefinitionManager>.Instance.GetConfiguration<PermissionsConfiguration>().EveryoneAccess;
+
     internal static GridSharing SharingOf(Entity entity)
     {
         var key = GridOf(entity)?.TryGet<GridPermissionsComponent>()?.BuildPermissions;
@@ -131,6 +152,15 @@ internal sealed class WorldSocial
         if (key == Private || !key.HasValue) return GridSharing.Private;
         return key == Singleton<DefinitionManager>.Instance.GetConfiguration<PermissionsConfiguration>().EveryoneAccess ? GridSharing.Everyone : GridSharing.Private;
     }
+    // Through the game's transfer so PCUTrackerSessionComponent moves the grid's PCU; a bare Owner write left it
+    // on the old owner and the new owner went negative as blocks were removed.
+    internal static void SetOwner(Entity grid, long owner)
+    {
+        var to = new IdentityId(owner);
+        if ((grid.Scene?.UserObject as Session)?.SessionComponents.TryGet<OwnershipSessionComponent>() is { } ownership) ownership.TryTransferOwnership(grid, to);
+        else grid.Get<OwnershipComponent>().Owner = to;
+    }
+
     internal static void SetSharing(Entity grid, GridSharing sharing)
         => grid.Get<GridPermissionsComponent>().BuildPermissions = sharing switch { GridSharing.Faction => Faction, GridSharing.Everyone => Everyone, _ => Private };
 
@@ -139,17 +169,20 @@ internal sealed class WorldSocial
         var grid = GridOf(target);
         if (grid == null) return null;
         long owner = TeamPermissions.OwnerOf(grid);
-        if (PlayerIdentities.IsNpc(owner)) return null;
+        // Unowned, NPC and "everyone may use" blocks keep the game's own rules (anyone can claim an unowned grid anyway).
+        if (!PlayerIdentities.IsHuman(owner) || EveryoneMayUse(target)) return null;
+        var acl = AclOf(target);
         if (ClientWorld.Current?.BoundSession is { } client)
-            return SocialState.CanAccess(owner, actor, SharingOf(grid), client.Social.Factions);
+            return BlockAcl.CanUse(owner, actor, SharingOf(grid), client.Social.Factions, acl);
         var social = HostWorld.Current?.Social;
         if (social == null) return null;
-        lock (social.Sync) return SocialState.CanAccess(owner, actor, SharingOf(grid), social.State.Factions);
+        lock (social.Sync) return BlockAcl.CanUse(owner, actor, SharingOf(grid), social.State.Factions, acl);
     }
 
     internal string Apply(long actor, SocialRequest request, Func<uint, Entity> resolve)
     {
         if (request.Action < SocialAction.ClaimGrid) return State.Apply(actor, request);
+        if (request.Action is SocialAction.BlockAllow or SocialAction.BlockDeny) return ApplyBlock(actor, request, resolve);
         var grid = resolve(request.Grid);
         if (grid == null || GridOf(grid) != grid || grid.TryGet<OwnershipComponent>() == null || grid.TryGet<GridPermissionsComponent>() == null) return "That grid is no longer available.";
         long owner = TeamPermissions.OwnerOf(grid);
@@ -157,7 +190,7 @@ internal sealed class WorldSocial
         if (request.Action == SocialAction.ClaimGrid)
         {
             if (owner != 0) return "That grid already has an owner.";
-            grid.Get<OwnershipComponent>().Owner = new IdentityId(actor); SetSharing(grid, GridSharing.Private);
+            SetOwner(grid, actor); SetSharing(grid, GridSharing.Private);
         }
         else
         {
@@ -170,13 +203,30 @@ internal sealed class WorldSocial
                     SetSharing(grid, request.Sharing); break;
                 case SocialAction.TransferGrid:
                     if (!State.Players.Any(p => p.Identity == request.Player) || request.Player == actor) return "Choose another player in this world.";
-                    grid.Get<OwnershipComponent>().Owner = new IdentityId(request.Player); SetSharing(grid, GridSharing.Private); break;
+                    SetOwner(grid, request.Player); SetSharing(grid, GridSharing.Private); break;
                 case SocialAction.ReleaseGrid:
-                    grid.Get<OwnershipComponent>().Owner = new IdentityId(0); SetSharing(grid, GridSharing.Everyone); break;
+                    SetOwner(grid, 0); SetSharing(grid, GridSharing.Everyone); break;
                 default: return "Unknown grid action.";
             }
         }
         State.Revision++; return "Grid ownership updated.";
+    }
+
+    private string ApplyBlock(long actor, SocialRequest request, Func<uint, Entity> resolve)
+    {
+        var block = resolve(request.Grid);
+        var permissions = block?.TryGet<BlockPermissionsComponent>();
+        var grid = block == null ? null : GridOf(block);
+        if (permissions == null || grid == null || BlockOf(block) != block) return "That block is no longer available.";
+        long owner = TeamPermissions.OwnerOf(grid);
+        if (!PlayerIdentities.IsHuman(owner) || owner != actor) return "Only this grid's owner can change who may use its blocks.";
+        bool add = request.Offset == 1, deny = request.Action == SocialAction.BlockDeny;
+        if (request.Player == actor || (add && !State.Players.Any(p => p.Identity == request.Player))) return "Choose another player in this world.";
+        var acl = AclOf(block).With(request.Player, deny, add);
+        if (add && !(deny ? acl.Deny : acl.Allow).Contains(request.Player)) return $"A block list holds at most {BlockAcl.MaxPerList} players.";
+        permissions.AccessGroup = acl.IsEmpty ? Singleton<DefinitionManager>.Instance.GetConfiguration<PermissionsConfiguration>().OwnerAccess : StringId.Get(acl.ToString());
+        State.Revision++;
+        return add ? (deny ? "Player blacklisted on this block." : "Player whitelisted on this block.") : "Player removed from the block's list.";
     }
 
     internal SocialSnapshot Snapshot(long actor, SocialGrid[] grids, SocialRequest view, string message)
@@ -184,7 +234,7 @@ internal sealed class WorldSocial
         var copy = SocialState.Deserialize(State.Serialize());
         var filtered = grids.Where(g => string.IsNullOrWhiteSpace(view.Name) || g.Name.Contains(view.Name, StringComparison.OrdinalIgnoreCase)).OrderBy(g => g.Name).ThenBy(g => g.NetId).ToArray();
         int offset = Math.Clamp(view.Offset, 0, Math.Max(0, ((filtered.Length - 1) / 100) * 100));
-        var snapshot = new SocialSnapshot { Actor = actor, Revision = State.Revision, Message = message, Players = copy.Players.ToArray(), Factions = copy.Factions.ToArray(), TotalGrids = filtered.Length, Offset = offset, Grids = filtered.Skip(offset).Take(100).ToArray() };
+        var snapshot = new SocialSnapshot { Actor = actor, Revision = State.Revision, Message = message, Players = copy.Players.ToArray(), Factions = copy.Factions.ToArray(), TotalGrids = filtered.Length, Offset = offset, Grids = filtered.Skip(offset).Take(100).ToArray(), Focus = view.Grid == 0 ? null : grids.FirstOrDefault(g => g.NetId == view.Grid) };
         if (actor == PlayerIdentities.HotfixIdentity) Local = snapshot;
         return snapshot;
     }

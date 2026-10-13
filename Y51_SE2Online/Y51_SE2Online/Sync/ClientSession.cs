@@ -105,6 +105,12 @@ public sealed class ClientSession
 			_t.Send(Host.Value, Channel.Control, SocialMessage.Encode(SyncMsg.ChatSend, new ChatSend(text)));
 	}
 
+	public void SendGpsShare(GpsShare share)
+	{
+		if (Host.HasValue && CurrentPhase == Phase.Accepted)
+			_t.Send(Host.Value, Channel.Control, SocialMessage.Encode(SyncMsg.GpsShare, share));
+	}
+
 	public void SendAdmin(AdminRequest request)
 	{
 		if (Host.HasValue && CurrentPhase == Phase.Accepted)

@@ -22,6 +22,7 @@ internal static class StatusOverlay
 			MpPlugin.Tick(__instance);
 			if (Y51_SE2Online.Dedicated.DedicatedRuntime.Headless) return;
 			MpMenu.Tick(__instance);
+			PermissionFeedback.Tick(MpClock.NowMs());
 			UpdateStats(MpClock.NowMs());
 		}
 		catch (Exception ex)

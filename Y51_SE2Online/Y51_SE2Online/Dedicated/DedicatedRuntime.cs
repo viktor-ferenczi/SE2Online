@@ -43,6 +43,10 @@ internal static class DedicatedRuntime
     private static long _shutdownRequests;
     private static DateTime? _lastSaveUtc;
     private static long _nextSave;
+    // SE2's own autosave restarts its timer after every server save; this is the other half, so the two never run back to back.
+    private const long GameSaveGapMs = 60_000;
+    private static DateTime? _seenGameSave;
+    private static long _gameSaveMs = long.MinValue / 2;
     private static string _statusPath;
     private static long _lastStatus;
     private static string _savedId;
@@ -168,8 +172,17 @@ internal static class DedicatedRuntime
             ticks.PauseWhenInMenu = false;
             ticks.Pause = false;
             ticks.Tick = true;
-            if (!_saving && Config.SaveIntervalSeconds > 0 && MpClock.NowMs() >= _nextSave)
-                Save(app.Server.Entity.Get<WorldSessionComponent>(), false).SkipWait();
+            var world = app.Server.Entity.Get<WorldSessionComponent>();
+            // Set by SaveSessionComponent.OnSavePerformed after any completed save, the game's autosave included.
+            var gameSave = world.OwnedSession?.SessionComponents.TryGet<SaveSessionComponent>()?._lastEntryAutosaveTime;
+            if (gameSave != _seenGameSave)
+            {
+                _seenGameSave = gameSave;
+                if (!_saving) _gameSaveMs = MpClock.NowMs();
+            }
+            long now = MpClock.NowMs();
+            if (!_saving && Config.SaveIntervalSeconds > 0 && now >= _nextSave && now - _gameSaveMs >= GameSaveGapMs)
+                Save(world, false).SkipWait();
         }
         catch (Exception ex) { Fail("runtime", ex); }
     }

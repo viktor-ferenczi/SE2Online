@@ -182,7 +182,7 @@ internal static class ObjectCodec
 			}
 			return WireValue.Arr(TypeName(elementType), items);
 		}
-		if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(List<>))
+		if (type.IsGenericType && (type.GetGenericTypeDefinition() == typeof(List<>) || type.GetGenericTypeDefinition() == typeof(System.Collections.ObjectModel.ObservableCollection<>)))
 		{
 			Type elementType = type.GetGenericArguments()[0];
 			var items = new List<WireValue>();
@@ -521,7 +521,10 @@ internal static class ObjectCodec
 			bool isImmutable = text.StartsWith("ImmutableArray:", StringComparison.Ordinal);
 			string elementName = isList ? text[5..] : isImmutable ? text[15..] : text;
 			Type? itemType = WireTypes.Resolve(elementName, typeof(object));
-			if (itemType == null || Collection(text, isList ? typeof(List<>).MakeGenericType(itemType) : isImmutable ? typeof(ImmutableArray<>).MakeGenericType(itemType) : itemType.MakeArrayType(), declared) == null)
+			// A plain (unreplicated) ObservableCollection travels as a list and is rebuilt as the slot's own type.
+			Type? listType = itemType == null ? null : (Nullable.GetUnderlyingType(declared) ?? declared) == typeof(System.Collections.ObjectModel.ObservableCollection<>).MakeGenericType(itemType)
+				? typeof(System.Collections.ObjectModel.ObservableCollection<>).MakeGenericType(itemType) : typeof(List<>).MakeGenericType(itemType);
+			if (itemType == null || Collection(text, isList ? listType : isImmutable ? typeof(ImmutableArray<>).MakeGenericType(itemType) : itemType.MakeArrayType(), declared) == null)
 			{
 				fail = "element type " + text + " not found or not allowed";
 				return null;
@@ -533,7 +536,7 @@ internal static class ObjectCodec
 			}
 			if (isList)
 			{
-				var list = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(itemType));
+				var list = (IList)Activator.CreateInstance(listType);
 				foreach (object item in array)
 				{
 					list.Add(item);
@@ -622,6 +625,11 @@ internal static class ObjectCodec
 		{
 			return collection;
 		}
+		// A signal's ImmutableArray argument is a command-buffer reference to its backing array (CommandLayouts Ref segment).
+		if (collection.IsArray && slot.IsGenericType && slot.GetGenericTypeDefinition() == typeof(ImmutableArray<>) && slot.GetGenericArguments()[0] == collection.GetElementType())
+		{
+			return collection;
+		}
 		WireTypes.Refuse(name, declared, "a " + collection.Name + " does not fit the slot");
 		return null;
 	}
@@ -661,7 +669,7 @@ internal static class ObjectCodec
 		{
 			return TypeProblem(t.GetElementType(), copyObservables, depth + 1);
 		}
-		if (t.IsGenericType && (t.GetGenericTypeDefinition() == typeof(List<>) || t.GetGenericTypeDefinition() == typeof(ImmutableArray<>) || t.GetGenericTypeDefinition() == typeof(HashSet<>)))
+		if (t.IsGenericType && (t.GetGenericTypeDefinition() == typeof(List<>) || t.GetGenericTypeDefinition() == typeof(ImmutableArray<>) || t.GetGenericTypeDefinition() == typeof(HashSet<>) || t.GetGenericTypeDefinition() == typeof(System.Collections.ObjectModel.ObservableCollection<>)))
 		{
 			return TypeProblem(t.GetGenericArguments()[0], copyObservables, depth + 1);
 		}

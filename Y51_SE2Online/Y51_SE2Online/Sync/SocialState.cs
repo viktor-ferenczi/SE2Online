@@ -12,13 +12,16 @@ public enum SocialAction
     RejectRequest, LeaveFaction, RemoveMember, TransferLeadership, DisbandFaction,
     ClaimGrid, TransferGrid, ReleaseGrid, ShareGrid,
     /// <summary>Suit broadcast: Offset 1 on, 0 off.</summary>
-    Broadcast
+    Broadcast,
+    /// <summary>Block whitelist/blacklist for Player: Offset 1 adds, 0 removes. The block is Secure (its control panel id).</summary>
+    BlockAllow, BlockDeny
 }
 
 public sealed record SocialRequest(SocialAction Action, string FactionId = "", long Player = 0,
-    uint Grid = 0, GridSharing Sharing = GridSharing.Private, string Name = "", string Tag = "", int Offset = 0);
+    uint Grid = 0, GridSharing Sharing = GridSharing.Private, string Name = "", string Tag = "", int Offset = 0, Guid Secure = default);
 public sealed record SocialPlayer(long Identity, string Name);
 public sealed record SocialGrid(uint NetId, string Name, long Owner, GridSharing Sharing);
+public sealed record SocialBlock(uint NetId, string Name, long Owner, long[] Allow, long[] Deny, Guid Secure);
 public sealed class OnlineFaction
 {
     public string Id { get; set; } = "";
@@ -40,6 +43,10 @@ public sealed class SocialSnapshot
     public SocialGrid[] Grids { get; set; } = Array.Empty<SocialGrid>();
     public int TotalGrids { get; set; }
     public int Offset { get; set; }
+    /// <summary>The grid a Refresh asked for by its control panel id, whatever the page shows.</summary>
+    public SocialGrid Focus { get; set; }
+    /// <summary>The single block a Refresh asked for, with its whitelist and blacklist.</summary>
+    public SocialBlock FocusBlock { get; set; }
 }
 
 public sealed class SocialState

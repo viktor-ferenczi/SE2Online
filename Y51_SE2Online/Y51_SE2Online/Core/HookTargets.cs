@@ -256,4 +256,7 @@ public static class HookTargets
 	private const string ObsClient = "Keen.VRage.Multiplayer.Replications.ObservableObjectReplicationClientSessionComponent";
 
 	public const string ReplayIlSha256 = "6d1fd8c2bbcf3dcb7f2525c5260093504ed818b1d57706e8e358da1aa8feb064";
+
+	/// <summary><see cref="IlShape.Hash"/> of the same method: its IL with metadata tokens zeroed.</summary>
+	public const string ReplayIlShapeSha256 = "77a4f66af8d3d243388ad267b84ca4ceb738cf53b93ecca93226f3402775f8af";
 }

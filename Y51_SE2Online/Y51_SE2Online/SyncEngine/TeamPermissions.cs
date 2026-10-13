@@ -76,9 +76,9 @@ internal static class TeamPermissions
 		}
 	}
 
-	public static void CanUseBlockActionPostfix(Entity grid, IdentityId identity, ref bool __result)
+	public static void CanUseBlockActionPostfix(Entity block, Entity grid, IdentityId identity, ref bool __result)
 	{
-		if (ApplyAccess(grid, identity, ref __result)) return;
+		if (ApplyAccess(block, identity, ref __result)) return;
 		if (!__result && Enabled)
 		{
 			long owner = OwnerOf(grid);

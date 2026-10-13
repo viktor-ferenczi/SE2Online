@@ -8,7 +8,8 @@ namespace Y51_SE2Online.SyncEngine;
 internal static class SocialGuard
 {
     internal static bool IsOwnershipSignal(string name) => name.Contains("OwnershipComponent+", StringComparison.Ordinal)
-        || name.Contains("GridPermissionsComponent+", StringComparison.Ordinal);
+        || name.Contains("GridPermissionsComponent+", StringComparison.Ordinal)
+        || name.Contains("BlockPermissionsComponent+", StringComparison.Ordinal);
 
     internal static string CheckObject(object value, long actor)
     {

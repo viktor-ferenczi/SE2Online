@@ -733,7 +733,9 @@ internal sealed class NetSession
 			long beforePoll = iteration.ElapsedMilliseconds;
 			tickWatch.Restart();
 			transport.Poll();
+			long transportMs = tickWatch.ElapsedMilliseconds;
 			if (_o.Dedicated) GameServer.RunCallbacks();
+			long callbacksMs = tickWatch.ElapsedMilliseconds - transportMs;
 			UpdateDirectory(now);
 			long pollMs = tickWatch.ElapsedMilliseconds;
 			host?.Tick();
@@ -743,7 +745,7 @@ internal sealed class NetSession
 			if (tickMs > 250)
 			{
 				slowestTickMs = Math.Max(slowestTickMs, tickMs);
-				_log.Warn($"net: loop iteration took {tickMs} ms (transport.Poll {pollMs} ms incl. the link's Pump); timestamps taken before it would be stale");
+				_log.Warn($"net: loop iteration took {tickMs} ms (transport.Poll {transportMs} ms incl. the link's Pump, Steam callbacks {callbacksMs} ms, directory {pollMs - transportMs - callbacksMs} ms; {transport.LastPollDetail}); timestamps taken before it would be stale");
 			}
 			foreach (var entry in connectedAt)
 			{

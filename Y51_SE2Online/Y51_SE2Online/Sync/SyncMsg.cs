@@ -36,5 +36,6 @@ public enum SyncMsg : byte
 	AdminRequest = 69,
 	AdminState = 70,
 	SpawnMenu = 71,
-	InputAck = 72
+	InputAck = 72,
+	GpsShare = 73
 }

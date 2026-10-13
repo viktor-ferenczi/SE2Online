@@ -109,13 +109,15 @@ internal static class ReplicationProbe
 			// The command meter parses Replay's command header, so it only runs against the exact IL it was written for.
 			byte[] replayIl = EngineMembers.Method(HookTargets.Replay).GetMethodBody()?.GetILAsByteArray() ?? Array.Empty<byte>();
 			string hash = Convert.ToHexString(SHA256.HashData(replayIl)).ToLowerInvariant();
-			_meterAllowed = hash == "6d1fd8c2bbcf3dcb7f2525c5260093504ed818b1d57706e8e358da1aa8feb064";
+			// A tool that rewrites the game's assemblies (native Linux setups) renumbers metadata tokens without changing the code.
+			string shape = IlShape.Hash(replayIl);
+			_meterAllowed = hash == HookTargets.ReplayIlSha256 || shape == HookTargets.ReplayIlShapeSha256;
 			harmony.Patch(original, null, new HarmonyMethod(typeof(ReplicationProbe), "CommitPostfix"));
 			_commitActive = true;
 			_measure = _meterAllowed;
 			return _meterAllowed
 				? $"ok; command meter armed (Replay IL {replayIl.Length} B, sha256 matches build {HookTargets.GameBuild})"
-				: "ok, but Replay IL sha256 " + hash + " != expected (game updated?): command meter OFF";
+				: $"ok, but Replay IL ({replayIl.Length} B) sha256 {hash}, shape {shape} != expected (game updated?): command meter OFF";
 		}));
 		return results;
 

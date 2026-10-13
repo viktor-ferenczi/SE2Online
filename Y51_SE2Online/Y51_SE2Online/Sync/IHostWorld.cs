@@ -7,6 +7,7 @@ public interface IHostWorld
 {
 	void OnSocialRequest(PeerId peer, ushort clientId, SocialRequest request) { }
 	void OnAdminRequest(PeerId? peer, ushort clientId, AdminRequest request) { }
+	void OnGpsShare(ushort fromClientId, string fromName, GpsShare share) { }
 	bool WorldReady { get; }
 
 	string WorldName { get; }

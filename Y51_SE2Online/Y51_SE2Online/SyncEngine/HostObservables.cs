@@ -131,7 +131,7 @@ internal sealed class HostObservables
 
 	public uint? OidOnServer(object model, ReplayContext server)
 	{
-		if (HeadlessReplication.Active && model is ObservableObject) return GetOrAdd(model, isList: false).Oid;
+		if ((HeadlessReplication.Active && model is ObservableObject) || HostWorld.IsOwnOreList(model)) return GetOrAdd(model, isList: false).Oid;
 		if (_byReplica.TryGetValue(model, out var known))
 		{
 			return known.Oid;

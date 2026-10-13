@@ -31,8 +31,14 @@ internal static class CommandLayouts
 
 	private static readonly HashSet<Type> ForwardableStructs = new() { typeof(LocalizableText), typeof(Keen.Game2.Simulation.GameSystems.Explosions.AudioParameter?) };
 
-	// Host to joiner only: voxel destruction craters and thruster flame classes. A joiner must never send these to the server.
-	private static readonly HashSet<Type> DownstreamStructs = new() { typeof(Keen.VRage.Voxels.Storage.Operations.CutOutCapsulesBuilder), typeof(Keen.Game2.Simulation.WorldObjects.CubeGrids.Movement.ThrusterSyncData) };
+	// Host to joiner only: voxel destruction craters, thruster flame classes, and the explosion decals, grid damage status,
+	// camera shake and character hit effects ([Clients] handlers only). A joiner must never send these to the server.
+	private static readonly HashSet<Type> DownstreamStructs = new()
+	{
+		typeof(Keen.VRage.Voxels.Storage.Operations.CutOutCapsulesBuilder), typeof(Keen.Game2.Simulation.WorldObjects.CubeGrids.Movement.ThrusterSyncData),
+		typeof(Keen.Game2.Simulation.WorldObjects.CubeGrids.Damage.GridExplosionHitInfo), typeof(Keen.Game2.Simulation.GameSystems.ProjectileSystems.ExplosionHit),
+		typeof(Keen.Game2.Simulation.WorldObjects.Characters.Stats.StatChangeData)
+	};
 
 	private static readonly MethodInfo SizeOfMethod = typeof(Unsafe).GetMethod("SizeOf");
 

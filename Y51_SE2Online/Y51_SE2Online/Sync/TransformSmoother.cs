@@ -73,7 +73,7 @@ public sealed class TransformSmoother
 
 	public long Dropped;
 
-	public int DelayMs { get; set; } = 60;
+	public int DelayMs { get; set; } = Core.MpOptions.DefaultInterpMs;
 
 	public bool Adaptive { get; set; } = true;
 
@@ -387,8 +387,9 @@ public sealed class TransformSmoother
 				int[] sorted = new int[_lateCount];
 				Array.Copy(_late, sorted, _lateCount);
 				Array.Sort(sorted);
-				int p97 = sorted[Math.Min(sorted.Length - 1, (int)(sorted.Length * 0.97))];
-				_targetDelay = Math.Clamp(p97 + MarginMs, DelayMs, Math.Max(DelayMs, MaxDelayMs));
+				// p99, not p97: the 1-3% late tail (Steam bursts) is what pulled fast bodies backwards once the floor came down.
+				int p99 = sorted[Math.Min(sorted.Length - 1, (int)(sorted.Length * 0.99))];
+				_targetDelay = Math.Clamp(p99 + MarginMs, DelayMs, Math.Max(DelayMs, MaxDelayMs));
 			}
 			else
 			{

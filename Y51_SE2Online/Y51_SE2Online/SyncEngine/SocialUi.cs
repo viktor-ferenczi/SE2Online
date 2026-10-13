@@ -43,6 +43,7 @@ internal static class SocialUi
     {
         harmony.Patch(AccessTools.Method(typeof(TerminalScreenViewModel), "BuildScreenTree"), postfix: new HarmonyMethod(typeof(SocialUi), nameof(TreeBuilt)));
         harmony.Patch(AccessTools.Constructor(typeof(TerminalScreen)), postfix: new HarmonyMethod(typeof(SocialUi), nameof(TerminalBuilt)));
+        ControlPanelOwnership.Install();
     }
     internal static void Confirm(string title, string message, Action action) => MpMenu.Queue(() =>
     {
