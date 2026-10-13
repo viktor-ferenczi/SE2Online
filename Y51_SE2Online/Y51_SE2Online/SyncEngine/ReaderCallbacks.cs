@@ -12,40 +12,37 @@ internal static class ReaderCallbacks
 
 	public static Dictionary<Type, Dictionary<int, int>> Analyse()
 	{
-		Dictionary<Type, Dictionary<int, int>> dictionary = new Dictionary<Type, Dictionary<int, int>>();
-		Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
-		foreach (Assembly assembly in assemblies)
+		var result = new Dictionary<Type, Dictionary<int, int>>();
+		foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
 		{
-			string name = assembly.GetName().Name;
-			if (name == null || (!name.StartsWith("Game2", StringComparison.Ordinal) && !name.StartsWith("VRage", StringComparison.Ordinal) && !(name == "SpaceEngineers2")))
+			string? name = assembly.GetName().Name;
+			if (name == null || !(name.StartsWith("Game2", StringComparison.Ordinal) || name.StartsWith("VRage", StringComparison.Ordinal) || name == "SpaceEngineers2"))
 			{
 				continue;
 			}
-			Type[] array;
+			Type[] types;
 			try
 			{
-				array = assembly.GetTypes();
+				types = assembly.GetTypes();
 			}
 			catch (ReflectionTypeLoadException ex)
 			{
-				array = ex.Types.Where((Type t) => t != null).ToArray();
+				types = ex.Types.Where((Type t) => t != null).ToArray();
 			}
-			Type[] array2 = array;
-			foreach (Type type in array2)
+			foreach (Type type in types)
 			{
 				if (type.Name != "InProcessReplicationReaderCallbacks")
 				{
 					continue;
 				}
-				MethodInfo[] methods = type.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-				foreach (MethodInfo methodInfo in methods)
+				foreach (MethodInfo method in type.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
 				{
-					CustomAttributeData customAttributeData = methodInfo.GetCustomAttributesData().FirstOrDefault((CustomAttributeData a) => a.AttributeType.Name == "ReaderCallbackAttribute");
-					if (customAttributeData != null && customAttributeData.ConstructorArguments.Count == 1 && customAttributeData.ConstructorArguments[0].Value is Type key)
+					CustomAttributeData? attribute = method.GetCustomAttributesData().FirstOrDefault((CustomAttributeData a) => a.AttributeType.Name == "ReaderCallbackAttribute");
+					if (attribute != null && attribute.ConstructorArguments.Count == 1 && attribute.ConstructorArguments[0].Value is Type signalType)
 					{
 						try
 						{
-							dictionary[key] = Scan(methodInfo);
+							result[signalType] = Scan(method);
 						}
 						catch (Exception)
 						{
@@ -54,97 +51,95 @@ internal static class ReaderCallbacks
 				}
 			}
 		}
-		return dictionary;
+		return result;
 	}
 
+	// Walks the callback's IL and records, for each argument passed by address to a *TranslationTable.Translate
+	// call, the int constant most recently loaded before it (the strategy the game applies when translation fails).
 	public static Dictionary<int, int> Scan(MethodInfo m)
 	{
-		Dictionary<int, int> dictionary = new Dictionary<int, int>();
-		byte[] array = m.GetMethodBody()?.GetILAsByteArray();
-		if (array == null)
+		var result = new Dictionary<int, int>();
+		byte[]? il = m.GetMethodBody()?.GetILAsByteArray();
+		if (il == null)
 		{
-			return dictionary;
+			return result;
 		}
-		Dictionary<short, OpCode> dictionary2 = Ops();
-		int num = 0;
-		int num2 = -1;
-		int value = -1;
-		while (num < array.Length)
+		Dictionary<short, OpCode> ops = Ops();
+		int pos = 0;
+		int argIndex = -1;
+		int lastConstant = -1;
+		while (pos < il.Length)
 		{
-			short num3 = array[num++];
-			if (num3 == 254 && num < array.Length)
+			short code = il[pos++];
+			if (code == 0xFE && pos < il.Length)
 			{
-				num3 = (short)(0xFE00 | array[num++]);
+				code = (short)(0xFE00 | il[pos++]);
 			}
-			if (!dictionary2.TryGetValue(num3, out var value2))
+			if (!ops.TryGetValue(code, out OpCode op))
 			{
-				return dictionary;
+				return result;
 			}
-			int num4 = 0;
-			switch (value2.OperandType)
+			int operand = 0;
+			switch (op.OperandType)
 			{
 			case OperandType.ShortInlineBrTarget:
 			case OperandType.ShortInlineI:
 			case OperandType.ShortInlineVar:
-				num4 = ((value2.OperandType == OperandType.ShortInlineI) ? ((int)(sbyte)array[num]) : ((int)array[num]));
-				num++;
+				operand = op.OperandType == OperandType.ShortInlineI ? (sbyte)il[pos] : il[pos];
+				pos++;
 				break;
 			case OperandType.InlineVar:
-				num4 = BitConverter.ToUInt16(array, num);
-				num += 2;
+				operand = BitConverter.ToUInt16(il, pos);
+				pos += 2;
 				break;
 			case OperandType.InlineI8:
 			case OperandType.InlineR:
-				num += 8;
+				pos += 8;
 				break;
 			case OperandType.InlineSwitch:
-				num += 4 + 4 * BitConverter.ToInt32(array, num);
+				pos += 4 + 4 * BitConverter.ToInt32(il, pos);
 				break;
 			default:
-				num4 = BitConverter.ToInt32(array, num);
-				num += 4;
+				operand = BitConverter.ToInt32(il, pos);
+				pos += 4;
 				break;
 			case OperandType.InlineNone:
 				break;
 			}
-			if (value2 == OpCodes.Ldarga_S || value2 == OpCodes.Ldarga)
+			if (op == OpCodes.Ldarga_S || op == OpCodes.Ldarga)
 			{
-				num2 = num4;
+				argIndex = operand;
 			}
-			else if (value2.Value >= OpCodes.Ldc_I4_0.Value && value2.Value <= OpCodes.Ldc_I4_8.Value)
+			else if (op.Value >= OpCodes.Ldc_I4_0.Value && op.Value <= OpCodes.Ldc_I4_8.Value)
 			{
-				value = value2.Value - OpCodes.Ldc_I4_0.Value;
+				lastConstant = op.Value - OpCodes.Ldc_I4_0.Value;
 			}
-			else if (value2 == OpCodes.Ldc_I4_S || value2 == OpCodes.Ldc_I4)
+			else if (op == OpCodes.Ldc_I4_S || op == OpCodes.Ldc_I4)
 			{
-				value = num4;
+				lastConstant = operand;
 			}
-			else
+			else if (op == OpCodes.Call)
 			{
-				if (!(value2 == OpCodes.Call))
-				{
-					continue;
-				}
-				MethodBase methodBase = null;
+				MethodBase? callee = null;
 				try
 				{
-					methodBase = m.Module.ResolveMethod(num4);
+					callee = m.Module.ResolveMethod(operand);
 				}
 				catch (Exception)
 				{
 				}
-				if (methodBase != null && methodBase.Name == "Translate")
+				if (callee != null && callee.Name == "Translate")
 				{
-					Type? declaringType = methodBase.DeclaringType;
-					if ((object)declaringType != null && declaringType.Name.EndsWith("TranslationTable", StringComparison.Ordinal) && num2 >= 1)
+					Type? declaringType = callee.DeclaringType;
+					if (declaringType is not null && declaringType.Name.EndsWith("TranslationTable", StringComparison.Ordinal) && argIndex >= 1)
 					{
-						dictionary[num2 - 1] = value;
+						result[argIndex - 1] = lastConstant;
 					}
 				}
-				num2 = -1;
+				argIndex = -1;
 			}
 		}
-		return dictionary;
+		return result;
 	}
 
 	private static Dictionary<short, OpCode> Ops()
@@ -153,15 +148,14 @@ internal static class ReaderCallbacks
 		{
 			return _ops;
 		}
-		Dictionary<short, OpCode> dictionary = new Dictionary<short, OpCode>();
-		FieldInfo[] fields = typeof(OpCodes).GetFields(BindingFlags.Static | BindingFlags.Public);
-		for (int i = 0; i < fields.Length; i++)
+		var ops = new Dictionary<short, OpCode>();
+		foreach (FieldInfo field in typeof(OpCodes).GetFields(BindingFlags.Static | BindingFlags.Public))
 		{
-			if (fields[i].GetValue(null) is OpCode value)
+			if (field.GetValue(null) is OpCode op)
 			{
-				dictionary[value.Value] = value;
+				ops[op.Value] = op;
 			}
 		}
-		return _ops = dictionary;
+		return _ops = ops;
 	}
 }

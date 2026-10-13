@@ -28,17 +28,17 @@ internal static class ObjectCodec
 {
 	private delegate bool TryAnyFn(DefinitionManager dm, Guid id, out Definition? definition);
 
-	private static readonly ConcurrentDictionary<Type, FieldInfo[]> FieldsCache = new ConcurrentDictionary<Type, FieldInfo[]>();
+	private static readonly ConcurrentDictionary<Type, FieldInfo[]> FieldsCache = new();
 
-	private static readonly ConcurrentDictionary<Type, Func<object, byte[]>> ToBytesCache = new ConcurrentDictionary<Type, Func<object, byte[]>>();
+	private static readonly ConcurrentDictionary<Type, Func<object, byte[]>> ToBytesCache = new();
 
-	private static readonly ConcurrentDictionary<Type, Func<byte[], object>> FromBytesCache = new ConcurrentDictionary<Type, Func<byte[], object>>();
+	private static readonly ConcurrentDictionary<Type, Func<byte[], object>> FromBytesCache = new();
 
-	private static readonly ConcurrentDictionary<Type, bool> SerializableCache = new ConcurrentDictionary<Type, bool>();
+	private static readonly ConcurrentDictionary<Type, bool> SerializableCache = new();
 
-	private static readonly ConcurrentDictionary<string, Type?> TypeCache = new ConcurrentDictionary<string, Type>();
+	private static readonly ConcurrentDictionary<string, Type?> TypeCache = new();
 
-	private static readonly HashSet<Type> PlainDataClasses = new HashSet<Type> { typeof(BlockPlacerEntityBundle) };
+	private static readonly HashSet<Type> PlainDataClasses = new() { typeof(BlockPlacerEntityBundle) };
 
 	private static Func<DefinitionManager, Guid, Definition?>? _tryAny;
 
@@ -52,7 +52,7 @@ internal static class ObjectCodec
 
 	private static readonly MethodInfo IsRefMethod = typeof(RuntimeHelpers).GetMethod("IsReferenceOrContainsReferences");
 
-	private static readonly ConcurrentDictionary<Type, bool> RefCache = new ConcurrentDictionary<Type, bool>();
+	private static readonly ConcurrentDictionary<Type, bool> RefCache = new();
 
 	private static readonly MethodInfo SerializeGeneric = typeof(SerializationHelper).GetMethods(BindingFlags.Static | BindingFlags.Public).First((MethodInfo m) => m.Name == "Serialize" && m.IsGenericMethodDefinition && m.GetParameters().Length == 3 && m.GetParameters()[0].ParameterType == typeof(SerializationContext));
 
@@ -60,10 +60,7 @@ internal static class ObjectCodec
 
 	internal static bool DefinitionLookupBound => TryAny() != null;
 
-	public static string TypeName(Type t)
-	{
-		return t.FullName + ", " + t.Assembly.GetName().Name;
-	}
+	public static string TypeName(Type t) => t.FullName + ", " + t.Assembly.GetName().Name;
 
 	public static Type? FindType(string name)
 	{
@@ -84,21 +81,18 @@ internal static class ObjectCodec
 	{
 		return FieldsCache.GetOrAdd(t, (Type type) =>
 		{
-			List<FieldInfo> list = new List<FieldInfo>();
-			Type type2 = type;
-			while (type2 != null && type2 != typeof(object) && type2 != typeof(ValueType))
+			var fields = new List<FieldInfo>();
+			Type current = type;
+			while (current != null && current != typeof(object) && current != typeof(ValueType))
 			{
-				list.AddRange(type2.GetFields(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
-				type2 = type2.BaseType;
+				fields.AddRange(current.GetFields(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
+				current = current.BaseType;
 			}
-			return list.ToArray();
+			return fields.ToArray();
 		});
 	}
 
-	private static FieldInfo? Field(Type t, string name)
-	{
-		return Fields(t).FirstOrDefault((FieldInfo f) => f.Name == name);
-	}
+	private static FieldInfo? Field(Type t, string name) => Fields(t).FirstOrDefault((FieldInfo f) => f.Name == name);
 
 	public static WireValue Encode(object? o, Type declared, ObjectSpace sp, ref string? fail, int depth = 0, bool copyObservables = false)
 	{
@@ -115,222 +109,206 @@ internal static class ObjectCodec
 			fail = declared.Name + " nested too deeply";
 			return WireValue.NullValue;
 		}
-		if (!(o is Entity entity))
+		switch (o)
 		{
-			if (!(o is Component component))
+		case Entity entity:
+		{
+			uint? netId = sp.IdOf(entity);
+			if (netId.HasValue)
 			{
-				if (!(o is Session))
-				{
-					if (!(o is Definition definition))
-					{
-						if (!(o is string s))
-						{
-							if (!(o is StringId stringId))
-							{
-								if (!(o is Type t))
-								{
-									if (!(o is Delegate obj))
-									{
-										if (o is ObservableObject && !copyObservables)
-										{
-											if (sp.ObservableId == null)
-											{
-												fail = o.GetType().Name + " is an observable object (shared by replication pairing; this side does not name models)";
-												return WireValue.NullValue;
-											}
-											uint? num = sp.ObservableId(o);
-											if (num.HasValue)
-											{
-												uint valueOrDefault = num.GetValueOrDefault();
-												sp.Observed.Add(valueOrDefault);
-												return WireValue.Observable(valueOrDefault);
-											}
-											Func<object, bool>? wasReleased = sp.WasReleased;
-											fail = ((wasReleased != null && wasReleased(o)) ? (o.GetType().Name + " was already released by the host") : (o.GetType().Name + " is an observable model the other side cannot have (not replicated)"));
-											return WireValue.NullValue;
-										}
-										Type type = o.GetType();
-										if (o is IList arg && o is INotifyCollectionChanged)
-										{
-											uint? num = sp.ListId?.Invoke(arg);
-											if (num.HasValue)
-											{
-												uint valueOrDefault2 = num.GetValueOrDefault();
-												sp.Observed.Add(valueOrDefault2);
-												return WireValue.List(valueOrDefault2);
-											}
-										}
-										if (type.IsArray && type.GetArrayRank() == 1)
-										{
-											Type elementType = type.GetElementType();
-											Array array = (Array)o;
-											List<WireValue> list = new List<WireValue>(array.Length);
-											foreach (object item in array)
-											{
-												list.Add(Encode(item, elementType, sp, ref fail, depth + 1, copyObservables));
-											}
-											return WireValue.Arr(TypeName(elementType), list);
-										}
-										if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(List<>))
-										{
-											Type type2 = type.GetGenericArguments()[0];
-											List<WireValue> list2 = new List<WireValue>();
-											foreach (object item2 in (IList)o)
-											{
-												list2.Add(Encode(item2, type2, sp, ref fail, depth + 1, copyObservables));
-											}
-											return WireValue.Arr("List:" + TypeName(type2), list2);
-										}
-										if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ImmutableArray<>))
-										{
-											Type type3 = type.GetGenericArguments()[0];
-											List<WireValue> list3 = new List<WireValue>();
-											foreach (object item3 in (IEnumerable)o)
-											{
-												list3.Add(Encode(item3, type3, sp, ref fail, depth + 1, copyObservables));
-											}
-											return WireValue.Arr("ImmutableArray:" + TypeName(type3), list3);
-										}
-										if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<, >))
-										{
-											Type[] genericArguments = type.GetGenericArguments();
-											List<WireValue> list4 = new List<WireValue>();
-											foreach (DictionaryEntry item4 in (IDictionary)o)
-											{
-												list4.Add(Encode(item4.Key, genericArguments[0], sp, ref fail, depth + 1, copyObservables));
-												list4.Add(Encode(item4.Value, genericArguments[1], sp, ref fail, depth + 1, copyObservables));
-											}
-											return WireValue.Arr("Dict:" + TypeName(genericArguments[0]) + "|" + TypeName(genericArguments[1]), list4);
-										}
-										if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(HashSet<>))
-										{
-											Type type4 = type.GetGenericArguments()[0];
-											List<WireValue> list5 = new List<WireValue>();
-											foreach (object item5 in (IEnumerable)o)
-											{
-												list5.Add(Encode(item5, type4, sp, ref fail, depth + 1, copyObservables));
-											}
-											return WireValue.Arr("Set:" + TypeName(type4), list5);
-										}
-										bool flag = declared == type || Nullable.GetUnderlyingType(declared) == type || declared.IsEnum;
-										if ((type.IsValueType && !ContainsReferences(type)) & flag)
-										{
-											if (ContainsStringId(type, 0))
-											{
-												return EncodeFields(o, type, sp, ref fail, depth, copyObservables);
-											}
-											byte[] array2 = ToBytes(o, type);
-											string text = (sp.OpaqueHandles ? null : ProcessLocal(type, 0));
-											if (text != null && Array.Exists(array2, (byte b) => b != 0))
-											{
-												fail = type.Name + " carries a process-local " + text;
-												return WireValue.NullValue;
-											}
-											return WireValue.Raw(array2);
-										}
-										if (IsCompilerGenerated(type) || type.IsValueType || type == typeof(ReplicationEventContext))
-										{
-											return EncodeFields(o, type, sp, ref fail, depth, copyObservables || IsReleaseToServer(type));
-										}
-										if (PlainDataClasses.Contains(type))
-										{
-											return EncodeFields(o, type, sp, ref fail, depth, copyObservables);
-										}
-										if (IsKeenSerializable(type))
-										{
-											try
-											{
-												return WireValue.Ser(TypeName(type), SerializeKeen(o, type, sp));
-											}
-											catch (Exception ex)
-											{
-												fail = $"{type.Name} did not serialize ({ex.GetType().Name}: {ex.Message})";
-												return WireValue.NullValue;
-											}
-										}
-										fail = type.FullName + " cannot travel";
-										return WireValue.NullValue;
-									}
-									fail = "a delegate (" + obj.Method.Name + ") cannot travel";
-									return WireValue.NullValue;
-								}
-								return WireValue.TypeName(TypeName(t));
-							}
-							return WireValue.Str(stringId.String ?? "");
-						}
-						return WireValue.Str(s);
-					}
-					return WireValue.Def(definition.Guid);
-				}
-				return WireValue.Of(WireKind.Session);
+				return WireValue.Ent(netId.Value);
 			}
-			uint? num2 = sp.IdOf(component.Entity);
-			if (!num2.HasValue)
+			// Not replicated (yet): hand out a negative per-message id the receiver turns into a stub.
+			if (!sp.LocalIds.TryGetValue(entity, out var localId))
+			{
+				localId = sp.LocalIds[entity] = sp.NextLocalId();
+			}
+			return new WireValue
+			{
+				Kind = WireKind.Entity,
+				Id = (uint)localId
+			};
+		}
+		case Component component:
+		{
+			uint? entityId = sp.IdOf(component.Entity);
+			if (!entityId.HasValue)
 			{
 				fail = component.GetType().Name + " on an entity the other side does not have";
 				return WireValue.NullValue;
 			}
-			return WireValue.Comp(num2.Value, TypeName(component.GetType()));
+			return WireValue.Comp(entityId.Value, TypeName(component.GetType()));
 		}
-		uint? num3 = sp.IdOf(entity);
-		if (num3.HasValue)
-		{
-			return WireValue.Ent(num3.Value);
+		case Session:
+			return WireValue.Of(WireKind.Session);
+		case Definition definition:
+			return WireValue.Def(definition.Guid);
+		case string s:
+			return WireValue.Str(s);
+		case StringId stringId:
+			return WireValue.Str(stringId.String ?? "");
+		case Type t:
+			return WireValue.TypeName(TypeName(t));
+		case Delegate d:
+			fail = "a delegate (" + d.Method.Name + ") cannot travel";
+			return WireValue.NullValue;
 		}
-		if (!sp.LocalIds.TryGetValue(entity, out var value))
+		if (o is ObservableObject && !copyObservables)
 		{
-			value = (sp.LocalIds[entity] = sp.NextLocalId());
+			if (sp.ObservableId == null)
+			{
+				fail = o.GetType().Name + " is an observable object (shared by replication pairing; this side does not name models)";
+				return WireValue.NullValue;
+			}
+			if (sp.ObservableId(o) is uint oid)
+			{
+				sp.Observed.Add(oid);
+				return WireValue.Observable(oid);
+			}
+			Func<object, bool>? wasReleased = sp.WasReleased;
+			fail = wasReleased != null && wasReleased(o)
+				? o.GetType().Name + " was already released by the host"
+				: o.GetType().Name + " is an observable model the other side cannot have (not replicated)";
+			return WireValue.NullValue;
 		}
-		return new WireValue
+		Type type = o.GetType();
+		if (o is IList observedList && o is INotifyCollectionChanged && sp.ListId?.Invoke(observedList) is uint listId)
 		{
-			Kind = WireKind.Entity,
-			Id = (uint)value
-		};
+			sp.Observed.Add(listId);
+			return WireValue.List(listId);
+		}
+		if (type.IsArray && type.GetArrayRank() == 1)
+		{
+			Type elementType = type.GetElementType();
+			var array = (Array)o;
+			var items = new List<WireValue>(array.Length);
+			foreach (object item in array)
+			{
+				items.Add(Encode(item, elementType, sp, ref fail, depth + 1, copyObservables));
+			}
+			return WireValue.Arr(TypeName(elementType), items);
+		}
+		if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(List<>))
+		{
+			Type elementType = type.GetGenericArguments()[0];
+			var items = new List<WireValue>();
+			foreach (object item in (IList)o)
+			{
+				items.Add(Encode(item, elementType, sp, ref fail, depth + 1, copyObservables));
+			}
+			return WireValue.Arr("List:" + TypeName(elementType), items);
+		}
+		if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ImmutableArray<>))
+		{
+			Type elementType = type.GetGenericArguments()[0];
+			var items = new List<WireValue>();
+			foreach (object item in (IEnumerable)o)
+			{
+				items.Add(Encode(item, elementType, sp, ref fail, depth + 1, copyObservables));
+			}
+			return WireValue.Arr("ImmutableArray:" + TypeName(elementType), items);
+		}
+		if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>))
+		{
+			Type[] keyValueTypes = type.GetGenericArguments();
+			var items = new List<WireValue>();
+			foreach (DictionaryEntry entry in (IDictionary)o)
+			{
+				items.Add(Encode(entry.Key, keyValueTypes[0], sp, ref fail, depth + 1, copyObservables));
+				items.Add(Encode(entry.Value, keyValueTypes[1], sp, ref fail, depth + 1, copyObservables));
+			}
+			return WireValue.Arr("Dict:" + TypeName(keyValueTypes[0]) + "|" + TypeName(keyValueTypes[1]), items);
+		}
+		if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(HashSet<>))
+		{
+			Type elementType = type.GetGenericArguments()[0];
+			var items = new List<WireValue>();
+			foreach (object item in (IEnumerable)o)
+			{
+				items.Add(Encode(item, elementType, sp, ref fail, depth + 1, copyObservables));
+			}
+			return WireValue.Arr("Set:" + TypeName(elementType), items);
+		}
+		bool declaredExactly = declared == type || Nullable.GetUnderlyingType(declared) == type || declared.IsEnum;
+		if (type.IsValueType && !ContainsReferences(type) && declaredExactly)
+		{
+			if (ContainsStringId(type, 0))
+			{
+				return EncodeFields(o, type, sp, ref fail, depth, copyObservables);
+			}
+			byte[] bytes = ToBytes(o, type);
+			string? local = sp.OpaqueHandles ? null : ProcessLocal(type, 0);
+			// An all-zero value (an unassigned handle) is safe to send even if the type can hold a local one.
+			if (local != null && Array.Exists(bytes, (byte b) => b != 0))
+			{
+				fail = type.Name + " carries a process-local " + local;
+				return WireValue.NullValue;
+			}
+			return WireValue.Raw(bytes);
+		}
+		if (IsCompilerGenerated(type) || type.IsValueType || type == typeof(ReplicationEventContext))
+		{
+			return EncodeFields(o, type, sp, ref fail, depth, copyObservables || IsReleaseToServer(type));
+		}
+		if (PlainDataClasses.Contains(type))
+		{
+			return EncodeFields(o, type, sp, ref fail, depth, copyObservables);
+		}
+		if (IsKeenSerializable(type))
+		{
+			try
+			{
+				return WireValue.Ser(TypeName(type), SerializeKeen(o, type, sp));
+			}
+			catch (Exception ex)
+			{
+				fail = $"{type.Name} did not serialize ({ex.GetType().Name}: {ex.Message})";
+				return WireValue.NullValue;
+			}
+		}
+		fail = type.FullName + " cannot travel";
+		return WireValue.NullValue;
 	}
 
 	private static WireValue EncodeFields(object o, Type type, ObjectSpace sp, ref string? fail, int depth, bool copyObservables)
 	{
-		List<(string, WireValue)> list = new List<(string, WireValue)>();
-		FieldInfo[] array = Fields(type);
-		foreach (FieldInfo fieldInfo in array)
+		var fields = new List<(string, WireValue)>();
+		foreach (FieldInfo field in Fields(type))
 		{
-			if (!fieldInfo.IsLiteral && !fieldInfo.IsStatic)
+			if (!field.IsLiteral && !field.IsStatic)
 			{
-				list.Add((fieldInfo.Name, Encode(fieldInfo.GetValue(o), fieldInfo.FieldType, sp, ref fail, depth + 1, copyObservables)));
+				fields.Add((field.Name, Encode(field.GetValue(o), field.FieldType, sp, ref fail, depth + 1, copyObservables)));
 				if (fail != null)
 				{
-					fail = $"{type.Name}.{fieldInfo.Name}: {fail}";
+					fail = $"{type.Name}.{field.Name}: {fail}";
 					break;
 				}
 			}
 		}
-		return WireValue.Obj(TypeName(type), list);
+		return WireValue.Obj(TypeName(type), fields);
 	}
 
 	internal static Definition? FindDefinition(Guid guid, Type declared)
 	{
-		DefinitionManager instance = Singleton<DefinitionManager>.Instance;
+		DefinitionManager definitions = Singleton<DefinitionManager>.Instance;
 		if (typeof(Configuration).IsAssignableFrom(declared) && declared != typeof(Configuration))
 		{
-			if (!instance.TryGetConfiguration(declared, out Configuration configuration))
-			{
-				return null;
-			}
-			return configuration;
+			return definitions.TryGetConfiguration(declared, out Configuration? configuration) ? configuration : null;
 		}
-		Func<DefinitionManager, Guid, Definition> func = TryAny();
-		Definition definition;
-		if (func != null)
+		Func<DefinitionManager, Guid, Definition?>? tryAny = TryAny();
+		Definition? definition;
+		if (tryAny != null)
 		{
-			definition = func(instance, guid);
+			definition = tryAny(definitions, guid);
 		}
-		else if (!instance.TryGetDefinition(guid, out definition))
+		else if (!definitions.TryGetDefinition(guid, out definition))
 		{
 			definition = null;
 		}
-		if (definition is Configuration configuration2 && instance.TryGetConfiguration(configuration2.GetType(), out Configuration configuration3) && configuration3 != null)
+		// For a configuration, return the instance the manager currently holds for that type.
+		if (definition is Configuration found && definitions.TryGetConfiguration(found.GetType(), out Configuration? live) && live != null)
 		{
-			return configuration3;
+			return live;
 		}
 		return definition;
 	}
@@ -343,9 +321,9 @@ internal static class ObjectCodec
 		}
 		try
 		{
-			MethodInfo methodInfo = EngineMembers.Method(HookTargets.Reflected.Single((EngineMember m) => m.Id == "defs-tryany"));
-			TryAnyFn fn = methodInfo.CreateDelegate<TryAnyFn>();
-			_tryAny = (DefinitionManager dm, Guid g) => (!fn(dm, g, out var definition)) ? null : definition;
+			MethodInfo method = EngineMembers.Method(HookTargets.Reflected.Single((EngineMember m) => m.Id == "defs-tryany"));
+			TryAnyFn fn = method.CreateDelegate<TryAnyFn>();
+			_tryAny = (DefinitionManager dm, Guid g) => !fn(dm, g, out var definition) ? null : definition;
 		}
 		catch (Exception)
 		{
@@ -355,18 +333,9 @@ internal static class ObjectCodec
 		return _tryAny;
 	}
 
-	public static bool IsUnknownModel(string fail)
-	{
-		if (fail.Contains("is not on this side", StringComparison.Ordinal))
-		{
-			if (!fail.Contains("observable #", StringComparison.Ordinal))
-			{
-				return fail.Contains("observed list #", StringComparison.Ordinal);
-			}
-			return true;
-		}
-		return false;
-	}
+	public static bool IsUnknownModel(string fail) =>
+		fail.Contains("is not on this side", StringComparison.Ordinal)
+		&& (fail.Contains("observable #", StringComparison.Ordinal) || fail.Contains("observed list #", StringComparison.Ordinal));
 
 	public static object? Decode(WireValue v, Type declared, ObjectSpace sp, bool translated, ref string? fail, int depth = 0, bool inCollection = false)
 	{
@@ -382,95 +351,89 @@ internal static class ObjectCodec
 		{
 		case WireKind.Null:
 		case WireKind.Default:
-			if (!declared.IsValueType || !(Nullable.GetUnderlyingType(declared) == null))
-			{
-				return null;
-			}
-			return Activator.CreateInstance(declared);
+			return declared.IsValueType && Nullable.GetUnderlyingType(declared) == null ? Activator.CreateInstance(declared) : null;
 		case WireKind.Entity:
 		{
 			int id = (int)v.Id;
+			// Ids below -1 are the sender's per-message local ids (see Encode): one stub per id.
 			if (id < -1)
 			{
-				if (!sp.LocalStubs.TryGetValue(id, out Entity value2))
+				if (!sp.LocalStubs.TryGetValue(id, out Entity stub))
 				{
-					value2 = (sp.LocalStubs[id] = EntityAllocator.AllocateStub());
+					stub = sp.LocalStubs[id] = EntityAllocator.AllocateStub();
 				}
-				return value2;
+				return stub;
 			}
-			Entity entity2 = sp.Resolve(v.Id, translated);
-			if (entity2 == null)
+			Entity? entity = sp.Resolve(v.Id, translated);
+			if (entity == null)
 			{
 				fail = $"entity #{v.Id} is not on this side{sp.Explain?.Invoke(v.Id)}";
 			}
-			return entity2;
+			return entity;
 		}
 		case WireKind.Component:
 		{
-			Entity entity3 = sp.Resolve(v.Id, translated);
-			if (entity3 == null)
+			Entity? entity = sp.Resolve(v.Id, translated);
+			if (entity == null)
 			{
 				fail = $"component's entity #{v.Id} is not on this side{sp.Explain?.Invoke(v.Id)}";
 				return null;
 			}
-			Type type3 = FindType(v.Text);
-			Component component = null;
-			foreach (Component component2 in entity3.Components)
+			Type? exactType = FindType(v.Text);
+			Component? match = null;
+			foreach (Component candidate in entity.Components)
 			{
-				if (declared.IsInstanceOfType(component2))
+				if (declared.IsInstanceOfType(candidate))
 				{
-					if (type3 != null && component2.GetType() == type3)
+					if (exactType != null && candidate.GetType() == exactType)
 					{
-						return component2;
+						return candidate;
 					}
-					if (component == null)
-					{
-						component = component2;
-					}
+					match ??= candidate;
 				}
 			}
-			if (component == null)
+			if (match == null)
 			{
 				fail = $"no {declared.Name} on entity #{v.Id}";
 			}
-			return component;
+			return match;
 		}
 		case WireKind.Session:
 		{
-			Session? session = (translated ? sp.TranslatedSession : sp.Session);
+			Session? session = translated ? sp.TranslatedSession : sp.Session;
 			if (session == null)
 			{
-				fail = (translated ? "no session to translate on this side" : "no session on this side");
+				fail = translated ? "no session to translate on this side" : "no session on this side";
 			}
 			return session;
 		}
 		case WireKind.Observable:
 		{
-			object obj6 = sp.ResolveObservable?.Invoke(v.Id, inCollection);
-			if (obj6 == null)
+			object? observable = sp.ResolveObservable?.Invoke(v.Id, inCollection);
+			if (observable == null)
 			{
 				fail = $"observable #{v.Id} is not on this side";
 				return null;
 			}
-			if (!(Nullable.GetUnderlyingType(declared) ?? declared).IsInstanceOfType(obj6))
+			if (!(Nullable.GetUnderlyingType(declared) ?? declared).IsInstanceOfType(observable))
 			{
-				fail = $"observable #{v.Id} is a {obj6.GetType().Name} here, not a {declared.Name}";
+				fail = $"observable #{v.Id} is a {observable.GetType().Name} here, not a {declared.Name}";
 				return null;
 			}
-			return obj6;
+			return observable;
 		}
 		case WireKind.ObservedList:
 		{
-			object? obj2 = sp.ResolveList?.Invoke(v.Id);
-			if (obj2 == null)
+			object? list = sp.ResolveList?.Invoke(v.Id);
+			if (list == null)
 			{
 				fail = $"observed list #{v.Id} is not on this side";
 			}
-			return obj2;
+			return list;
 		}
 		case WireKind.Definition:
 		{
-			Definition definition = FindDefinition(v.Guid, Nullable.GetUnderlyingType(declared) ?? declared);
+			Definition? definition = FindDefinition(v.Guid, Nullable.GetUnderlyingType(declared) ?? declared);
 			if (definition != null)
 			{
 				return definition;
@@ -486,178 +449,140 @@ internal static class ObjectCodec
 			return v.Text;
 		case WireKind.Type:
 		{
-			Type? type4 = FindType(v.Text);
-			if (type4 == null)
+			Type? type = FindType(v.Text);
+			if (type == null)
 			{
 				fail = "type " + v.Text + " not found";
 			}
-			return type4;
+			return type;
 		}
 		case WireKind.Bytes:
 		{
-			Type type9 = Nullable.GetUnderlyingType(declared) ?? declared;
-			if (!type9.IsValueType || ContainsReferences(type9))
+			Type type = Nullable.GetUnderlyingType(declared) ?? declared;
+			if (!type.IsValueType || ContainsReferences(type))
 			{
 				fail = "raw bytes for " + declared.Name;
 				return null;
 			}
-			if (CommandLayouts.SizeOf(type9) != v.Bytes.Length)
+			if (CommandLayouts.SizeOf(type) != v.Bytes.Length)
 			{
-				fail = $"{type9.Name}: {v.Bytes.Length} B, expected {CommandLayouts.SizeOf(type9)} B";
+				fail = $"{type.Name}: {v.Bytes.Length} B, expected {CommandLayouts.SizeOf(type)} B";
 				return null;
 			}
-			return FromBytes(v.Bytes, type9);
+			return FromBytes(v.Bytes, type);
 		}
 		case WireKind.Array:
 		{
 			if (v.Text.StartsWith("Dict:", StringComparison.Ordinal))
 			{
-				string text = v.Text;
-				int length = "Dict:".Length;
-				string[] array = text.Substring(length, text.Length - length).Split('|');
-				Type type5 = ((array.Length == 2) ? FindType(array[0]) : null);
-				Type type6 = ((array.Length == 2) ? FindType(array[1]) : null);
-				if (type5 == null || type6 == null || v.Items.Count % 2 != 0)
+				string[] typeNames = v.Text[DictPrefix.Length..].Split('|');
+				Type? keyType = typeNames.Length == 2 ? FindType(typeNames[0]) : null;
+				Type? valueType = typeNames.Length == 2 ? FindType(typeNames[1]) : null;
+				if (keyType == null || valueType == null || v.Items.Count % 2 != 0)
 				{
 					fail = "dictionary " + v.Text + " not readable here";
 					return null;
 				}
-				IDictionary dictionary = (IDictionary)Activator.CreateInstance(typeof(Dictionary<, >).MakeGenericType(type5, type6));
+				var dictionary = (IDictionary)Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(keyType, valueType));
 				for (int i = 0; i + 1 < v.Items.Count; i += 2)
 				{
-					object obj3 = Decode(v.Items[i], type5, sp, translated: false, ref fail, depth + 1, inCollection: true);
-					object value3 = Decode(v.Items[i + 1], type6, sp, translated: false, ref fail, depth + 1, inCollection: true);
+					object? key = Decode(v.Items[i], keyType, sp, translated: false, ref fail, depth + 1, inCollection: true);
+					object? value = Decode(v.Items[i + 1], valueType, sp, translated: false, ref fail, depth + 1, inCollection: true);
 					if (fail != null)
 					{
 						return null;
 					}
-					if (obj3 != null)
+					if (key != null)
 					{
-						dictionary[obj3] = value3;
+						dictionary[key] = value;
 					}
 				}
 				return dictionary;
 			}
 			if (v.Text.StartsWith("Set:", StringComparison.Ordinal))
 			{
-				string text = v.Text;
-				int length = "Set:".Length;
-				Type type7 = FindType(text.Substring(length, text.Length - length));
-				if (type7 == null)
+				Type? elementType = FindType(v.Text[SetPrefix.Length..]);
+				if (elementType == null)
 				{
 					fail = "set element type " + v.Text + " not found";
 					return null;
 				}
-				object obj4 = Activator.CreateInstance(typeof(HashSet<>).MakeGenericType(type7));
-				MethodInfo method = obj4.GetType().GetMethod("Add");
+				object set = Activator.CreateInstance(typeof(HashSet<>).MakeGenericType(elementType));
+				MethodInfo add = set.GetType().GetMethod("Add");
+				foreach (WireValue item in v.Items)
 				{
-					foreach (WireValue item3 in v.Items)
+					object? element = Decode(item, elementType, sp, translated: false, ref fail, depth + 1, inCollection: true);
+					if (fail != null)
 					{
-						object obj5 = Decode(item3, type7, sp, translated: false, ref fail, depth + 1, inCollection: true);
-						if (fail != null)
-						{
-							return null;
-						}
-						method.Invoke(obj4, new object[1] { obj5 });
+						return null;
 					}
-					return obj4;
+					add.Invoke(set, new object[] { element });
 				}
+				return set;
 			}
-			string text2 = v.Text;
-			bool flag = text2.StartsWith("List:", StringComparison.Ordinal);
-			bool flag2 = text2.StartsWith("ImmutableArray:", StringComparison.Ordinal);
-			string name;
-			if (!flag)
+			string text = v.Text;
+			bool isList = text.StartsWith("List:", StringComparison.Ordinal);
+			bool isImmutable = text.StartsWith("ImmutableArray:", StringComparison.Ordinal);
+			string elementName = isList ? text[5..] : isImmutable ? text[15..] : text;
+			Type? itemType = FindType(elementName);
+			if (itemType == null)
 			{
-				if (!flag2)
-				{
-					name = text2;
-				}
-				else
-				{
-					string text = text2;
-					name = text.Substring(15, text.Length - 15);
-				}
-			}
-			else
-			{
-				string text = text2;
-				name = text.Substring(5, text.Length - 5);
-			}
-			Type type8 = FindType(name);
-			if (type8 == null)
-			{
-				fail = "element type " + text2 + " not found";
+				fail = "element type " + text + " not found";
 				return null;
 			}
-			Array array2 = Array.CreateInstance(type8, v.Items.Count);
-			for (int j = 0; j < v.Items.Count; j++)
+			Array array = Array.CreateInstance(itemType, v.Items.Count);
+			for (int i = 0; i < v.Items.Count; i++)
 			{
-				array2.SetValue(Decode(v.Items[j], type8, sp, translated: false, ref fail, depth + 1, inCollection: true), j);
+				array.SetValue(Decode(v.Items[i], itemType, sp, translated: false, ref fail, depth + 1, inCollection: true), i);
 			}
-			if (flag)
+			if (isList)
 			{
-				IList list = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(type8));
+				var list = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(itemType));
+				foreach (object item in array)
 				{
-					foreach (object item4 in array2)
-					{
-						list.Add(item4);
-					}
-					return list;
+					list.Add(item);
 				}
+				return list;
 			}
-			if (flag2)
+			if (isImmutable)
 			{
-				return typeof(ImmutableArray).GetMethods().First((MethodInfo m) =>
-				{
-					if (m.Name == "Create")
-					{
-						ParameterInfo[] parameters = m.GetParameters();
-						if (parameters != null && parameters.Length == 1)
-						{
-							return parameters[0].ParameterType.IsArray;
-						}
-					}
-					return false;
-				}).MakeGenericMethod(type8)
-					.Invoke(null, new object[1] { array2 });
+				return typeof(ImmutableArray).GetMethods()
+					.First((MethodInfo m) => m.Name == "Create" && m.GetParameters() is { Length: 1 } parameters && parameters[0].ParameterType.IsArray)
+					.MakeGenericMethod(itemType)
+					.Invoke(null, new object[] { array });
 			}
-			return array2;
+			return array;
 		}
 		case WireKind.Object:
 		{
-			Type type2 = FindType(v.Text);
-			if (type2 == null)
+			Type? type = FindType(v.Text);
+			if (type == null)
 			{
 				fail = "type " + v.Text + " not found";
 				return null;
 			}
-			object obj = (type2.IsValueType ? Activator.CreateInstance(type2) : RuntimeHelpers.GetUninitializedObject(type2));
+			object instance = type.IsValueType ? Activator.CreateInstance(type) : RuntimeHelpers.GetUninitializedObject(type);
+			foreach (var (name, value) in v.Fields)
 			{
-				foreach (var field in v.Fields)
+				FieldInfo? field = Field(type, name);
+				if (field == null)
 				{
-					string item = field.Name;
-					WireValue item2 = field.Value;
-					FieldInfo fieldInfo = Field(type2, item);
-					if (fieldInfo == null)
-					{
-						fail = type2.Name + " has no field " + item + " here";
-						return null;
-					}
-					object value = Decode(item2, fieldInfo.FieldType, sp, translated: false, ref fail, depth + 1, inCollection);
-					if (fail != null)
-					{
-						fail = $"{type2.Name}.{item}: {fail}";
-						return null;
-					}
-					fieldInfo.SetValue(obj, value);
+					fail = type.Name + " has no field " + name + " here";
+					return null;
 				}
-				return obj;
+				object? decoded = Decode(value, field.FieldType, sp, translated: false, ref fail, depth + 1, inCollection);
+				if (fail != null)
+				{
+					fail = $"{type.Name}.{name}: {fail}";
+					return null;
+				}
+				field.SetValue(instance, decoded);
 			}
+			return instance;
 		}
 		case WireKind.Serialized:
 		{
-			Type type = FindType(v.Text);
+			Type? type = FindType(v.Text);
 			if (type == null)
 			{
 				fail = "type " + v.Text + " not found";
@@ -679,19 +604,9 @@ internal static class ObjectCodec
 		}
 	}
 
-	public static bool ContainsReferences(Type t)
-	{
-		return RefCache.GetOrAdd(t, (Type x) => (bool)IsRefMethod.MakeGenericMethod(x).Invoke(null, null));
-	}
+	public static bool ContainsReferences(Type t) => RefCache.GetOrAdd(t, (Type x) => (bool)IsRefMethod.MakeGenericMethod(x).Invoke(null, null));
 
-	public static bool IsReleaseToServer(Type t)
-	{
-		if (t.IsGenericType)
-		{
-			return t.GetGenericTypeDefinition() == typeof(ReleaseToServer<>);
-		}
-		return false;
-	}
+	public static bool IsReleaseToServer(Type t) => t.IsGenericType && t.GetGenericTypeDefinition() == typeof(ReleaseToServer<>);
 
 	public static string? TypeProblem(Type t, bool copyObservables = false, int depth = 0)
 	{
@@ -728,31 +643,30 @@ internal static class ObjectCodec
 		{
 			return TypeProblem(t.GetGenericArguments()[0], copyObservables, depth + 1);
 		}
-		if (t.IsGenericType && t.GetGenericTypeDefinition() == typeof(Dictionary<, >))
+		if (t.IsGenericType && t.GetGenericTypeDefinition() == typeof(Dictionary<,>))
 		{
 			return TypeProblem(t.GetGenericArguments()[0], copyObservables, depth + 1) ?? TypeProblem(t.GetGenericArguments()[1], copyObservables, depth + 1);
 		}
 		if (t.IsValueType && !ContainsReferences(t))
 		{
-			string text = (ContainsStringId(t, 0) ? null : ProcessLocal(t, 0));
-			if (text != null)
+			string? local = ContainsStringId(t, 0) ? null : ProcessLocal(t, 0);
+			if (local != null)
 			{
-				return t.Name + " (" + text + ": only while unassigned)";
+				return t.Name + " (" + local + ": only while unassigned)";
 			}
 			return null;
 		}
 		if (IsCompilerGenerated(t) || t.IsValueType || t == typeof(ReplicationEventContext))
 		{
-			bool copyObservables2 = copyObservables || IsReleaseToServer(t);
-			FieldInfo[] array = Fields(t);
-			foreach (FieldInfo fieldInfo in array)
+			bool fieldCopyObservables = copyObservables || IsReleaseToServer(t);
+			foreach (FieldInfo field in Fields(t))
 			{
-				if (!fieldInfo.IsStatic && !fieldInfo.IsLiteral)
+				if (!field.IsStatic && !field.IsLiteral)
 				{
-					string text2 = TypeProblem(fieldInfo.FieldType, copyObservables2, depth + 1);
-					if (text2 != null)
+					string? problem = TypeProblem(field.FieldType, fieldCopyObservables, depth + 1);
+					if (problem != null)
 					{
-						return $"{t.Name}.{fieldInfo.Name}: {text2}";
+						return $"{t.Name}.{field.Name}: {problem}";
 					}
 				}
 			}
@@ -769,6 +683,7 @@ internal static class ObjectCodec
 		return t.Name + " cannot travel";
 	}
 
+	// Closures and other compiler-made types, including types nested in them (display classes).
 	public static bool IsCompilerGenerated(Type t)
 	{
 		if (!t.Name.Contains('<') && t.GetCustomAttribute<CompilerGeneratedAttribute>() == null)
@@ -792,10 +707,9 @@ internal static class ObjectCodec
 		{
 			return false;
 		}
-		FieldInfo[] array = Fields(t);
-		foreach (FieldInfo fieldInfo in array)
+		foreach (FieldInfo field in Fields(t))
 		{
-			if (!fieldInfo.IsStatic && ContainsStringId(fieldInfo.FieldType, depth + 1))
+			if (!field.IsStatic && ContainsStringId(field.FieldType, depth + 1))
 			{
 				return true;
 			}
@@ -821,25 +735,21 @@ internal static class ObjectCodec
 		{
 			return null;
 		}
-		FieldInfo[] array = Fields(t);
-		foreach (FieldInfo fieldInfo in array)
+		foreach (FieldInfo field in Fields(t))
 		{
-			if (!fieldInfo.IsStatic)
+			if (!field.IsStatic)
 			{
-				string text = ProcessLocal(fieldInfo.FieldType, depth + 1);
-				if (text != null)
+				string? found = ProcessLocal(field.FieldType, depth + 1);
+				if (found != null)
 				{
-					return text;
+					return found;
 				}
 			}
 		}
 		return null;
 	}
 
-	private static bool IsKeenSerializable(Type t)
-	{
-		return SerializableCache.GetOrAdd(t, (Type x) => typeof(ISerializable).IsAssignableFrom(x));
-	}
+	private static bool IsKeenSerializable(Type t) => SerializableCache.GetOrAdd(t, (Type x) => typeof(ISerializable).IsAssignableFrom(x));
 
 	public static byte[] ToBytes(object box, Type t)
 	{
@@ -853,56 +763,53 @@ internal static class ObjectCodec
 
 	private static byte[] ToBytesT<T>(object box) where T : struct
 	{
-		T reference = (T)box;
-		return MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref reference, 1)).ToArray();
+		T value = (T)box;
+		return MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref value, 1)).ToArray();
 	}
 
-	private static object FromBytesT<T>(byte[] b) where T : struct
-	{
-		return MemoryMarshal.Read<T>(b);
-	}
+	private static object FromBytesT<T>(byte[] b) where T : struct => MemoryMarshal.Read<T>(b);
 
 	private static byte[] SerializeKeen(object o, Type t, ObjectSpace sp)
 	{
 		bool bundle = typeof(EntityBundle).IsAssignableFrom(t);
-		NetIdProxyContext proxies = new NetIdProxyContext((Entity e) =>
+		var proxies = new NetIdProxyContext((Entity e) =>
 		{
-			uint? num = sp.IdOf(e);
-			if (num.HasValue)
+			uint? netId = sp.IdOf(e);
+			if (netId.HasValue)
 			{
-				return (int)num.Value;
+				return (int)netId.Value;
 			}
-			if (sp.LocalIds.TryGetValue(e, out var value) || sp.BundleLocalIds.TryGetValue(e, out value))
+			if (sp.LocalIds.TryGetValue(e, out var localId) || sp.BundleLocalIds.TryGetValue(e, out localId))
 			{
-				return value;
+				return localId;
 			}
-			int num2 = sp.NextLocalId();
+			int newId = sp.NextLocalId();
 			if (bundle)
 			{
-				sp.BundleLocalIds[e] = num2;
+				sp.BundleLocalIds[e] = newId;
 			}
 			else
 			{
-				sp.LocalIds[e] = num2;
+				sp.LocalIds[e] = newId;
 			}
-			return num2;
+			return newId;
 		}, null);
 		return EngineCodec.SerializeObject(o, t, proxies, SerializeGeneric);
 	}
 
 	private static object? DeserializeKeen(byte[] b, Type t, ObjectSpace sp)
 	{
-		NetIdProxyContext proxies = new NetIdProxyContext(null, (int id) =>
+		var proxies = new NetIdProxyContext(null, (int id) =>
 		{
 			if (id < -1)
 			{
-				if (!sp.LocalStubs.TryGetValue(id, out Entity value))
+				if (!sp.LocalStubs.TryGetValue(id, out Entity stub))
 				{
-					value = (sp.LocalStubs[id] = EntityAllocator.AllocateStub());
+					stub = sp.LocalStubs[id] = EntityAllocator.AllocateStub();
 				}
-				return value;
+				return stub;
 			}
-			return sp.Resolve((uint)id, arg2: false) ?? EntityAllocator.AllocateStub();
+			return sp.Resolve((uint)id, false) ?? EntityAllocator.AllocateStub();
 		});
 		return EngineCodec.DeserializeObject(b, t, proxies, DeserializeGeneric);
 	}

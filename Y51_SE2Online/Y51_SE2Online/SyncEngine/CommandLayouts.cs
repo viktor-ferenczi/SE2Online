@@ -23,13 +23,13 @@ internal static class CommandLayouts
 
 	private static Dictionary<string, CommandLayout>? _byName;
 
-	private static readonly object Sync = new object();
+	private static readonly object Sync = new();
 
 	public static int CallbacksAnalysed;
 
 	public static int CallbacksMissing;
 
-	private static readonly HashSet<Type> ForwardableStructs = new HashSet<Type> { typeof(LocalizableText), typeof(Keen.Game2.Simulation.GameSystems.Explosions.AudioParameter?) };
+	private static readonly HashSet<Type> ForwardableStructs = new() { typeof(LocalizableText), typeof(Keen.Game2.Simulation.GameSystems.Explosions.AudioParameter?) };
 
 	private static readonly MethodInfo SizeOfMethod = typeof(Unsafe).GetMethod("SizeOf");
 
@@ -48,7 +48,7 @@ internal static class CommandLayouts
 
 	public static CommandLayout? ByStub(int stub)
 	{
-		CommandLayout[] all = All;
+		CommandLayout?[] all = All;
 		if ((uint)stub >= (uint)all.Length)
 		{
 			return null;
@@ -59,30 +59,26 @@ internal static class CommandLayouts
 	public static CommandLayout? ByName(string name)
 	{
 		Build();
-		if (!_byName.TryGetValue(name, out CommandLayout value))
-		{
-			return null;
-		}
-		return value;
+		return _byName.TryGetValue(name, out CommandLayout? layout) ? layout : null;
 	}
 
 	public static string? Check(SignalKeyDef def)
 	{
 		try
 		{
-			CommandLayout commandLayout = ByName(def.Name);
-			if (commandLayout == null)
+			CommandLayout? layout = ByName(def.Name);
+			if (layout == null)
 			{
 				return "unknown signal in this game build";
 			}
-			if (!commandLayout.Forwardable)
+			if (!layout.Forwardable)
 			{
-				return "not forwardable here: " + commandLayout.Why;
+				return "not forwardable here: " + layout.Why;
 			}
-			SignalKeyDef signalKeyDef = commandLayout.Def(def.Key);
-			if (signalKeyDef.PayloadBytes != def.PayloadBytes || signalKeyDef.RefOffsets != def.RefOffsets)
+			SignalKeyDef local = layout.Def(def.Key);
+			if (local.PayloadBytes != def.PayloadBytes || local.RefOffsets != def.RefOffsets)
 			{
-				return $"layout differs (here {signalKeyDef.PayloadBytes} B [{signalKeyDef.RefOffsets}], peer {def.PayloadBytes} B [{def.RefOffsets}])";
+				return $"layout differs (here {local.PayloadBytes} B [{local.RefOffsets}], peer {def.PayloadBytes} B [{def.RefOffsets}])";
 			}
 			return null;
 		}
@@ -105,39 +101,39 @@ internal static class CommandLayouts
 				return;
 			}
 			ReplicationCommandBufferIndexer.CommandBufferCommand[] table = MetadataIndexerBase<ReplicationCommandBufferIndexer>.Instance.Table;
-			CommandLayout[] array = new CommandLayout[table.Length];
-			Dictionary<string, CommandLayout> dictionary = new Dictionary<string, CommandLayout>(StringComparer.Ordinal);
-			Dictionary<Type, Dictionary<int, int>> dictionary2;
+			var byStub = new CommandLayout[table.Length];
+			var byName = new Dictionary<string, CommandLayout>(StringComparer.Ordinal);
+			Dictionary<Type, Dictionary<int, int>> callbacks;
 			try
 			{
-				dictionary2 = ReaderCallbacks.Analyse();
+				callbacks = ReaderCallbacks.Analyse();
 			}
 			catch (Exception)
 			{
-				dictionary2 = new Dictionary<Type, Dictionary<int, int>>();
+				callbacks = new Dictionary<Type, Dictionary<int, int>>();
 			}
 			for (int i = 0; i < table.Length; i++)
 			{
 				Type signalType = table[i].SignalType;
-				if ((object)signalType != null && signalType.FullName != null)
+				if (signalType is not null && signalType.FullName != null)
 				{
-					CommandLayout commandLayout = For(i, signalType.FullName, table[i].WriterInfo);
-					commandLayout.SignalType = signalType;
-					if (dictionary2.TryGetValue(signalType, out var value))
+					CommandLayout layout = For(i, signalType.FullName, table[i].WriterInfo);
+					layout.SignalType = signalType;
+					if (callbacks.TryGetValue(signalType, out var translated))
 					{
-						commandLayout.Translated = value;
+						layout.Translated = translated;
 						CallbacksAnalysed++;
 					}
-					else if (commandLayout.Kind == CommandKind.Signal)
+					else if (layout.Kind == CommandKind.Signal)
 					{
 						CallbacksMissing++;
 					}
-					array[i] = commandLayout;
-					dictionary.TryAdd(commandLayout.Name, commandLayout);
+					byStub[i] = layout;
+					byName.TryAdd(layout.Name, layout);
 				}
 			}
-			_byName = dictionary;
-			_byStub = array;
+			_byName = byName;
+			_byStub = byStub;
 		}
 	}
 
@@ -145,39 +141,36 @@ internal static class CommandLayouts
 	{
 		switch (name)
 		{
-		case "Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent+PostDataSignal":
-		{
-			CommandLayout commandLayout2 = new CommandLayout();
-			commandLayout2.Stub = stub;
-			commandLayout2.Name = name;
-			commandLayout2.Kind = CommandKind.PostData;
-			commandLayout2.RefOffsets = new int[2] { 0, 4 };
-			return commandLayout2;
-		}
-		case "Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent+RemoveDataSignal":
-		{
-			CommandLayout commandLayout2 = new CommandLayout();
-			commandLayout2.Stub = stub;
-			commandLayout2.Name = name;
-			commandLayout2.Kind = CommandKind.RemoveData;
-			commandLayout2.PayloadBytes = 12;
-			commandLayout2.RefOffsets = new int[2] { 0, 4 };
-			return commandLayout2;
-		}
-		case "Keen.VRage.Multiplayer.Replications.InProcess.InProcessReplicationSessionComponent+PostInvokeInternalSignal":
-		{
-			CommandLayout commandLayout2 = new CommandLayout();
-			commandLayout2.Stub = stub;
-			commandLayout2.Name = name;
-			commandLayout2.Kind = CommandKind.PostInvoke;
-			commandLayout2.PayloadBytes = 8;
-			commandLayout2.RefOffsets = new int[2] { 0, 4 };
-			commandLayout2.Why = "closure";
-			return commandLayout2;
-		}
+		case PostDataSignal:
+			return new CommandLayout
+			{
+				Stub = stub,
+				Name = name,
+				Kind = CommandKind.PostData,
+				RefOffsets = new[] { 0, 4 }
+			};
+		case RemoveDataSignal:
+			return new CommandLayout
+			{
+				Stub = stub,
+				Name = name,
+				Kind = CommandKind.RemoveData,
+				PayloadBytes = 12,
+				RefOffsets = new[] { 0, 4 }
+			};
+		case PostInvokeSignal:
+			return new CommandLayout
+			{
+				Stub = stub,
+				Name = name,
+				Kind = CommandKind.PostInvoke,
+				PayloadBytes = 8,
+				RefOffsets = new[] { 0, 4 },
+				Why = "closure"
+			};
 		default:
 		{
-			CommandLayout commandLayout = new CommandLayout
+			var layout = new CommandLayout
 			{
 				Stub = stub,
 				Name = name,
@@ -185,27 +178,27 @@ internal static class CommandLayouts
 			};
 			if (writer == null)
 			{
-				commandLayout.Why = "no writer";
-				return commandLayout;
+				layout.Why = "no writer";
+				return layout;
 			}
 			ParameterInfo[] parameters = writer.GetParameters();
 			if (parameters.Length == 0)
 			{
-				commandLayout.Why = "writer has no entity parameter";
-				return commandLayout;
+				layout.Why = "writer has no entity parameter";
+				return layout;
 			}
 			if (name.StartsWith("Keen.VRage.Multiplayer.", StringComparison.Ordinal))
 			{
-				commandLayout.Why = "replication infrastructure (observables, pairing): not forwarded";
-				commandLayout.PayloadBytes = -1;
+				layout.Why = "replication infrastructure (observables, pairing): not forwarded";
+				layout.PayloadBytes = -1;
 			}
-			List<Segment> list = new List<Segment>
+			var segments = new List<Segment>
 			{
 				new Segment(SegmentKind.Ref, 4, 0, parameters[0].ParameterType)
 			};
-			bool flag = false;
-			int num = 4;
-			List<int> list2 = new List<int>();
+			bool hasSpan = false;
+			int offset = 4;
+			var stringIdOffsets = new List<int>();
 			for (int i = 1; i < parameters.Length; i++)
 			{
 				Type type = parameters[i].ParameterType;
@@ -215,96 +208,90 @@ internal static class CommandLayouts
 				}
 				if (!type.IsValueType || IsGeneric(type, typeof(ImmutableArray<>)))
 				{
-					list.Add(new Segment(SegmentKind.Ref, 4, i, type));
-					num += 4;
+					segments.Add(new Segment(SegmentKind.Ref, 4, i, type));
+					offset += 4;
 					continue;
 				}
 				if (IsGeneric(type, typeof(ReadOnlySpan<>)) || IsGeneric(type, typeof(Span<>)))
 				{
-					Type type2 = type.GetGenericArguments()[0];
-					if (RuntimeHelpersIsReferenceOrContainsReferences(type2) || ProcessLocal(type2, 0) != null)
+					Type elementType = type.GetGenericArguments()[0];
+					if (RuntimeHelpersIsReferenceOrContainsReferences(elementType) || ProcessLocal(elementType, 0) != null)
 					{
-						commandLayout.Why = $"span of {type2.Name} ({parameters[i].Name})";
-						return commandLayout;
+						layout.Why = $"span of {elementType.Name} ({parameters[i].Name})";
+						return layout;
 					}
-					List<int> list3 = new List<int>();
-					CollectStringIds(type2, 0, list3, 0);
-					if (list3.Count > 0)
+					var elementStringIds = new List<int>();
+					CollectStringIds(elementType, 0, elementStringIds, 0);
+					if (elementStringIds.Count > 0)
 					{
-						commandLayout.Why = $"span of {type2.Name} ({parameters[i].Name}) holds StringIds";
-						return commandLayout;
+						layout.Why = $"span of {elementType.Name} ({parameters[i].Name}) holds StringIds";
+						return layout;
 					}
-					list.Add(new Segment(SegmentKind.Span, 0, i, type));
-					flag = true;
+					segments.Add(new Segment(SegmentKind.Span, 0, i, type));
+					hasSpan = true;
 					continue;
 				}
 				if (RuntimeHelpersIsReferenceOrContainsReferences(type))
 				{
-					num += 4;
-					list.Add(new Segment(SegmentKind.Ref, 4, i, type));
+					offset += 4;
+					segments.Add(new Segment(SegmentKind.Ref, 4, i, type));
 					if (!ForwardableStructs.Contains(type))
 					{
-						CommandLayout commandLayout2 = commandLayout;
-						if (commandLayout2.Why == null)
-						{
-							commandLayout2.Why = $"managed struct argument {parameters[i].Name} ({type.Name})";
-						}
+						layout.Why ??= $"managed struct argument {parameters[i].Name} ({type.Name})";
 					}
 					continue;
 				}
-				string text = ProcessLocal(type, 0);
-				if (text != null)
+				string? local = ProcessLocal(type, 0);
+				if (local != null)
 				{
-					commandLayout.Why = "argument " + parameters[i].Name + " carries " + text;
-					return commandLayout;
+					layout.Why = "argument " + parameters[i].Name + " carries " + local;
+					return layout;
 				}
-				int num2 = SizeOf(type);
-				List<int> list4 = new List<int>();
-				CollectStringIds(type, 0, list4, 0);
-				if (list4.Count > 0)
+				int size = SizeOf(type);
+				var stringIds = new List<int>();
+				CollectStringIds(type, 0, stringIds, 0);
+				if (stringIds.Count > 0)
 				{
-					if (flag)
+					// Offsets after a variable-length span are not fixed, so these ids could not be patched.
+					if (hasSpan)
 					{
-						commandLayout.Why = "argument " + parameters[i].Name + " holds a StringId after a span";
-						return commandLayout;
+						layout.Why = "argument " + parameters[i].Name + " holds a StringId after a span";
+						return layout;
 					}
-					foreach (int item in list4)
+					foreach (int stringId in stringIds)
 					{
-						list2.Add(num + item);
+						stringIdOffsets.Add(offset + stringId);
 					}
 				}
-				num += num2;
-				if (list[list.Count - 1].Kind == SegmentKind.Bytes)
+				offset += size;
+				if (segments[^1].Kind == SegmentKind.Bytes)
 				{
-					int index = list.Count - 1;
-					Segment value = list[list.Count - 1];
-					value = value with { Size = list[list.Count - 1].Size + num2 };
-					list[index] = value;
+					segments[^1] = segments[^1] with { Size = segments[^1].Size + size };
 				}
 				else
 				{
-					list.Add(new Segment(SegmentKind.Bytes, num2, i, type));
+					segments.Add(new Segment(SegmentKind.Bytes, size, i, type));
 				}
 			}
-			commandLayout.Segments = list.ToArray();
-			commandLayout.StringIdOffsets = list2.ToArray();
-			if (!flag)
+			layout.Segments = segments.ToArray();
+			layout.StringIdOffsets = stringIdOffsets.ToArray();
+			if (!hasSpan)
 			{
-				int num3 = 0;
-				List<int> list5 = new List<int>();
-				foreach (Segment item2 in list)
+				int payloadBytes = 0;
+				var refOffsets = new List<int>();
+				foreach (Segment segment in segments)
 				{
-					if (item2.Kind == SegmentKind.Ref)
+					if (segment.Kind == SegmentKind.Ref)
 					{
-						list5.Add(num3);
+						refOffsets.Add(payloadBytes);
 					}
-					num3 += ((item2.Kind == SegmentKind.Ref) ? 4 : item2.Size);
+					payloadBytes += segment.Kind == SegmentKind.Ref ? 4 : segment.Size;
 				}
-				commandLayout.PayloadBytes = num3;
-				commandLayout.RefOffsets = list5.ToArray();
+				layout.PayloadBytes = payloadBytes;
+				layout.RefOffsets = refOffsets.ToArray();
 			}
-			commandLayout.Forwardable = commandLayout.Why == null;
-			return commandLayout;
+			layout.Forwardable = layout.Why == null;
+			return layout;
 		}
 		}
 	}
@@ -314,53 +301,36 @@ internal static class CommandLayouts
 		if (t == typeof(StringId))
 		{
 			found.Add(baseOffset);
+			return;
 		}
-		else
+		if (!t.IsValueType || t.IsPrimitive || t.IsEnum || t.IsPointer || depth > 6)
 		{
-			if (!t.IsValueType || t.IsPrimitive || t.IsEnum || t.IsPointer || depth > 6)
+			return;
+		}
+		foreach (FieldInfo field in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+		{
+			Type fieldType = field.FieldType;
+			if (fieldType.IsValueType && !fieldType.IsPrimitive && !fieldType.IsEnum)
 			{
-				return;
-			}
-			FieldInfo[] fields = t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-			foreach (FieldInfo fieldInfo in fields)
-			{
-				Type fieldType = fieldInfo.FieldType;
-				if (fieldType.IsValueType && !fieldType.IsPrimitive && !fieldType.IsEnum)
-				{
-					CollectStringIds(fieldType, baseOffset + (int)fieldInfo.GetFieldOffset(), found, depth + 1);
-				}
+				CollectStringIds(fieldType, baseOffset + (int)field.GetFieldOffset(), found, depth + 1);
 			}
 		}
 	}
 
-	private static bool IsGeneric(Type t, Type def)
-	{
-		if (t.IsGenericType)
-		{
-			return t.GetGenericTypeDefinition() == def;
-		}
-		return false;
-	}
+	private static bool IsGeneric(Type t, Type def) => t.IsGenericType && t.GetGenericTypeDefinition() == def;
 
-	public static int SizeOf(Type t)
-	{
-		return (int)SizeOfMethod.MakeGenericMethod(t).Invoke(null, null);
-	}
+	public static int SizeOf(Type t) => (int)SizeOfMethod.MakeGenericMethod(t).Invoke(null, null);
 
-	private static bool RuntimeHelpersIsReferenceOrContainsReferences(Type t)
-	{
-		return (bool)IsRefMethod.MakeGenericMethod(t).Invoke(null, null);
-	}
+	private static bool RuntimeHelpersIsReferenceOrContainsReferences(Type t) => (bool)IsRefMethod.MakeGenericMethod(t).Invoke(null, null);
 
+	// Names what makes a value of this type meaningless in another process (a pointer or an entity id), or null.
 	private static string? ProcessLocal(Type t, int depth)
 	{
 		if (t.IsPointer || t == typeof(nint) || t == typeof(nuint))
 		{
 			return "a pointer";
 		}
-		string fullName = t.FullName;
-		bool flag = ((fullName == "Keen.VRage.DCS.Accessors.DEntity" || fullName == "Keen.VRage.Multiplayer.EntityId") ? true : false);
-		if (flag || t.Name == "EntityId")
+		if (t.FullName is "Keen.VRage.DCS.Accessors.DEntity" or "Keen.VRage.Multiplayer.EntityId" || t.Name == "EntityId")
 		{
 			return t.Name;
 		}
@@ -368,92 +338,77 @@ internal static class CommandLayouts
 		{
 			return null;
 		}
-		FieldInfo[] fields = t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-		for (int i = 0; i < fields.Length; i++)
+		foreach (FieldInfo field in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
 		{
-			string text = ProcessLocal(fields[i].FieldType, depth + 1);
-			if (text != null)
+			string? found = ProcessLocal(field.FieldType, depth + 1);
+			if (found != null)
 			{
-				return text;
+				return found;
 			}
 		}
 		return null;
 	}
 
+	// Evaluates the constant size expression (ldc/sizeof combined with add/mul) the generated writer
+	// computes before its first stloc, or returns -1 when the IL is anything else.
 	public static int WriterAllocationSize(MethodInfo trampoline)
 	{
-		string text;
-		if (!trampoline.Name.EndsWith("_Trampoline", StringComparison.Ordinal))
-		{
-			text = trampoline.Name;
-		}
-		else
-		{
-			string name = trampoline.Name;
-			int length = "_Trampoline".Length;
-			text = name.Substring(0, name.Length - length);
-		}
-		string name2 = text;
-		MethodInfo methodInfo = trampoline.DeclaringType?.GetMethod(name2, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-		byte[] array = methodInfo?.GetMethodBody()?.GetILAsByteArray();
-		if (methodInfo == null || array == null || array.Length < 2)
+		string writerName = trampoline.Name.EndsWith("_Trampoline", StringComparison.Ordinal) ? trampoline.Name[..^"_Trampoline".Length] : trampoline.Name;
+		MethodInfo? writer = trampoline.DeclaringType?.GetMethod(writerName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+		byte[]? il = writer?.GetMethodBody()?.GetILAsByteArray();
+		if (writer == null || il == null || il.Length < 2)
 		{
 			return -1;
 		}
-		Stack<long> stack = new Stack<long>();
-		int num = 0;
-		while (num < array.Length)
+		var stack = new Stack<long>();
+		int pos = 0;
+		while (pos < il.Length)
 		{
-			byte b = array[num++];
-			byte b2 = b;
-			switch (b2)
+			byte op = il[pos++];
+			switch (op)
 			{
-			case 32:
-				if (b2 != 32)
-				{
-					break;
-				}
-				stack.Push(BitConverter.ToInt32(array, num));
-				num += 4;
+			case 0x20: // ldc.i4
+				stack.Push(BitConverter.ToInt32(il, pos));
+				pos += 4;
 				continue;
-			case 22:
-			case 23:
-			case 24:
-			case 25:
-			case 26:
-			case 27:
-			case 28:
-			case 29:
-			case 30:
-				stack.Push(b - 22);
+			case 0x16: // ldc.i4.0 .. ldc.i4.8
+			case 0x17:
+			case 0x18:
+			case 0x19:
+			case 0x1A:
+			case 0x1B:
+			case 0x1C:
+			case 0x1D:
+			case 0x1E:
+				stack.Push(op - 0x16);
 				continue;
-			case 21:
+			case 0x15: // ldc.i4.m1
 				stack.Push(-1L);
 				continue;
-			case 31:
-				stack.Push((sbyte)array[num++]);
+			case 0x1F: // ldc.i4.s
+				stack.Push((sbyte)il[pos++]);
 				continue;
-			case 88:
-			case 90:
+			case 0x58: // add
+			case 0x5A: // mul
 			{
 				if (stack.Count < 2)
 				{
 					return -1;
 				}
-				long num2 = stack.Pop();
-				long num3 = stack.Pop();
-				stack.Push((b == 88) ? (num3 + num2) : (num3 * num2));
+				long right = stack.Pop();
+				long left = stack.Pop();
+				stack.Push(op == 0x58 ? left + right : left * right);
 				continue;
 			}
-			case 254:
-				if (num < array.Length && array[num] == 28)
+			case 0xFE: // two-byte opcode; only sizeof (FE 1C) is understood
+				if (pos < il.Length && il[pos] == 0x1C)
 				{
-					int metadataToken = BitConverter.ToInt32(array, num + 1);
-					num += 5;
+					int token = BitConverter.ToInt32(il, pos + 1);
+					pos += 5;
 					Type t;
 					try
 					{
-						t = methodInfo.Module.ResolveType(metadataToken, methodInfo.DeclaringType?.GetGenericArguments(), methodInfo.GetGenericArguments());
+						t = writer.Module.ResolveType(token, writer.DeclaringType?.GetGenericArguments(), writer.GetGenericArguments());
 					}
 					catch (Exception)
 					{
@@ -463,11 +418,11 @@ internal static class CommandLayouts
 					continue;
 				}
 				break;
-			case 10:
-			case 11:
-			case 12:
-			case 13:
-			case 19:
+			case 0x0A: // stloc.0 .. stloc.3, stloc.s: the size expression is complete
+			case 0x0B:
+			case 0x0C:
+			case 0x0D:
+			case 0x13:
 				if (stack.Count != 1)
 				{
 					return -1;

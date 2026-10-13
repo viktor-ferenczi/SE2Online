@@ -24,40 +24,39 @@ internal static class SignalCodec
 			fail = "payload does not frame";
 			return null;
 		}
-		byte[] array = payload.Slice(0, size).ToArray();
-		WireCommand wireCommand = new WireCommand
+		byte[] bytes = payload.Slice(0, size).ToArray();
+		var command = new WireCommand
 		{
 			Key = key,
-			Payload = array
+			Payload = bytes
 		};
-		foreach (var item4 in scratch)
+		foreach (var (offset, seg) in scratch)
 		{
-			int item = item4.Offset;
-			Segment item2 = item4.Seg;
-			int arg = BinaryPrimitives.ReadInt32LittleEndian(array.AsSpan(item));
-			WireValue item3 = ObjectCodec.Encode(readObject(arg), item2.Type ?? typeof(object), sp, ref fail);
+			int handle = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
+			WireValue encoded = ObjectCodec.Encode(readObject(handle), seg.Type ?? typeof(object), sp, ref fail);
 			if (fail != null)
 			{
-				fail = $"arg {item2.Param}: {fail}";
+				fail = $"arg {seg.Param}: {fail}";
 				return null;
 			}
-			BinaryPrimitives.WriteInt32LittleEndian(array.AsSpan(item), 0);
-			wireCommand.Refs.Add(item3);
+			// The handle only means something in this process; the receiver rebinds the slot from Refs.
+			BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), 0);
+			command.Refs.Add(encoded);
 		}
 		if (sp.LocalIds.Count > 0)
 		{
 			fail = "refers to an entity the other side does not have";
 			return null;
 		}
-		return wireCommand;
+		return command;
 	}
 
 	public static bool Write(ReplicationCommandBuffer cb, CommandLayout l, WireCommand c, ObjectSpace sp, List<(int Offset, Segment Seg)> scratch, ref string? fail)
 	{
-		int num = l.Frame(c.Payload, scratch);
-		if (num != c.Payload.Length)
+		int framed = l.Frame(c.Payload, scratch);
+		if (framed != c.Payload.Length)
 		{
-			fail = $"payload {c.Payload.Length} B does not frame ({num})";
+			fail = $"payload {c.Payload.Length} B does not frame ({framed})";
 			return false;
 		}
 		if (scratch.Count != c.Refs.Count)
@@ -68,26 +67,26 @@ internal static class SignalCodec
 		object?[] objs = new object[scratch.Count];
 		for (int i = 0; i < scratch.Count; i++)
 		{
-			Segment item = scratch[i].Seg;
-			bool flag = l.Translated.TryGetValue(item.Param, out var value);
-			objs[i] = ObjectCodec.Decode(c.Refs[i], item.Type ?? typeof(object), sp, flag, ref fail);
+			Segment seg = scratch[i].Seg;
+			bool translated = l.Translated.TryGetValue(seg.Param, out int strategy);
+			objs[i] = ObjectCodec.Decode(c.Refs[i], seg.Type ?? typeof(object), sp, translated, ref fail);
 			if (fail != null)
 			{
-				if (!flag || value != 3 || c.Refs[i].Kind != WireKind.Entity || item.Param == 0)
+				if (!translated || strategy != NullOnAnyFail || c.Refs[i].Kind != WireKind.Entity || seg.Param == 0)
 				{
-					if (flag && value == 1)
+					if (translated && strategy == Skip)
 					{
 						fail += " (the game skips the command then: dropped)";
 					}
-					fail = $"arg {item.Param}: {fail}";
+					fail = $"arg {seg.Param}: {fail}";
 					return false;
 				}
 				fail = null;
 				objs[i] = null;
 			}
-			else if (((objs[i] == null) & flag) && (value == 0 || value == 2) && c.Refs[i].Kind != WireKind.Null)
+			else if (objs[i] == null && translated && (strategy == Throw || strategy == NullStrategy) && c.Refs[i].Kind != WireKind.Null)
 			{
-				fail = $"arg {item.Param}: unresolved where the callback would throw";
+				fail = $"arg {seg.Param}: unresolved where the callback would throw";
 				return false;
 			}
 		}
@@ -96,7 +95,7 @@ internal static class SignalCodec
 		{
 			offsets[j] = scratch[j].Offset;
 		}
-		CommandBuffers.Append(cb, l.Stub, c.Payload, (int off) => cb.StoreObject(objs[Array.IndexOf(offsets, off)]), offsets, 1580056798);
+		CommandBuffers.Append(cb, l.Stub, c.Payload, off => cb.StoreObject(objs[Array.IndexOf(offsets, off)]), offsets, 1580056798);
 		return true;
 	}
 }

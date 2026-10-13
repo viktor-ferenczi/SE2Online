@@ -26,11 +26,11 @@ internal sealed class CommandLayout
 
 	public Type? SignalType;
 
-	public Dictionary<int, int> Translated = new Dictionary<int, int>();
+	public Dictionary<int, int> Translated = new();
 
 	public int[] StringIdOffsets = Array.Empty<int>();
 
-	public bool Dynamic => Segments.Any((Segment s) => s.Kind == SegmentKind.Span);
+	public bool Dynamic => Segments.Any(s => s.Kind == SegmentKind.Span);
 
 	public string Signature
 	{
@@ -38,7 +38,7 @@ internal sealed class CommandLayout
 		{
 			if (Segments.Length != 0)
 			{
-				return string.Join(",", Segments.Select((Segment s) => s.Kind switch
+				return string.Join(",", Segments.Select(s => s.Kind switch
 				{
 					SegmentKind.Ref => "R", 
 					SegmentKind.Span => "S", 
@@ -49,48 +49,44 @@ internal sealed class CommandLayout
 		}
 	}
 
-	public SignalKeyDef Def(ushort key)
-	{
-		return new SignalKeyDef(key, Name, Dynamic ? ushort.MaxValue : ((ushort)Math.Max(0, PayloadBytes)), Signature);
-	}
+	public SignalKeyDef Def(ushort key) =>
+		new(key, Name, Dynamic ? ushort.MaxValue : (ushort)Math.Max(0, PayloadBytes), Signature);
 
 	public int Frame(ReadOnlySpan<byte> payload, List<(int Offset, Segment Seg)> refs)
 	{
 		refs.Clear();
-		int num = 0;
-		Segment[] segments = Segments;
-		for (int i = 0; i < segments.Length; i++)
+		int offset = 0;
+		foreach (Segment seg in Segments)
 		{
-			Segment item = segments[i];
-			switch (item.Kind)
+			switch (seg.Kind)
 			{
 			case SegmentKind.Bytes:
-				num += item.Size;
+				offset += seg.Size;
 				break;
 			case SegmentKind.Ref:
-				refs.Add((num, item));
-				num += 4;
+				refs.Add((offset, seg));
+				offset += 4;
 				break;
 			case SegmentKind.Span:
 			{
-				if (num + 4 > payload.Length)
+				if (offset + 4 > payload.Length)
 				{
 					return -1;
 				}
-				int num2 = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(num));
-				if (num2 < 0 || num2 > 16777216)
+				int spanLength = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(offset));
+				if (spanLength < 0 || spanLength > 16777216)
 				{
 					return -1;
 				}
-				num += 4 + num2;
+				offset += 4 + spanLength;
 				break;
 			}
 			}
-			if (num > payload.Length)
+			if (offset > payload.Length)
 			{
 				return -1;
 			}
 		}
-		return num;
+		return offset;
 	}
 }

@@ -6,18 +6,14 @@ public readonly record struct TypeKeyDef(ushort Key, ushort Size, string Name)
 	{
 		get
 		{
-			string text = Name;
-			int num = text.IndexOf(',');
-			if (num >= 0)
+			string name = Name;
+			int comma = name.IndexOf(',');
+			if (comma >= 0)
 			{
-				text = text.Substring(0, num);
+				name = name.Substring(0, comma);
 			}
-			int num2 = text.LastIndexOfAny(new char[2] { '.', '+' });
-			if (num2 < 0)
-			{
-				return text;
-			}
-			return text.Substring(num2 + 1);
+			int separator = name.LastIndexOfAny(new[] { '.', '+' });
+			return separator >= 0 ? name.Substring(separator + 1) : name;
 		}
 	}
 }
