@@ -57,10 +57,6 @@ public sealed class MpOptions
 
 	internal static bool TestAllowNonLoopbackTcp;
 
-	public bool Probe { get; private set; }
-
-	public bool ProbeBundleSize { get; private set; } = true;
-
 	public bool HostSteam { get; private set; }
 
 	public IPEndPoint? HostIp { get; private set; }
@@ -147,7 +143,7 @@ public sealed class MpOptions
 
 	public bool Networking => (Host || Join) && Errors.Count == 0;
 
-	public bool Any => Probe || Host || Join;
+	public bool Any => Host || Join;
 
 	public bool NeedsSteam
 	{
@@ -239,17 +235,6 @@ public sealed class MpOptions
 		case "join-address":
 			JoinIp = ServerEndpoint.Parse(value);
 			UseSteamIp = true;
-			return true;
-		case "probe":
-			Probe = true;
-			if (value is not null)
-			{
-				if (!value.Equals("nosize", StringComparison.OrdinalIgnoreCase))
-				{
-					throw new FormatException("expected -y51online:probe or -y51online:probe:nosize");
-				}
-				ProbeBundleSize = false;
-			}
 			return true;
 		case "host":
 			if (value is not null)
@@ -502,10 +487,6 @@ public sealed class MpOptions
 	public string Describe()
 	{
 		var parts = new List<string>();
-		if (Probe)
-		{
-			parts.Add(ProbeBundleSize ? "probe" : "probe(nosize)");
-		}
 		if (HostSteam)
 		{
 			parts.Add("host(steam)");
