@@ -89,6 +89,20 @@ public sealed class MpPlugin : IPlugin, IDisposable
 
 	private const string LoadedKey = "Y51_SE2Online.LoadedFrom";
 
+	// The game's -plugins: loader adds a plugin assembly to the engine's type index before constructing it; Pulsar does
+	// not. Without the index, every world that builds one of this plugin's components fails to load.
+	private void RegisterMetadata()
+	{
+		var assembly = typeof(MpPlugin).Assembly;
+		var metadata = Keen.VRage.Library.Utils.Singleton<Keen.VRage.Library.Reflection.MetadataManager>.Instance;
+		if (metadata.ActiveContext?.Assemblies.Contains(assembly) == true)
+		{
+			return;
+		}
+		metadata.PushContext(assembly);
+		_log.Info("registered with the game's type index (the plugin loader did not)");
+	}
+
 	private void Init(PluginHost host)
 	{
 		string gameVersion = GameVersion();
@@ -97,6 +111,7 @@ public sealed class MpPlugin : IPlugin, IDisposable
 		{
 			_log.Warn($"game version {gameVersion} differs from the build this plugin was compiled and verified against ({"2.4.0.95"})");
 		}
+		RegisterMetadata();
 		Instance = this;
 		LaunchArgs = host.Args ?? Array.Empty<string>();
 		_options = new MpOptions();
