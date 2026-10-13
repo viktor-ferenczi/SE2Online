@@ -11,41 +11,43 @@ public static class FriendPicker
 
 	public static Choice Pick(IEnumerable<FriendHost> friends, string? nameFilter, ushort mySyncVersion)
 	{
-		List<FriendHost> list = friends.Where((FriendHost friendHost) => friendHost.Hosting).OrderBy((FriendHost friendHost) => friendHost.Name, StringComparer.OrdinalIgnoreCase).ThenBy((FriendHost friendHost) => friendHost.SteamId)
+		List<FriendHost> hosting = friends.Where(h => h.Hosting)
+			.OrderBy(h => h.Name, StringComparer.OrdinalIgnoreCase)
+			.ThenBy(h => h.SteamId)
 			.ToList();
-		if (list.Count == 0)
+		if (hosting.Count == 0)
 		{
-			return new Choice(null, list, "no friend is hosting SE2 multiplayer right now");
+			return new Choice(null, hosting, "no friend is hosting SE2 multiplayer right now");
 		}
-		List<FriendHost> list2 = list;
+		List<FriendHost> candidates = hosting;
 		if (!string.IsNullOrWhiteSpace(nameFilter))
 		{
 			string f = nameFilter.Trim();
-			list2 = list.Where((FriendHost h) => h.Name.Contains(f, StringComparison.OrdinalIgnoreCase) || h.SteamId.ToString(CultureInfo.InvariantCulture) == f).ToList();
-			if (list2.Count == 0)
+			candidates = hosting.Where(h => h.Name.Contains(f, StringComparison.OrdinalIgnoreCase) || h.SteamId.ToString(CultureInfo.InvariantCulture) == f).ToList();
+			if (candidates.Count == 0)
 			{
-				return new Choice(null, list, $"{list.Count} friend(s) hosting, none matches '{f}'");
+				return new Choice(null, hosting, $"{hosting.Count} friend(s) hosting, none matches '{f}'");
 			}
 		}
-		List<FriendHost> list3 = list2.Where((FriendHost h) => h.Presence.SyncVersion == mySyncVersion).ToList();
-		if (list3.Count > 0)
+		List<FriendHost> compatible = candidates.Where(h => h.Presence.SyncVersion == mySyncVersion).ToList();
+		if (compatible.Count > 0)
 		{
-			bool flag = !string.IsNullOrWhiteSpace(nameFilter);
+			bool filtered = !string.IsNullOrWhiteSpace(nameFilter);
 			string reason;
-			if (list3.Count > 1)
+			if (compatible.Count > 1)
 			{
-				reason = $"first of {list3.Count} compatible hosts{(flag ? (" matching '" + nameFilter.Trim() + "'") : "")} (pick one with -y51online:join:friend:<name>)";
+				reason = $"first of {compatible.Count} compatible hosts{(filtered ? " matching '" + nameFilter.Trim() + "'" : "")} (pick one with -y51online:join:friend:<name>)";
 			}
-			else if (list2.Count > 1)
+			else if (candidates.Count > 1)
 			{
-				reason = $"the only one{(flag ? (" matching '" + nameFilter.Trim() + "'") : "")} with sync v{mySyncVersion}";
+				reason = $"the only one{(filtered ? " matching '" + nameFilter.Trim() + "'" : "")} with sync v{mySyncVersion}";
 			}
 			else
 			{
-				reason = (flag ? ("the only friend hosting that matches '" + nameFilter.Trim() + "'") : "the only friend hosting");
+				reason = filtered ? "the only friend hosting that matches '" + nameFilter.Trim() + "'" : "the only friend hosting";
 			}
-			return new Choice(list3[0], list, reason);
+			return new Choice(compatible[0], hosting, reason);
 		}
-		return new Choice(list2[0], list, $"no host runs sync v{mySyncVersion}; trying {list2[0].Name} (sync v{list2[0].Presence.SyncVersion}) anyway, expect a version rejection");
+		return new Choice(candidates[0], hosting, $"no host runs sync v{mySyncVersion}; trying {candidates[0].Name} (sync v{candidates[0].Presence.SyncVersion}) anyway, expect a version rejection");
 	}
 }

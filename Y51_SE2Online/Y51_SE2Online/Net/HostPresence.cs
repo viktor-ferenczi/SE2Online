@@ -14,13 +14,13 @@ public sealed record HostPresence(ushort SyncVersion, string PluginVersion, int 
 
 	public string Encode()
 	{
-		string text = $"{"y51online1"};{SyncVersion.ToString(CultureInfo.InvariantCulture)};{VirtualPort.ToString(CultureInfo.InvariantCulture)};{Clean(PluginVersion, 32).Replace(';', ',')};";
-		string text2 = Clean(WorldName, 200);
-		while (text2.Length > 0 && Encoding.UTF8.GetByteCount(text + text2) > 255)
+		string head = $"{Tag};{SyncVersion.ToString(CultureInfo.InvariantCulture)};{VirtualPort.ToString(CultureInfo.InvariantCulture)};{Clean(PluginVersion, 32).Replace(';', ',')};";
+		string world = Clean(WorldName, 200);
+		while (world.Length > 0 && Encoding.UTF8.GetByteCount(head + world) > MaxValueBytes)
 		{
-			text2 = text2.Substring(0, text2.Length - 1);
+			world = world.Substring(0, world.Length - 1);
 		}
-		return text + text2;
+		return head + world;
 	}
 
 	public static bool TryDecode(string? value, out HostPresence presence)
@@ -30,16 +30,18 @@ public sealed record HostPresence(ushort SyncVersion, string PluginVersion, int 
 		{
 			return false;
 		}
-		string[] array = value.Split(';', 5);
-		if (array.Length < 5 || array[0] != "y51online1")
+		string[] fields = value.Split(';', 5);
+		if (fields.Length < 5 || fields[0] != Tag)
 		{
 			return false;
 		}
-		if (!ushort.TryParse(array[1], NumberStyles.None, CultureInfo.InvariantCulture, out var result) || !int.TryParse(array[2], NumberStyles.None, CultureInfo.InvariantCulture, out var result2) || result2 < 0 || result2 > 65535)
+		if (!ushort.TryParse(fields[1], NumberStyles.None, CultureInfo.InvariantCulture, out ushort syncVersion)
+			|| !int.TryParse(fields[2], NumberStyles.None, CultureInfo.InvariantCulture, out int virtualPort)
+			|| virtualPort < 0 || virtualPort > 65535)
 		{
 			return false;
 		}
-		presence = new HostPresence(result, array[3], result2, array[4]);
+		presence = new HostPresence(syncVersion, fields[3], virtualPort, fields[4]);
 		return true;
 	}
 
@@ -49,15 +51,15 @@ public sealed record HostPresence(ushort SyncVersion, string PluginVersion, int 
 		{
 			return "";
 		}
-		StringBuilder stringBuilder = new StringBuilder(Math.Min(s.Length, max));
+		var sb = new StringBuilder(Math.Min(s.Length, max));
 		foreach (char c in s)
 		{
-			if (stringBuilder.Length >= max)
+			if (sb.Length >= max)
 			{
 				break;
 			}
-			stringBuilder.Append(char.IsControl(c) ? ' ' : c);
+			sb.Append(char.IsControl(c) ? ' ' : c);
 		}
-		return stringBuilder.ToString().Trim();
+		return sb.ToString().Trim();
 	}
 }

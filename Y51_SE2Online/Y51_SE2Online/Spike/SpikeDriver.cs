@@ -58,7 +58,7 @@ public sealed class SpikeDriver
 
 	private readonly int _blobDelayMs;
 
-	private readonly Dictionary<PeerId, PeerProgress> _peers = new Dictionary<PeerId, PeerProgress>();
+	private readonly Dictionary<PeerId, PeerProgress> _peers = new();
 
 	private uint _nextBlobId = 1u;
 
@@ -72,7 +72,7 @@ public sealed class SpikeDriver
 		_log = log;
 		_clock = clock;
 		_blobBytes = blobBytes;
-		_seed = ((seed == 0L) ? 11400714819323198485uL : seed);
+		_seed = seed == 0 ? 11400714819323198485uL : seed;
 		_blobDelayMs = blobDelayMs;
 		_t.PeerConnected += OnConnected;
 		_t.PeerDisconnected += OnDisconnected;
@@ -86,12 +86,14 @@ public sealed class SpikeDriver
 			ConnectedMs = _clock(),
 			LastPingLogMs = _clock()
 		};
-		_log.Info((_blobBytes > 0) ? $"spike: peer {peer} connected; ping every 1 s, {MpLogExtensions.Bytes(_blobBytes)} blob in {(double)_blobDelayMs / 1000.0:0.#} s" : $"spike: peer {peer} connected; ping every 1 s, blob test disabled");
+		_log.Info(_blobBytes > 0
+			? $"spike: peer {peer} connected; ping every 1 s, {MpLogExtensions.Bytes(_blobBytes)} blob in {_blobDelayMs / 1000.0:0.#} s"
+			: $"spike: peer {peer} connected; ping every 1 s, blob test disabled");
 	}
 
 	private void OnDisconnected(PeerId peer, DisconnectInfo info)
 	{
-		if (_peers.Remove(peer, out PeerProgress value) && !value.ResultLogged && _blobBytes > 0)
+		if (_peers.Remove(peer, out PeerProgress progress) && !progress.ResultLogged && _blobBytes > 0)
 		{
 			_log.Warn($"SPIKE RESULT: INCOMPLETE peer={peer} (disconnected before both blobs were verified: {info})");
 		}
@@ -99,27 +101,27 @@ public sealed class SpikeDriver
 
 	public void Tick()
 	{
-		long num = _clock();
-		foreach (KeyValuePair<PeerId, PeerProgress> peer in _peers)
+		long now = _clock();
+		foreach (var entry in _peers)
 		{
-			PeerId key = peer.Key;
-			PeerProgress value = peer.Value;
-			if (_blobBytes > 0 && !value.BlobSent && num - value.ConnectedMs >= _blobDelayMs)
+			PeerId peer = entry.Key;
+			PeerProgress p = entry.Value;
+			if (_blobBytes > 0 && !p.BlobSent && now - p.ConnectedMs >= _blobDelayMs)
 			{
-				SendBlob(key, value, num);
+				SendBlob(peer, p, now);
 			}
-			if (LogPings && num - value.LastPingLogMs >= 1000 && _t.TryGetStats(key, out PeerStats stats))
+			if (LogPings && now - p.LastPingLogMs >= 1000 && _t.TryGetStats(peer, out PeerStats stats))
 			{
-				value.LastPingLogMs = num;
-				if (stats.PongsReceived > value.PongsAtLastLog)
+				p.LastPingLogMs = now;
+				if (stats.PongsReceived > p.PongsAtLastLog)
 				{
-					_log.Info($"ping {key}: rtt={stats.LastRttMs:0} ms (min {stats.MinRttMs:0} / avg {stats.AvgRttMs:0.0} / max {stats.MaxRttMs:0}, n={stats.PongsReceived})");
+					_log.Info($"ping {peer}: rtt={stats.LastRttMs:0} ms (min {stats.MinRttMs:0} / avg {stats.AvgRttMs:0.0} / max {stats.MaxRttMs:0}, n={stats.PongsReceived})");
 				}
 				else
 				{
-					_log.Info($"ping {key}: no pong for {(double)(num - ((stats.LastPongMs > 0) ? stats.LastPongMs : stats.ConnectedMs)) / 1000.0:0.0} s (sent {stats.PingsSent})");
+					_log.Info($"ping {peer}: no pong for {(now - (stats.LastPongMs > 0 ? stats.LastPongMs : stats.ConnectedMs)) / 1000.0:0.0} s (sent {stats.PingsSent})");
 				}
-				value.PongsAtLastLog = stats.PongsReceived;
+				p.PongsAtLastLog = stats.PongsReceived;
 			}
 		}
 	}
@@ -129,28 +131,29 @@ public sealed class SpikeDriver
 		p.BlobSent = true;
 		p.BlobId = _nextBlobId++;
 		p.BlobLength = _blobBytes;
-		byte[] array = new byte[37 + _blobBytes];
-		Span<byte> span = array.AsSpan(37);
-		Fill(span, _seed ^ p.BlobId);
-		byte[] array2 = SHA256.HashData(span);
-		array[0] = 2;
-		BitConverter.TryWriteBytes(array.AsSpan(1), p.BlobId);
-		array2.CopyTo(array.AsSpan(5));
-		WireWriter wireWriter = new WireWriter().U8(1).U32(p.BlobId).I32(_blobBytes)
-			.Bytes(array2);
-		_t.Send(peer, Channel.Control, wireWriter.ToArray());
-		_t.Send(peer, Channel.Bulk, array);
+		// Bulk message: kind (1) + blob id (4) + sha256 (32) + blob.
+		byte[] message = new byte[37 + _blobBytes];
+		Span<byte> blob = message.AsSpan(37);
+		Fill(blob, _seed ^ p.BlobId);
+		byte[] sha = SHA256.HashData(blob);
+		message[0] = (byte)AppKind.Blob;
+		BitConverter.TryWriteBytes(message.AsSpan(1), p.BlobId);
+		sha.CopyTo(message.AsSpan(5));
+		WireWriter start = new WireWriter().U8((byte)AppKind.BlobStart).U32(p.BlobId).I32(_blobBytes)
+			.Bytes(sha);
+		_t.Send(peer, Channel.Control, start.ToArray());
+		_t.Send(peer, Channel.Bulk, message);
 		p.BlobSentMs = now;
-		_log.Info($"blob #{p.BlobId} -> {peer}: {MpLogExtensions.Bytes(_blobBytes)} queued on Bulk, sha256={MpLogExtensions.Hex(array2)}");
+		_log.Info($"blob #{p.BlobId} -> {peer}: {MpLogExtensions.Bytes(_blobBytes)} queued on Bulk, sha256={MpLogExtensions.Hex(sha)}");
 	}
 
 	private void OnMessage(PeerId peer, Channel ch, byte[] data)
 	{
-		if (data.Length == 0 || !_peers.TryGetValue(peer, out PeerProgress value))
+		if (data.Length == 0 || !_peers.TryGetValue(peer, out PeerProgress p))
 		{
 			return;
 		}
-		long num = _clock();
+		long now = _clock();
 		try
 		{
 			switch ((AppKind)data[0])
@@ -158,52 +161,26 @@ public sealed class SpikeDriver
 			case AppKind.BlobStart:
 				if (ch == Channel.Control)
 				{
-					WireReader wireReader2 = new WireReader(data.AsSpan(1));
-					uint value3 = wireReader2.U32();
-					int num5 = wireReader2.I32();
-					value.TheirStartMs = num;
-					_log.Info($"blob #{value3} <- {peer}: incoming {MpLogExtensions.Bytes(num5)}, sha256={MpLogExtensions.Hex(wireReader2.Bytes(32))}");
+					var reader = new WireReader(data.AsSpan(1));
+					uint blobId = reader.U32();
+					int length = reader.I32();
+					p.TheirStartMs = now;
+					_log.Info($"blob #{blobId} <- {peer}: incoming {MpLogExtensions.Bytes(length)}, sha256={MpLogExtensions.Hex(reader.Bytes(32))}");
 				}
 				break;
 			case AppKind.Blob:
 				if (ch == Channel.Bulk)
 				{
-					uint num6 = BitConverter.ToUInt32(data, 1);
-					Span<byte> span = data.AsSpan(5, 32);
-					Span<byte> span2 = data.AsSpan(37);
-					byte[] array = SHA256.HashData(span2);
-					bool flag2 = span.SequenceEqual(array);
-					value.WeVerifiedTheirs = flag2;
-					value.TheirBlobMs = ((value.TheirStartMs >= 0) ? (num - value.TheirStartMs) : (-1));
-					string value4 = ((value.TheirBlobMs > 0) ? $" in {(double)value.TheirBlobMs / 1000.0:0.00} s ({(double)span2.Length / 1024.0 / ((double)value.TheirBlobMs / 1000.0):0} KiB/s)" : "");
-					string message2 = $"blob #{num6} <- {peer}: {MpLogExtensions.Bytes(span2.Length)}{value4}, sha256 {(flag2 ? "OK" : "MISMATCH")} ({MpLogExtensions.Hex(array)})";
-					if (flag2)
-					{
-						_log.Info(message2);
-					}
-					else
-					{
-						_log.Error(message2);
-					}
-					WireWriter wireWriter = new WireWriter(32).U8(3).U32(num6).U8(flag2 ? ((byte)1) : ((byte)0))
-						.I32(span2.Length)
-						.I64(value.TheirBlobMs);
-					_t.Send(peer, Channel.Control, wireWriter.ToArray());
-					CheckDone(peer, value);
-				}
-				break;
-			case AppKind.BlobAck:
-				if (ch == Channel.Control)
-				{
-					WireReader wireReader = new WireReader(data.AsSpan(1));
-					uint value2 = wireReader.U32();
-					bool flag = wireReader.U8() == 1;
-					int num2 = wireReader.I32();
-					long num3 = wireReader.I64();
-					value.TheyVerifiedOurs = flag;
-					long num4 = num - value.BlobSentMs;
-					string message = $"blob #{value2} -> {peer}: peer verified {MpLogExtensions.Bytes(num2)} {(flag ? "OK" : "MISMATCH")}; queue-to-ack {(double)num4 / 1000.0:0.00} s" + ((num3 > 0) ? $", their receive time {(double)num3 / 1000.0:0.00} s" : "");
-					if (flag)
+					uint blobId = BitConverter.ToUInt32(data, 1);
+					Span<byte> expectedSha = data.AsSpan(5, 32);
+					Span<byte> blob = data.AsSpan(37);
+					byte[] sha = SHA256.HashData(blob);
+					bool ok = expectedSha.SequenceEqual(sha);
+					p.WeVerifiedTheirs = ok;
+					p.TheirBlobMs = p.TheirStartMs >= 0 ? now - p.TheirStartMs : -1;
+					string timing = p.TheirBlobMs > 0 ? $" in {p.TheirBlobMs / 1000.0:0.00} s ({blob.Length / 1024.0 / (p.TheirBlobMs / 1000.0):0} KiB/s)" : "";
+					string message = $"blob #{blobId} <- {peer}: {MpLogExtensions.Bytes(blob.Length)}{timing}, sha256 {(ok ? "OK" : "MISMATCH")} ({MpLogExtensions.Hex(sha)})";
+					if (ok)
 					{
 						_log.Info(message);
 					}
@@ -211,7 +188,34 @@ public sealed class SpikeDriver
 					{
 						_log.Error(message);
 					}
-					CheckDone(peer, value);
+					WireWriter ack = new WireWriter(32).U8((byte)AppKind.BlobAck).U32(blobId).U8(ok ? (byte)1 : (byte)0)
+						.I32(blob.Length)
+						.I64(p.TheirBlobMs);
+					_t.Send(peer, Channel.Control, ack.ToArray());
+					CheckDone(peer, p);
+				}
+				break;
+			case AppKind.BlobAck:
+				if (ch == Channel.Control)
+				{
+					var reader = new WireReader(data.AsSpan(1));
+					uint blobId = reader.U32();
+					bool ok = reader.U8() == 1;
+					int length = reader.I32();
+					long theirReceiveMs = reader.I64();
+					p.TheyVerifiedOurs = ok;
+					long queueToAckMs = now - p.BlobSentMs;
+					string message = $"blob #{blobId} -> {peer}: peer verified {MpLogExtensions.Bytes(length)} {(ok ? "OK" : "MISMATCH")}; queue-to-ack {queueToAckMs / 1000.0:0.00} s"
+						+ (theirReceiveMs > 0 ? $", their receive time {theirReceiveMs / 1000.0:0.00} s" : "");
+					if (ok)
+					{
+						_log.Info(message);
+					}
+					else
+					{
+						_log.Error(message);
+					}
+					CheckDone(peer, p);
 				}
 				break;
 			}
@@ -228,10 +232,11 @@ public sealed class SpikeDriver
 		{
 			p.ResultLogged = true;
 			_t.TryGetStats(peer, out PeerStats stats);
-			bool flag = p.TheyVerifiedOurs.Value && p.WeVerifiedTheirs.Value;
-			p.Result = (flag ? "PASS" : "FAIL");
-			string message = $"SPIKE RESULT: {p.Result} peer={peer} blob out={(p.TheyVerifiedOurs.Value ? "OK" : "BAD")} in={(p.WeVerifiedTheirs.Value ? "OK" : "BAD")}" + ((stats != null) ? $" rtt avg={stats.AvgRttMs:0.0} ms min={stats.MinRttMs:0} max={stats.MaxRttMs:0} pongs={stats.PongsReceived} seqGaps={stats.SeqGaps} protoErrors={stats.ProtocolErrors}" : "");
-			if (flag)
+			bool pass = p.TheyVerifiedOurs.Value && p.WeVerifiedTheirs.Value;
+			p.Result = pass ? "PASS" : "FAIL";
+			string message = $"SPIKE RESULT: {p.Result} peer={peer} blob out={(p.TheyVerifiedOurs.Value ? "OK" : "BAD")} in={(p.WeVerifiedTheirs.Value ? "OK" : "BAD")}"
+				+ (stats != null ? $" rtt avg={stats.AvgRttMs:0.0} ms min={stats.MinRttMs:0} max={stats.MaxRttMs:0} pongs={stats.PongsReceived} seqGaps={stats.SeqGaps} protoErrors={stats.ProtocolErrors}" : "");
+			if (pass)
 			{
 				_log.Info(message);
 			}
@@ -242,22 +247,20 @@ public sealed class SpikeDriver
 		}
 	}
 
+	/// <summary>Deterministic xorshift64* fill, so both ends can regenerate the same blob from the seed.</summary>
 	public static void Fill(Span<byte> dst, ulong seed)
 	{
-		ulong num = ((seed == 0L) ? 2685821657736338717uL : seed);
-		int num2 = 0;
-		while (num2 < dst.Length)
+		ulong state = seed == 0 ? 2685821657736338717uL : seed;
+		int i = 0;
+		while (i < dst.Length)
 		{
-			num ^= num >> 12;
-			num ^= num << 25;
-			num ^= num >> 27;
-			ulong num3 = num * 2685821657736338717L;
-			int num4 = 0;
-			while (num4 < 8 && num2 < dst.Length)
+			state ^= state >> 12;
+			state ^= state << 25;
+			state ^= state >> 27;
+			ulong word = state * 2685821657736338717uL;
+			for (int b = 0; b < 8 && i < dst.Length; b++, i++)
 			{
-				dst[num2] = (byte)(num3 >> 8 * num4);
-				num4++;
-				num2++;
+				dst[i] = (byte)(word >> 8 * b);
 			}
 		}
 	}

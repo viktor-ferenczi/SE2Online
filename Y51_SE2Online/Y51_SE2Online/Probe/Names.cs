@@ -11,34 +11,36 @@ public static class Names
 		{
 			return "?";
 		}
-		string text = fullName;
-		int num = text.IndexOf("[[", StringComparison.Ordinal);
-		if (num >= 0)
+		string name = fullName;
+		int genericArgs = name.IndexOf("[[", StringComparison.Ordinal);
+		if (genericArgs >= 0)
 		{
-			text = text.Substring(0, num);
+			name = name.Substring(0, genericArgs);
 		}
-		int num2 = text.IndexOf('+');
-		int num3 = ((num2 >= 0) ? text.Substring(0, num2) : text).LastIndexOf('.');
-		if (num3 >= 0)
+		int nested = name.IndexOf('+');
+		int lastDot = (nested >= 0 ? name.Substring(0, nested) : name).LastIndexOf('.');
+		if (lastDot >= 0)
 		{
-			text = text.Substring(num3 + 1);
+			name = name.Substring(lastDot + 1);
 		}
-		text = text.Replace('+', '.');
-		StringBuilder stringBuilder = new StringBuilder(text.Length);
-		for (int i = 0; i < text.Length; i++)
+		name = name.Replace('+', '.');
+		var sb = new StringBuilder(name.Length);
+		for (int i = 0; i < name.Length; i++)
 		{
-			if (text[i] == '`')
+			if (name[i] == '`')
 			{
-				for (; i + 1 < text.Length && char.IsDigit(text[i + 1]); i++)
+				// Skip the generic arity digits.
+				while (i + 1 < name.Length && char.IsDigit(name[i + 1]))
 				{
+					i++;
 				}
 			}
 			else
 			{
-				stringBuilder.Append(text[i]);
+				sb.Append(name[i]);
 			}
 		}
-		return stringBuilder.ToString();
+		return sb.ToString();
 	}
 
 	public static string Member(string? name)
@@ -51,29 +53,29 @@ public static class Names
 		{
 			return name;
 		}
-		int num = name.IndexOf('>');
-		if (num < 0)
+		int close = name.IndexOf('>');
+		if (close < 0)
 		{
 			return name;
 		}
-		string text = name.Substring(1, num - 1);
-		int num2 = text.LastIndexOf('.');
-		if (num2 >= 0)
+		string owner = name.Substring(1, close - 1);
+		int lastDot = owner.LastIndexOf('.');
+		if (lastDot >= 0)
 		{
-			text = text.Substring(num2 + 1);
+			owner = owner.Substring(lastDot + 1);
 		}
-		if (text.Length == 0)
+		if (owner.Length == 0)
 		{
-			text = "lambda";
+			owner = "lambda";
 		}
-		int num3 = name.IndexOf(">g__", StringComparison.Ordinal);
-		if (num3 >= 0)
+		int localFunction = name.IndexOf(">g__", StringComparison.Ordinal);
+		if (localFunction >= 0)
 		{
-			int num4 = name.IndexOf('|', num3);
-			string text2 = ((num4 > 0) ? name.Substring(num3 + 4, num4 - num3 - 4) : name.Substring(num3 + 4));
-			return text + "." + text2;
+			int bar = name.IndexOf('|', localFunction);
+			string local = bar > 0 ? name.Substring(localFunction + 4, bar - localFunction - 4) : name.Substring(localFunction + 4);
+			return owner + "." + local;
 		}
-		return text;
+		return owner;
 	}
 
 	public static string GeneratedType(string? fullName)
@@ -82,23 +84,23 @@ public static class Names
 		{
 			return "?";
 		}
-		string text = fullName;
-		int num = text.IndexOf("[[", StringComparison.Ordinal);
-		if (num >= 0)
+		string name = fullName;
+		int genericArgs = name.IndexOf("[[", StringComparison.Ordinal);
+		if (genericArgs >= 0)
 		{
-			text = text.Substring(0, num);
+			name = name.Substring(0, genericArgs);
 		}
-		int num2 = text.LastIndexOf('+');
-		if (num2 < 0)
+		int nested = name.LastIndexOf('+');
+		if (nested < 0)
 		{
-			return Short(text);
+			return Short(name);
 		}
-		string text2 = Short(text.Substring(0, num2));
-		string text3 = text.Substring(num2 + 1);
-		if (text3.StartsWith("<>c", StringComparison.Ordinal))
+		string outer = Short(name.Substring(0, nested));
+		string inner = name.Substring(nested + 1);
+		if (inner.StartsWith("<>c", StringComparison.Ordinal))
 		{
-			return text2;
+			return outer;
 		}
-		return text2 + "." + Member(text3);
+		return outer + "." + Member(inner);
 	}
 }
