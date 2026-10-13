@@ -95,7 +95,7 @@ internal sealed class ClientStories
 
 	public long CannotTravel;
 
-	public long Resumed;
+	public long Refused;
 
 	public long Finished;
 
@@ -258,7 +258,9 @@ internal sealed class ClientStories
 		Entry entry = _byId[id];
 		entry.LastMs = MpClock.NowMs();
 		space.ClearLocalIds();
-		List<(string, WireValue)>? fields = StoryState.Encode(box, space, out string? fail);
+		StoryType? story = StoryState.Find(box.GetType());
+		string? fail = story == null ? "not a network story the game declares" : null;
+		List<(string, WireValue)>? fields = story == null ? null : StoryState.EncodeArguments(story, box, space, out fail);
 		if (fields == null || space.LocalIds.Count > 0)
 		{
 			fail ??= "refers to an entity the host does not have";
@@ -405,44 +407,12 @@ internal sealed class ClientStories
 				Count("move for an unknown story");
 				continue;
 			}
-			entry.LastMs = MpClock.NowMs();
-			space.ClearLocalIds();
-			space.LocalStubs.Clear();
-			object? resumed = StoryState.Decode(move, space, entry.Context, null, out string? moveFail);
-			if (resumed == null && moveFail != null && IsWaitable(moveFail) && nowMs - since < WaitMs(moveFail))
-			{
-				_waiting.Add((move, since));
-				continue;
-			}
-			entry.AtHost = false;
-			if (resumed == null)
-			{
-				Failed++;
-				_log.Warn($"client: story {entry.Name} #{entry.Id} came back but cannot continue here ({moveFail}); skipped");
-				Forget(entry.Id);
-				NetworkStoryContext ctx2 = entry.Context;
-				var comp2 = entry.Comp;
-				post(() => FinishLocal(comp2, ctx2, null, new Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException()));
-				continue;
-			}
-			Resumed++;
-			if (FirstOf("resumed " + entry.Name) | (Resumed <= 20))
-			{
-				_log.Info($"client: STORY {entry.Name} #{entry.Id} back from the host, continuing here");
-			}
-			var sm = (IAsyncStateMachine)resumed;
-			string n = entry.Name;
-			post(() =>
-			{
-				try
-				{
-					sm.MoveNext();
-				}
-				catch (Exception ex2)
-				{
-					_log.Warn($"client: story {n} threw on resume: {ex2.GetType().Name}: {ex2.Message}");
-				}
-			});
+			// Only results come back for the client's own stories; a host never sends their state.
+			Refuse(entry.Name, entry.Name, "the host sent state for a story this client started");
+			Forget(entry.Id);
+			NetworkStoryContext ctx2 = entry.Context;
+			var comp2 = entry.Comp;
+			post(() => FinishLocal(comp2, ctx2, null, new Keen.VRage.Multiplayer.NetworkStories.SkipNetworkStoryException()));
 		}
 		long now = MpClock.NowMs();
 		foreach (Entry idle in _byId.Values.Where(x => !x.AtHost && now - x.LastMs > 300000).ToList())
@@ -462,19 +432,23 @@ internal sealed class ClientStories
 
 	private void StartServerStory(StoryMove move, ObjectSpace space, Action<Action> post, long now, long since)
 	{
-		string name = StoryState.Name(move.StateMachineType);
-		Type? type = ObjectCodec.FindType(move.StateMachineType);
-		FieldInfo? builder = (type == null) ? null : ObjectCodec.Fields(type).FirstOrDefault(f => StoryState.IsBuilder(f.FieldType));
-		if (builder == null)
+		StoryType? story = StoryState.Find(move.StateMachineType, out string why);
+		string name = story?.Name ?? StoryState.Clip(move.StateMachineType);
+		if (story == null || !story.HostMayStart)
 		{
-			Count(name + ": host story type not here");
+			Refuse(story?.Name ?? "unlisted", name, story == null ? why : "hosts do not start this story on clients");
 			return;
 		}
-		NetworkStoryContext context = (NetworkStoryContext)Activator.CreateInstance(builder.FieldType);
+		var context = (NetworkStoryContext)Activator.CreateInstance(story.Builder.FieldType)!;
 		context.Narrator = ServerStoryNarrator.Instance;
 		space.ClearLocalIds();
 		space.LocalStubs.Clear();
-		object? sm = StoryState.Decode(move, space, context, null, out string? fail);
+		object? sm = StoryState.Start(story, move, space, context, StoryState.FirstAwaitState, out string? refused, out string? fail);
+		if (refused != null)
+		{
+			Refuse(story.Name, name, refused);
+			return;
+		}
 		if (sm == null && fail != null && IsWaitable(fail) && now - since < WaitMs(fail))
 		{
 			_waiting.Add((move, since));
@@ -496,6 +470,14 @@ internal sealed class ClientStories
 			try { ((IAsyncStateMachine)sm).MoveNext(); }
 			catch (Exception ex) { _log.Warn($"client: host story {name} threw: {ex.GetType().Name}: {ex.Message}"); }
 		});
+	}
+
+	// Keyed by a story this client knows (or "unlisted") so a host cannot grow the log-once set with made-up names.
+	private void Refuse(string kind, string name, string why)
+	{
+		Refused++;
+		Count(kind + ": refused");
+		_log.WarnOnce("story-refused-" + kind, $"story: refused {name} ({why}) (further ones of this story only counted)");
 	}
 
 	private void Forget(uint id)
@@ -588,7 +570,7 @@ internal sealed class ClientStories
 
 	public string Describe()
 	{
-		return $"stories: sent {Sent}, host-started {ServerStarted}, resumed {Resumed}, finished {Finished}, local toolbar {Local}, kept local {DeniedCount}, camera coalesced {CameraCoalesced}, cannot travel {CannotTravel}, released-model no-ops {ReleasedNoOps}, failed {Failed}, timed out {TimedOut}, in flight {_byId.Count}" + (_counts.Count == 0 ? "" : "; " + string.Join(", ",
+		return $"stories: sent {Sent}, host-started {ServerStarted}, refused {Refused}, finished {Finished}, local toolbar {Local}, kept local {DeniedCount}, camera coalesced {CameraCoalesced}, cannot travel {CannotTravel}, released-model no-ops {ReleasedNoOps}, failed {Failed}, timed out {TimedOut}, in flight {_byId.Count}" + (_counts.Count == 0 ? "" : "; " + string.Join(", ",
 			from kv in _counts.OrderByDescending(kv => kv.Value).Take(8)
 			select $"{kv.Key} x{kv.Value}"));
 	}

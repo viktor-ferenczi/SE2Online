@@ -27,8 +27,6 @@ internal sealed class HostStories
 		public NetworkStoryContext Context;
 
 		public long LastMs;
-
-		public int Moves;
 	}
 
 	private sealed class HostStoryNarrator : INetworkStoryNarrator
@@ -41,52 +39,35 @@ internal sealed class HostStories
 
 		private readonly ObjectSpace _space;
 
-		public HostStoryNarrator(HostStories owner, Entry entry, IStorySink host, ObjectSpace space)
+		private readonly Func<ReplicationEventContext> _asker;
+
+		public HostStoryNarrator(HostStories owner, Entry entry, IStorySink host, ObjectSpace space, Func<ReplicationEventContext> asker)
 		{
 			_owner = owner;
 			_entry = entry;
 			_host = host;
 			_space = space;
+			_asker = asker;
 		}
 
 		public void Start<TResult>(NetworkStoryContext context, IAsyncStateMachine stateMachine) => stateMachine.MoveNext();
 
+		// Every MoveTo.Server of a joiner's story answers as that joiner, never as the host itself.
 		public void MoveToServer(NetworkStoryContext context, IAsyncStateMachine stateMachine, ServerRequest server)
 		{
-			server.Result = new ReplicationEventContext
-			{
-				IsLocal = true,
-				Session = _space.Session,
-				SourceId = new ClientId(0)
-			};
+			server.Result = _asker();
 			stateMachine.MoveNext();
 		}
 
+		// State never travels back: the client's tail (in 2.4 only "return x") runs here and only the result goes to the joiner.
 		public void MoveToClient(NetworkStoryContext context, IAsyncStateMachine stateMachine, ClientRequest client)
 		{
-			_space.ClearLocalIds();
-			_space.Observed.Clear();
-			List<(string, WireValue)>? fields = StoryState.Encode(stateMachine, _space, out string? fail);
-			if (fields != null && _space.LocalIds.Count > 0)
+			_owner.TailsRunHere++;
+			if (_owner.FirstOf("tail " + _entry.Name))
 			{
-				fields = null;
-				fail = "refers to an entity the joiner does not have";
+				_owner._log.Info($"host world sync: STORY {_entry.Name} #{_entry.Id} moves back to the client; its tail runs here and only the result travels");
 			}
-			if (fields == null)
-			{
-				_owner.Done(_entry);
-				_owner.Fail(_host, _entry.Peer, _entry.Id, _entry.Name, "cannot travel back: " + fail);
-				return;
-			}
-			_owner.MovedToClient++;
-			_owner.Roots(_entry.Peer, _space);
-			_entry.LastMs = MpClock.NowMs();
-			_host.SendStoryMove(_entry.Peer, new StoryMove
-			{
-				StoryId = _entry.Id,
-				StateMachineType = ObjectCodec.TypeName(stateMachine.GetType()),
-				Fields = fields
-			});
+			stateMachine.MoveNext();
 		}
 
 		public void Finish<TResult>(NetworkStoryContext context, TResult result, Exception? exception)
@@ -150,9 +131,7 @@ internal sealed class HostStories
 
 	public long Started;
 
-	public long Resumed;
-
-	public long MovedToClient;
+	public long TailsRunHere;
 
 	public long Finished;
 
@@ -297,47 +276,50 @@ internal sealed class HostStories
 		{
 			return;
 		}
-		string name = StoryState.Name(move.StateMachineType);
+		(PeerId, uint) key = (peer, move.StoryId);
+		StoryType? story = StoryState.Find(move.StateMachineType, out string why);
+		string name = story?.Name ?? StoryState.Clip(move.StateMachineType);
+		if (story == null || !story.ClientMayStart)
+		{
+			Refuse(host, peer, move.StoryId, story, name, story == null ? why : "clients do not start this story");
+			return;
+		}
+		if (_entries.ContainsKey(key))
+		{
+			Refuse(host, peer, move.StoryId, story, name, "story already running; only its arguments may come from the client");
+			return;
+		}
 		Entry? removed;
 		try
 		{
-			(PeerId, uint) key = (peer, move.StoryId);
-			if (!_entries.TryGetValue(key, out Entry? entry))
+			var context = (NetworkStoryContext)Activator.CreateInstance(story.Builder.FieldType)!;
+			var entry = new Entry
 			{
-				Type type = ObjectCodec.FindType(move.StateMachineType);
-				FieldInfo? builder = type == null ? null : ObjectCodec.Fields(type).FirstOrDefault(f => StoryState.IsBuilder(f.FieldType));
-				if (builder == null)
-				{
-					Fail(host, peer, move.StoryId, name, "no state machine type " + move.StateMachineType + " / builder here");
-					return;
-				}
-				var context = (NetworkStoryContext)Activator.CreateInstance(builder.FieldType);
-				entry = new Entry
-				{
-					Peer = peer,
-					Id = move.StoryId,
-					Name = name,
-					Context = context
-				};
-				context.Narrator = new HostStoryNarrator(this, entry, host, space);
-				_entries[key] = entry;
-				Started++;
-			}
-			else
+				Peer = peer,
+				Id = move.StoryId,
+				Name = name,
+				Context = context,
+				LastMs = MpClock.NowMs()
+			};
+			context.Narrator = new HostStoryNarrator(this, entry, host, space, () => new ReplicationEventContext
 			{
-				Resumed++;
-			}
-			entry.LastMs = MpClock.NowMs();
-			bool firstMove = entry.Moves++ == 0;
+				IsLocal = false,
+				Session = serverSession,
+				SourceId = new ClientId(sourceClientId)
+			});
 			space.ClearLocalIds();
 			space.LocalStubs.Clear();
-			object? sm = StoryState.Decode(move, space, entry.Context, MakeRequest, out string? fail);
+			object? sm = StoryState.Start(story, move, space, context, StoryState.EntryState, out string? refused, out string? fail);
+			if (refused != null)
+			{
+				Refuse(host, peer, move.StoryId, story, name, refused);
+				return;
+			}
 			if (sm == null)
 			{
-				_entries.TryRemove(key, out removed);
 				if (fail != null && ObjectCodec.IsUnknownModel(fail))
 				{
-					AlreadyReleased(host, peer, move.StoryId, name, entry.Context, fail);
+					AlreadyReleased(host, peer, move.StoryId, name, context, fail);
 				}
 				else
 				{
@@ -345,29 +327,28 @@ internal sealed class HostStories
 				}
 				return;
 			}
+			string? refusal = Gate?.Invoke(clientId, sm, serverSession);
+			if (refusal != null)
 			{
-				string? refusal = Gate?.Invoke(clientId, sm, serverSession);
-				if (refusal != null)
+				Refused++;
+				Count(name + (refusal.StartsWith("passenger", StringComparison.Ordinal) ? ": refused (passenger seat)" : ": refused (not allowed)"));
+				_log.Info($"story: refused {name} #{move.StoryId} from {peer} (not allowed: {refusal})");
+				host.SendStoryFinish(peer, new StoryFinish
 				{
-					_entries.TryRemove(key, out removed);
-					Refused++;
-					Count(name + (refusal.StartsWith("passenger", StringComparison.Ordinal) ? ": refused (passenger seat)" : ": refused (strict grids)"));
-					_log.Info($"host world sync: STORY {name} #{move.StoryId} from {peer} refused: {refusal}");
-					host.SendStoryFinish(peer, new StoryFinish
-					{
-						StoryId = move.StoryId,
-						Status = 2,
-						Text = "not allowed: " + refusal
-					});
-					return;
-				}
+					StoryId = move.StoryId,
+					Status = 2,
+					Text = "not allowed: " + refusal
+				});
+				return;
 			}
+			_entries[key] = entry;
+			Started++;
 			Count(name);
-			if (firstMove && AudioRouting.IsBuildStory(name))
+			if (AudioRouting.IsBuildStory(name))
 			{
 				AudioRouting.Instance.NoteJoinerBuild(clientId != 0 ? clientId : sourceClientId, MpClock.NowMs());
 			}
-			if (FirstOf("run " + name) | (Started + Resumed <= 20))
+			if (FirstOf("run " + name) | (Started <= 20))
 			{
 				_log.Info($"host world sync: STORY {name} #{move.StoryId} from {peer} runs on the server as ClientId {sourceClientId}");
 			}
@@ -375,20 +356,24 @@ internal sealed class HostStories
 		}
 		catch (Exception ex)
 		{
-			_entries.TryRemove((peer, move.StoryId), out removed);
+			_entries.TryRemove(key, out removed);
 			Fail(host, peer, move.StoryId, name, ex.GetType().Name + ": " + ex.Message);
 		}
-		ServerRequest MakeRequest()
+	}
+
+	// Keyed by the listed story (or "unlisted") so a peer cannot grow the log-once set with made-up names.
+	private void Refuse(IStorySink host, PeerId peer, uint id, StoryType? story, string name, string why)
+	{
+		Refused++;
+		string kind = story?.Name ?? "unlisted";
+		Count(kind + ": refused");
+		_log.WarnOnce("story-refused-" + kind, $"story: refused {name} #{id} from {peer} ({why}) (further ones of this story only counted)");
+		host.SendStoryFinish(peer, new StoryFinish
 		{
-			var request = new ServerRequest();
-			request.Result = new ReplicationEventContext
-			{
-				IsLocal = false,
-				Session = serverSession,
-				SourceId = new ClientId(sourceClientId)
-			};
-			return request;
-		}
+			StoryId = id,
+			Status = 2,
+			Text = "refused: " + why
+		});
 	}
 
 	private void Fail(IStorySink host, PeerId peer, uint id, string name, string why)
@@ -433,7 +418,7 @@ internal sealed class HostStories
 
 	public string Describe()
 	{
-		return $"stories: received {Received}, started {Started}, resumed {Resumed}, moved to client {MovedToClient}, finished {Finished}, failed {Failed}, released-model no-ops {ReleasedNoOps}" + (_counts.IsEmpty ? "" : "; " + string.Join(", ",
+		return $"stories: received {Received}, started {Started}, refused {Refused}, client tails run here {TailsRunHere}, finished {Finished}, failed {Failed}, released-model no-ops {ReleasedNoOps}" + (_counts.IsEmpty ? "" : "; " + string.Join(", ",
 			from kv in _counts.OrderByDescending(kv => kv.Value).Take(8)
 			select $"{kv.Key} x{kv.Value}"));
 	}
