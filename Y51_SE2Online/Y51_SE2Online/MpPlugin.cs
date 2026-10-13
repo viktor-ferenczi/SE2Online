@@ -305,6 +305,13 @@ public sealed class MpPlugin : IPlugin, IDisposable
 					_modeHarmony.Patch(AccessTools.Method(magnetic, "Destroy"), finalizer: new HarmonyMethod(typeof(MagneticBlockGuard), nameof(MagneticBlockGuard.DestroyFinalizer)));
 				}
 				catch (Exception ex) { _log.Warn("client: landing gear guard not installed: " + ex.Message); }
+				try
+				{
+					var weather = typeof(Keen.Game2.Client.WorldObjects.Weather.WeatherModifierRenderComponent);
+					_modeHarmony.Patch(AccessTools.Method(weather, "OnAddedToScene"), prefix: new HarmonyMethod(typeof(WeatherRenderGuard), nameof(WeatherRenderGuard.AddedPrefix)));
+					_modeHarmony.Patch(AccessTools.Method(weather, "OnBeforeRemovedFromScene"), prefix: new HarmonyMethod(typeof(WeatherRenderGuard), nameof(WeatherRenderGuard.RemovedPrefix)));
+				}
+				catch (Exception ex) { _log.Warn("client: weather render guard not installed: " + ex.Message); }
 			}
 			hooks.Add(Patch("render:SceneManager.DestroyEntity", HookTargets.RenderDestroyEntity, null, null, new HarmonyMethod(typeof(BuildGuards), "RenderDestroyFinalizer")));
 		}
