@@ -425,6 +425,7 @@ internal sealed class NetSession
 						StateBudgetBytesPerSec = _o.StateBudgetBytesPerSec,
 						Caps = new RateCapPolicy(_o.RateCaps),
 						ResolveType = EngineCodec.ResolveType,
+						IsClientInput = EngineCodec.IsClientInput,
 						CheckSignal = CommandLayouts.Check,
 						Settings = new HostSettings(_o.Identities, _o.Grids, _o.Research),
 						HostName = name,
