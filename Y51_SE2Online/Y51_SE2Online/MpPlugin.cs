@@ -298,6 +298,13 @@ public sealed class MpPlugin : IPlugin, IDisposable
 					_modeHarmony.Patch(AccessTools.Method(control, "RequestCrouchToggle"), postfix: new HarmonyMethod(typeof(MpPlugin), nameof(CrouchPostfix)));
 				}
 				catch (Exception ex) { _log.Warn("client: sprint/crouch prediction hooks not installed: " + ex.Message); }
+				try
+				{
+					var magnetic = typeof(Keen.Game2.Simulation.WorldObjects.CubeBlocks.MechanicalBlocks.MagneticBlockComponent);
+					_modeHarmony.Patch(AccessTools.Method(magnetic, "OnUpdateReadyToLock"), prefix: new HarmonyMethod(typeof(MagneticBlockGuard), nameof(MagneticBlockGuard.ReadyToLockPrefix)));
+					_modeHarmony.Patch(AccessTools.Method(magnetic, "Destroy"), finalizer: new HarmonyMethod(typeof(MagneticBlockGuard), nameof(MagneticBlockGuard.DestroyFinalizer)));
+				}
+				catch (Exception ex) { _log.Warn("client: landing gear guard not installed: " + ex.Message); }
 			}
 			hooks.Add(Patch("render:SceneManager.DestroyEntity", HookTargets.RenderDestroyEntity, null, null, new HarmonyMethod(typeof(BuildGuards), "RenderDestroyFinalizer")));
 		}
