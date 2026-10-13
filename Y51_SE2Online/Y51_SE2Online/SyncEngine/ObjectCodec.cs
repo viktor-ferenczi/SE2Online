@@ -36,8 +36,6 @@ internal static class ObjectCodec
 
 	private static readonly ConcurrentDictionary<Type, bool> SerializableCache = new();
 
-	private static readonly ConcurrentDictionary<string, Type?> TypeCache = new();
-
 	private static readonly HashSet<Type> PlainDataClasses = new() { typeof(BlockPlacerEntityBundle) };
 
 	private static Func<DefinitionManager, Guid, Definition?>? _tryAny;
@@ -62,20 +60,16 @@ internal static class ObjectCodec
 
 	public static string TypeName(Type t) => t.FullName + ", " + t.Assembly.GetName().Name;
 
-	public static Type? FindType(string name)
+	static ObjectCodec()
 	{
-		return TypeCache.GetOrAdd(name, (string n) =>
-		{
-			try
-			{
-				return Type.GetType(n, throwOnError: false);
-			}
-			catch (Exception)
-			{
-				return (Type?)null;
-			}
-		});
+		WireTypes.Log ??= GameLog.Instance;
 	}
+
+	// Story state machines named by the peer (HostStories, ClientStories, StoryState).
+	public static Type? FindType(string name) => WireTypes.Resolve(name, typeof(IAsyncStateMachine), construct: true);
+
+	// The only classes Encode copies field by field (see EncodeFields callers).
+	private static bool IsFieldCopied(Type t) => IsCompilerGenerated(t) || t.IsValueType || t == typeof(ReplicationEventContext) || PlainDataClasses.Contains(t);
 
 	public static FieldInfo[] Fields(Type t)
 	{
@@ -379,7 +373,7 @@ internal static class ObjectCodec
 				fail = $"component's entity #{v.Id} is not on this side{sp.Explain?.Invoke(v.Id)}";
 				return null;
 			}
-			Type? exactType = FindType(v.Text);
+			Type? exactType = WireTypes.Resolve(v.Text, declared);
 			Component? match = null;
 			foreach (Component candidate in entity.Components)
 			{
@@ -449,10 +443,10 @@ internal static class ObjectCodec
 			return v.Text;
 		case WireKind.Type:
 		{
-			Type? type = FindType(v.Text);
+			Type? type = WireTypes.Resolve(v.Text, typeof(object));
 			if (type == null)
 			{
-				fail = "type " + v.Text + " not found";
+				fail = "type " + v.Text + " not found or not allowed";
 			}
 			return type;
 		}
@@ -476,14 +470,15 @@ internal static class ObjectCodec
 			if (v.Text.StartsWith("Dict:", StringComparison.Ordinal))
 			{
 				string[] typeNames = v.Text[DictPrefix.Length..].Split('|');
-				Type? keyType = typeNames.Length == 2 ? FindType(typeNames[0]) : null;
-				Type? valueType = typeNames.Length == 2 ? FindType(typeNames[1]) : null;
-				if (keyType == null || valueType == null || v.Items.Count % 2 != 0)
+				Type? keyType = typeNames.Length == 2 ? WireTypes.Resolve(typeNames[0], typeof(object)) : null;
+				Type? valueType = typeNames.Length == 2 ? WireTypes.Resolve(typeNames[1], typeof(object)) : null;
+				Type? dictionaryType = keyType == null || valueType == null ? null : Collection(v.Text, typeof(Dictionary<,>).MakeGenericType(keyType, valueType), declared);
+				if (dictionaryType == null || v.Items.Count % 2 != 0)
 				{
 					fail = "dictionary " + v.Text + " not readable here";
 					return null;
 				}
-				var dictionary = (IDictionary)Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(keyType, valueType));
+				var dictionary = (IDictionary)Activator.CreateInstance(dictionaryType);
 				for (int i = 0; i + 1 < v.Items.Count; i += 2)
 				{
 					object? key = Decode(v.Items[i], keyType, sp, translated: false, ref fail, depth + 1, inCollection: true);
@@ -501,13 +496,14 @@ internal static class ObjectCodec
 			}
 			if (v.Text.StartsWith("Set:", StringComparison.Ordinal))
 			{
-				Type? elementType = FindType(v.Text[SetPrefix.Length..]);
-				if (elementType == null)
+				Type? elementType = WireTypes.Resolve(v.Text[SetPrefix.Length..], typeof(object));
+				Type? setType = elementType == null ? null : Collection(v.Text, typeof(HashSet<>).MakeGenericType(elementType), declared);
+				if (setType == null)
 				{
-					fail = "set element type " + v.Text + " not found";
+					fail = "set element type " + v.Text + " not found or not allowed";
 					return null;
 				}
-				object set = Activator.CreateInstance(typeof(HashSet<>).MakeGenericType(elementType));
+				object set = Activator.CreateInstance(setType);
 				MethodInfo add = set.GetType().GetMethod("Add");
 				foreach (WireValue item in v.Items)
 				{
@@ -524,10 +520,10 @@ internal static class ObjectCodec
 			bool isList = text.StartsWith("List:", StringComparison.Ordinal);
 			bool isImmutable = text.StartsWith("ImmutableArray:", StringComparison.Ordinal);
 			string elementName = isList ? text[5..] : isImmutable ? text[15..] : text;
-			Type? itemType = FindType(elementName);
-			if (itemType == null)
+			Type? itemType = WireTypes.Resolve(elementName, typeof(object));
+			if (itemType == null || Collection(text, isList ? typeof(List<>).MakeGenericType(itemType) : isImmutable ? typeof(ImmutableArray<>).MakeGenericType(itemType) : itemType.MakeArrayType(), declared) == null)
 			{
-				fail = "element type " + text + " not found";
+				fail = "element type " + text + " not found or not allowed";
 				return null;
 			}
 			Array array = Array.CreateInstance(itemType, v.Items.Count);
@@ -555,16 +551,26 @@ internal static class ObjectCodec
 		}
 		case WireKind.Object:
 		{
-			Type? type = FindType(v.Text);
+			Type? type = WireTypes.Resolve(v.Text, declared, construct: true);
+			if (type != null && !IsFieldCopied(type))
+			{
+				WireTypes.Refuse(v.Text, declared, "not a type Encode copies field by field");
+				type = null;
+			}
 			if (type == null)
 			{
-				fail = "type " + v.Text + " not found";
+				fail = "type " + v.Text + " not found or not allowed";
 				return null;
 			}
 			object instance = type.IsValueType ? Activator.CreateInstance(type) : RuntimeHelpers.GetUninitializedObject(type);
 			foreach (var (name, value) in v.Fields)
 			{
 				FieldInfo? field = Field(type, name);
+				if (field != null && WireTypes.Problem(field.DeclaringType) != null)
+				{
+					WireTypes.Refuse(v.Text, declared, "field " + name + " is declared on " + field.DeclaringType.FullName);
+					field = null;
+				}
 				if (field == null)
 				{
 					fail = type.Name + " has no field " + name + " here";
@@ -582,10 +588,15 @@ internal static class ObjectCodec
 		}
 		case WireKind.Serialized:
 		{
-			Type? type = FindType(v.Text);
+			Type? type = WireTypes.Resolve(v.Text, declared, construct: true);
+			if (type != null && !IsKeenSerializable(type))
+			{
+				WireTypes.Refuse(v.Text, declared, "not Keen-serializable");
+				type = null;
+			}
 			if (type == null)
 			{
-				fail = "type " + v.Text + " not found";
+				fail = "type " + v.Text + " not found or not allowed";
 				return null;
 			}
 			try
@@ -602,6 +613,17 @@ internal static class ObjectCodec
 			fail = $"{v.Kind} cannot be decoded as {declared.Name}";
 			return null;
 		}
+	}
+
+	private static Type? Collection(string name, Type collection, Type declared)
+	{
+		Type slot = Nullable.GetUnderlyingType(declared) ?? declared;
+		if (slot.ContainsGenericParameters || slot.IsAssignableFrom(collection))
+		{
+			return collection;
+		}
+		WireTypes.Refuse(name, declared, "a " + collection.Name + " does not fit the slot");
+		return null;
 	}
 
 	public static bool ContainsReferences(Type t) => RefCache.GetOrAdd(t, (Type x) => (bool)IsRefMethod.MakeGenericMethod(x).Invoke(null, null));

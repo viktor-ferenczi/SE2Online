@@ -205,10 +205,10 @@ internal sealed class ClientObservables
 		{
 			return null;
 		}
-		Type type = ObjectCodec.FindType(op.Text);
+		Type type = WireTypes.Resolve(op.Text, typeof(IList), construct: true);
 		if (type == null)
 		{
-			return "list type " + op.Text + " not found";
+			return "list type " + op.Text + " not found or not allowed";
 		}
 		var list = (IList)Activator.CreateInstance(type, nonPublic: true);
 		Type declared = ObservableRules.ElementType(type);
@@ -245,10 +245,10 @@ internal sealed class ClientObservables
 		{
 			return null;
 		}
-		Type type = ObjectCodec.FindType(op.Text);
+		Type type = WireTypes.Resolve(op.Text, typeof(ObservableObject), construct: true);
 		if (type == null)
 		{
-			return "type " + op.Text + " not found";
+			return "type " + op.Text + " not found or not allowed";
 		}
 		ObservableObject? adopted = Adopt?.Invoke(type);
 		ObservableObject replica = adopted ?? (ObservableObject)Activator.CreateInstance(type, nonPublic: true);
