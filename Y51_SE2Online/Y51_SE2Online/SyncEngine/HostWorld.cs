@@ -1746,6 +1746,16 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		CommandBuffers.Append(cb, stub, buffer, off => cb.StoreObject(off == 0 ? sessionEntity : target), DataRefOffsets, 1580056798);
 	}
 
+	private bool ClientInput(int typeId, ushort clientId)
+	{
+		if (EngineCodec.IsClientInput(typeId))
+		{
+			return true;
+		}
+		_log.WarnOnce($"input-refused/{typeId}", $"input: refused data {EngineCodec.DescribeType(typeId).Name} from ClientId {clientId}: not a client input type");
+		return false;
+	}
+
 	private void Inject(InProcessReplicationSessionComponent comp, ClientInputBatch b, HostSession host)
 	{
 		var allowed = _allowed.TryGetValue(b.ClientId, out var allowedIds) ? allowedIds : null;
@@ -1760,6 +1770,11 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		int rejected = 0;
 		foreach (var (netId, typeId, bytes) in b.Data)
 		{
+			if (!ClientInput(typeId, b.ClientId))
+			{
+				rejected++;
+				continue;
+			}
 			var target = allowed != null && allowed.Contains(netId) ? Local(netId) : null;
 			if (target == null || WorldSocial.Access(target, IdentityOf(b.ClientId)) == false)
 			{
@@ -1790,6 +1805,11 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 		foreach (var (netId, typeId) in b.Removes)
 		{
+			if (!ClientInput(typeId, b.ClientId))
+			{
+				rejected++;
+				continue;
+			}
 			uint[]? leftIds = joiner != null ? joiner.LeftGridIds : null;
 			bool justLeft = leftIds != null && Array.IndexOf(leftIds, netId) >= 0 && MpClock.NowMs() - joiner.LeftAtMs < 3000;
 			var target = (allowed?.Contains(netId) ?? false) | justLeft ? Local(netId) : null;

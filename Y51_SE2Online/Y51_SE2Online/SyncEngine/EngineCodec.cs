@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using Keen.Game2.Simulation.RuntimeSystems.Saves;
 using Keen.VRage.Core.Game.Components;
@@ -426,6 +427,24 @@ internal static class EngineCodec
 		return (runtimeType == null ? $"typeId#{typeId}" : runtimeType.FullName + ", " + runtimeType.Assembly.GetName().Name, info.Size);
 	}
 
+	// The Data the game itself lets a client write to the server: the structs it marks [SyncFromClients].
+	public static readonly Type[] ClientInputTypes =
+	{
+		typeof(Keen.Game2.Simulation.WorldObjects.Movement.ControlData),
+		typeof(Keen.Game2.Simulation.WorldObjects.Movement.AngularControlData),
+		typeof(Keen.Game2.Simulation.WorldObjects.Movement.ControlReferenceOrientation),
+		typeof(Keen.Game2.Simulation.WorldObjects.Movement.LookOffsetData),
+		typeof(Keen.Game2.Simulation.WorldObjects.Movement.TargetControlData)
+	};
+
+	private static readonly HashSet<string> ClientInputNames = new HashSet<string>(ClientInputTypes.Select(t => t.FullName + ", " + t.Assembly.GetName().Name));
+
+	private static HashSet<int>? _clientInputIds;
+
+	public static bool IsClientInput(string name) => ClientInputNames.Contains(name);
+
+	public static bool IsClientInput(int typeId) => (_clientInputIds ??= new HashSet<int>(ClientInputTypes.Select(t => RuntimeDataInfo.Of(t).TypeId))).Contains(typeId);
+
 	public static (int TypeId, int Size)? ResolveType(string name)
 	{
 		Type? type = Type.GetType(name, throwOnError: false);
@@ -433,8 +452,37 @@ internal static class EngineCodec
 		{
 			return null;
 		}
+		// The peer's raw bytes are copied into the Data as is: a reference or pointer in it would be forged.
+		if (!IsPlainData(type, 0))
+		{
+			throw new InvalidDataException("contains references or pointers, raw bytes cannot be applied to it");
+		}
 		RuntimeDataInfo.Info info = RuntimeDataInfo.Of(type);
 		return (info.TypeId, info.Size);
+	}
+
+	internal static bool IsPlainData(Type type, int depth)
+	{
+		if (type.IsPointer || type.IsFunctionPointer || type == typeof(IntPtr) || type == typeof(UIntPtr))
+		{
+			return false;
+		}
+		if (type.IsPrimitive || type.IsEnum)
+		{
+			return true;
+		}
+		if (!type.IsValueType || type.IsByRefLike || depth > 32)
+		{
+			return false;
+		}
+		foreach (FieldInfo field in type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+		{
+			if (!IsPlainData(field.FieldType, depth + 1))
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 
 	public static List<DataBlob> Blobs(ref DEntityBuilder builder, TypeKeyTable keys)

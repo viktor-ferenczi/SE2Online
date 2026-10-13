@@ -83,6 +83,8 @@ public sealed partial class HostSession : IStorySink
 
 		public long InputRejected;
 
+		public int InputRefusedLogged;
+
 		public long InputRemoved;
 
 		public long CommandsIn;
@@ -612,10 +614,21 @@ public sealed partial class HostSession : IStorySink
 			{
 				break;
 			}
+			Func<string, bool> isInput = _o.IsClientInput ?? (_ => false);
+			List<TypeKeyDef> refused = defs.Where(d => !isInput(d.Name)).ToList();
 			List<string> unusable;
 			lock (client.Input)
 			{
-				unusable = client.InputTypes.Add(defs, _o.ResolveType);
+				unusable = client.InputTypes.Add(defs.Where(d => isInput(d.Name)), _o.ResolveType);
+				// Registered as unusable so a key re-announced under a refused name stops resolving to its old type.
+				client.InputTypes.Add(refused, _ => null);
+			}
+			foreach (TypeKeyDef def in refused)
+			{
+				if (client.InputRefusedLogged++ < 16)
+				{
+					_log.Warn($"input: refused data {def.Name} from ClientId {client.Player.ClientId}: not a client input type, its updates are ignored");
+				}
 			}
 			_log.Info($"sync(host): ClientId {client.Player.ClientId}: {defs.Count} input type key(s) ({string.Join(", ", defs.Select(d => d.ShortName))}), {unusable.Count} unusable");
 			foreach (string problem in unusable)

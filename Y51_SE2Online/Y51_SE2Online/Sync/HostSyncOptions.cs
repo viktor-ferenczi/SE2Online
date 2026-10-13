@@ -20,6 +20,9 @@ public sealed class HostSyncOptions
 
 	public Func<string, (int TypeId, int Size)?>? ResolveType;
 
+	// Which announced type names a client may write as input Data; null refuses all.
+	public Func<string, bool>? IsClientInput;
+
 	public Func<SignalKeyDef, string?>? CheckSignal;
 
 	public HostSettings Settings = new HostSettings(Identities: false, GridPermissionMode.Team, ResearchMode.Shared);
