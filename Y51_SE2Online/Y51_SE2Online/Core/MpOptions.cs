@@ -71,10 +71,6 @@ public sealed class MpOptions
 
 	public int VirtualPort { get; private set; } = 7742;
 
-	public bool Spike { get; private set; }
-
-	public int BlobBytes { get; private set; } = 5242880;
-
 	public int SendRateMaxBytes { get; private set; } = 8388608;
 
 	public int SendRateMinBytes { get; private set; } = 1048576;
@@ -298,17 +294,6 @@ public sealed class MpOptions
 			return true;
 		case "vport":
 			VirtualPort = ParseInt(value, 0, 65535);
-			return true;
-		case "spike":
-			if (value is not null)
-			{
-				throw new FormatException("-y51online:spike takes no value");
-			}
-			Spike = true;
-			return true;
-		case "blob":
-			BlobBytes = checked(ParseInt(value, 0, 256) * 1024 * 1024);
-			Spike = true;
 			return true;
 		case "sendrate":
 			SendRateMaxBytes = checked(ParseInt(value, 64, 1048576) * 1024);
@@ -553,10 +538,6 @@ public sealed class MpOptions
 				parts.Add($"sendrate={SendRateMinBytes / 1024}..{SendRateMaxBytes / 1024}KiB/s");
 			}
 			parts.Add(Sync ? "sync=on" : "sync=off");
-			if (Spike)
-			{
-				parts.Add($"spike blob={BlobBytes / 1048576}MiB");
-			}
 			if (Join && !ClientGame)
 			{
 				parts.Add("noclientgame");

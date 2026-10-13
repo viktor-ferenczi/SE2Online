@@ -8,7 +8,6 @@ using System.Text;
 using System.Threading;
 using Y51_SE2Online.Core;
 using Y51_SE2Online.Net;
-using Y51_SE2Online.Spike;
 using Y51_SE2Online.Steam;
 using Y51_SE2Online.Sync;
 using Y51_SE2Online.SyncEngine;
@@ -411,7 +410,6 @@ internal sealed class NetSession
 				PluginVersion = _pluginVersion,
 				GameVersion = _gameVersion
 			}, _log);
-			SpikeDriver? spike = _o.Spike ? new SpikeDriver(transport, _log, MpClock.NowMs, _o.BlobBytes, localId) : null;
 			HostSession? host = null;
 			ClientSession? client = null;
 			if (_o.Sync)
@@ -480,7 +478,7 @@ internal sealed class NetSession
 			_client = client;
 			_host = host;
 			_transport = transport;
-			Loop(steamLink, tcpLink, transport, spike, host);
+			Loop(steamLink, tcpLink, transport, host);
 		}
 		finally
 		{
@@ -549,7 +547,7 @@ internal sealed class NetSession
 		return session;
 	}
 
-	private void Loop(SteamLink? steam, TcpLink? tcp, MpTransport transport, SpikeDriver? spike, HostSession? host)
+	private void Loop(SteamLink? steam, TcpLink? tcp, MpTransport transport, HostSession? host)
 	{
 		var connectedAt = new Dictionary<PeerId, long>();
 		var detailedDone = new HashSet<PeerId>();
@@ -739,7 +737,6 @@ internal sealed class NetSession
 			host?.Tick();
 			_client?.Tick();
 			ClientWorld.Current?.NetTick(now);
-			spike?.Tick();
 			long tickMs = tickWatch.ElapsedMilliseconds;
 			if (tickMs > 250)
 			{
