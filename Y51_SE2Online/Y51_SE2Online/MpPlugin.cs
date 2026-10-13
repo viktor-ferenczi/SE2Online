@@ -167,9 +167,9 @@ public sealed class MpPlugin : IPlugin, IDisposable
 		var hooks = new List<(string, bool, string)>();
 		bool hosting = _options.Networking && _options.Host && _options.Sync;
 		bool joining = _options.Networking && _options.Join && _options.Sync;
-		if (_options.Probe | hosting | joining)
+		if (hosting | joining)
 		{
-			hooks.AddRange(ReplicationProbe.Install(_modeHarmony, _options.ProbeBundleSize, _log, _options.Probe));
+			hooks.AddRange(ReplicationProbe.Install(_modeHarmony, _log));
 		}
 		if (hosting)
 		{
