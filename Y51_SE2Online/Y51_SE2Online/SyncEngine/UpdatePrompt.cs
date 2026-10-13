@@ -47,6 +47,17 @@ internal static class UpdatePrompt
         string available = _available;
         if (available == null || shared == null || !atMainMenu) return;
         _available = null;
+        if (PluginPaths.PulsarHub)
+        {
+            shared.ShowDialog(new TwoOptionsDialogViewModel(new TwoOptionsDialogDefinition
+            {
+                Title = LocKey.FromString("Update available"),
+                Content = LocKey.FromString($"Y51_SE2Online {available} is available. You have {MpPlugin.Version}.\n\nServers only admit players on their exact version. " + PulsarUpdateHint),
+                ConfirmOption = LocKey.FromString("OK"),
+                CancelOption = LocKey.FromString("Skip this version")
+            }) { CancelAction = () => MpMenu.RememberSkippedUpdate(available) });
+            return;
+        }
         shared.ShowDialog(new ThreeOptionsDialogViewModel(new ThreeOptionsDialogDefinition
         {
             Title = LocKey.FromString("Update available"),
@@ -65,7 +76,9 @@ internal static class UpdatePrompt
     public static void VersionRefused(SharedUIComponent shared, string hostVersion, string serverText)
     {
         string text = string.IsNullOrEmpty(hostVersion) ? serverText : VersionMismatch.Explain(hostVersion, MpPlugin.Version);
-        if (VersionMismatch.IsNewer(hostVersion, MpPlugin.Version))
+        if (VersionMismatch.IsNewer(hostVersion, MpPlugin.Version) && PluginPaths.PulsarHub)
+            text += "\n\n" + PulsarUpdateHint;
+        else if (VersionMismatch.IsNewer(hostVersion, MpPlugin.Version))
         {
             shared.ShowDialog(new TwoOptionsDialogViewModel(new TwoOptionsDialogDefinition
             {
@@ -79,6 +92,9 @@ internal static class UpdatePrompt
             Title = LocKey.FromString("Different version"), Content = LocKey.FromString(text), ConfirmOption = LocKey.FromString("OK")
         }));
     }
+
+    // Hub releases go live only after the hub merges the new commit, which can lag the website.
+    private const string PulsarUpdateHint = "Pulsar installs plugin updates when the game starts, so restart the game to update. If the version stays the same, the update is still waiting for approval on Pulsar's plugin hub.";
 
     // Downloads need a Steam sign-in on the site, so the browser does the update.
     public static void OpenDownloadPage()

@@ -15,6 +15,10 @@ internal static class PluginPaths
 
 	public static bool InMemory => DllDir == null;
 
+	/// <summary>Installed from Pulsar's plugin hub: Pulsar compiles it into Modern/GitHub/&lt;plugin&gt;/Bin and updates it itself.</summary>
+	public static bool PulsarHub => MpPlugin.PulsarDataDir != null && DllDir != null
+		&& string.Equals(Directory.GetParent(DllDir)?.Parent?.Name, "GitHub", StringComparison.OrdinalIgnoreCase);
+
 	public static string DataDir => _dataDir ??= MpPlugin.PulsarDataDir ?? DllDir ?? Directory.CreateDirectory(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Y51_SE2Online")).FullName;
 
 	/// <summary>The shipped Content folder: Pulsar's copy of the registration's AssetFolder, or beside the DLL.</summary>
