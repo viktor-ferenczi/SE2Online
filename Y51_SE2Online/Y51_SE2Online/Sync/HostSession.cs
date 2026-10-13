@@ -65,6 +65,8 @@ public sealed partial class HostSession : IStorySink
 
 		public readonly Dictionary<(uint, ushort), (uint Seq, byte[] Bytes, bool Dirty)> InputData = new();
 
+		public long InputOverflow;
+
 		public readonly List<(string Signal, WireCommand Command)> InputCommands = new();
 
 		public LookAccumulator? Look;
@@ -146,6 +148,10 @@ public sealed partial class HostSession : IStorySink
 
 		public int Joins;
 	}
+
+	private const int MaxInputEntries = 256;
+
+	private const int MaxInputBytes = 1024;
 
 	private readonly ITransport _t;
 
@@ -695,7 +701,14 @@ public sealed partial class HostSession : IStorySink
 				{
 					client.InputEntries++;
 					(uint, ushort) key = (entry.NetId, entry.Key);
-					if (!client.InputData.TryGetValue(key, out var prev) || Seq.Newer(inputSeq, prev.Seq))
+					bool known = client.InputData.TryGetValue(key, out var prev);
+					// Honest input is a few small structs on the character, seat and piloted grid; anything past this is hostile.
+					if (entry.Bytes.Length > MaxInputBytes || (!known && client.InputData.Count >= MaxInputEntries))
+					{
+						if (client.InputOverflow++ == 0) _log.Warn($"sync(host): ClientId {client.Player?.ClientId} sent more input data than any honest client ({client.InputData.Count} entries, {entry.Bytes.Length} B); extra entries dropped");
+						continue;
+					}
+					if (!known || Seq.Newer(inputSeq, prev.Seq))
 					{
 						// Stays dirty until TakeInputs applies it, even if a newer copy brings the same bytes.
 						bool changed = prev.Bytes == null || !prev.Bytes.AsSpan().SequenceEqual(entry.Bytes);
