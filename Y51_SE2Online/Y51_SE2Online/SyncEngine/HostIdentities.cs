@@ -64,8 +64,16 @@ internal sealed class HostIdentities
 	internal static readonly Type[] LiveTypes = ResearchTypes.Append(typeof(GPSMarkersData)).Append(typeof(DiscoveriesPlayerData))
 		.Append(typeof(IntegrityToolPerPlayerData)).Append(typeof(PaintToolPerPlayerData)).ToArray();
 
-	// Server stories that only notify the addressed player's UI; others (saves, inventory) stay skipped.
-	internal static readonly HashSet<string> ForwardedStoryOwners = new HashSet<string>(StringComparer.Ordinal) { "DiscoveriesServerSessionComponent", "ColonizationProgressServerSessionComponent", "EncounterNotificationSessionComponent" };
+	// Server stories addressed to one player that only touch that player's own client: notifications, contract and
+	// undo history, and scenario actions (dialog, music, video, tutorial overlays). Saves, thumbnails, possession,
+	// respawn and debug stories stay skipped.
+	internal static readonly HashSet<string> ForwardedStoryOwners = new HashSet<string>(StringComparer.Ordinal)
+	{
+		"DiscoveriesServerSessionComponent", "ColonizationProgressServerSessionComponent", "EncounterNotificationSessionComponent",
+		"StreamedContractsScreenSessionComponent", "UndoSessionComponent", "PlayDialogActionComponent", "PlayMusicActionComponent",
+		"StopMusicActionComponent", "PlayVideoActionComponent", "SetUiTutorialActionComponent", "ClearUiTutorialActionComponent",
+		"ShowOnboardingTooltipActionComponent", "OpenTerminalScreenActionComponent"
+	};
 
 	public static HostIdentities? Current { get; private set; }
 

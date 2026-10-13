@@ -131,7 +131,8 @@ internal sealed class HostObservables
 
 	public uint? OidOnServer(object model, ReplayContext server)
 	{
-		if ((HeadlessReplication.Active && model is ObservableObject) || HostWorld.IsOwnOreList(model)) return GetOrAdd(model, isList: false).Oid;
+		if (HeadlessReplication.Active && model is ObservableObject) return GetOrAdd(HeadlessServerModel(model, server), isList: false).Oid;
+		if (HostWorld.IsOwnOreList(model)) return GetOrAdd(model, isList: false).Oid;
 		if (_byReplica.TryGetValue(model, out var known))
 		{
 			return known.Oid;
@@ -150,6 +151,16 @@ internal sealed class HostObservables
 			return null;
 		}
 		return GetOrAdd(remote, isList: false).Oid;
+	}
+
+	// Native stories hand out the replication's copy of a server model. A headless server has no client session, so
+	// that copy is never updated and its edits never reach the server (warheads would not arm, panels froze); joiners
+	// get the server model itself instead.
+	private static object HeadlessServerModel(object model, ReplayContext server)
+	{
+		if (!server.HasPairingRemote(model)) return model;
+		bool skip = false;
+		return server.TranslateObject(model, ReplicationFailureStrategy.NullOnAnyFail, ref skip) is ObservableObject local ? local : model;
 	}
 
 	public object? ResolveOnServer(uint oid, bool inCollection, ReplayContext server)
@@ -202,6 +213,10 @@ internal sealed class HostObservables
 			if (list && replica is ObservableObjectReplicationSessionComponent.ClientObservedCollection observed)
 			{
 				replica = observed.Source;
+			}
+			else if (HeadlessReplication.Active && replica != null)
+			{
+				replica = HeadlessServerModel(replica, hostClient);
 			}
 			if (replica == null || !_byReplica.TryRemove(replica, out var entry))
 			{

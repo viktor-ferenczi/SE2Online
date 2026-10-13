@@ -162,9 +162,11 @@ internal static class HeadlessReplication
         if (Active && __instance.ReplayContext.HasPairingRemote(entity)) __instance.ReplayContext.RemoveObjectPairing(entity);
     }
 
-    private static bool MoveToClientPrefix(NetworkStoryContext context)
+    private static bool MoveToClientPrefix(NetworkStoryContext context, IAsyncStateMachine stateMachine, ClientRequest client)
     {
         if (!Active) return true;
+        // Harmony skips every later prefix once one returns false, so a joiner's stories are routed from here.
+        if (client.ClientId.Id > 1 && !HostIdentities.MoveToClientPrefix(context, stateMachine, client)) return false;
         if (!context.Skipped) context.SkipStory();
         return false;
     }
