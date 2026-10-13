@@ -83,23 +83,23 @@ public sealed class ObservableOp
 
 	public List<uint> Refs()
 	{
-		List<uint> list = new List<uint>();
-		Value.CollectOids(list);
+		var oids = new List<uint>();
+		Value.CollectOids(oids);
 		if (Members != null)
 		{
 			foreach (var member in Members)
 			{
-				member.Value.CollectOids(list);
+				member.Value.CollectOids(oids);
 			}
 		}
 		if (Items != null)
 		{
 			foreach (WireValue item in Items)
 			{
-				item.CollectOids(list);
+				item.CollectOids(oids);
 			}
 		}
-		return list;
+		return oids;
 	}
 
 	public void Write(WireWriter w)
@@ -109,131 +109,123 @@ public sealed class ObservableOp
 		{
 		case ObservableOpKind.NewObject:
 			w.Str(Text).U16((ushort)Members.Count);
+			foreach (var (name, value) in Members)
 			{
-				foreach (var (s, v) in Members)
-				{
-					w.Str(s);
-					WireValue.Write(w, v);
-				}
-				break;
+				w.Str(name);
+				WireValue.Write(w, value);
 			}
+			break;
 		case ObservableOpKind.NewList:
 			w.Str(Text).I32(Items.Count);
+			foreach (WireValue item in Items)
 			{
-				foreach (WireValue item in Items)
-				{
-					WireValue.Write(w, item);
-				}
-				break;
+				WireValue.Write(w, item);
 			}
+			break;
 		case ObservableOpKind.Member:
 			w.Str(Text);
 			WireValue.Write(w, Value);
 			break;
 		case ObservableOpKind.ListChange:
-			w.U8(Change).I32(Start).I32(Count)
-				.I32(Items?.Count ?? (-1));
-			if (Items == null)
+			w.U8(Change).I32(Start).I32(Count).I32(Items?.Count ?? -1);
+			if (Items != null)
 			{
-				break;
-			}
-			{
-				foreach (WireValue item2 in Items)
+				foreach (WireValue item in Items)
 				{
-					WireValue.Write(w, item2);
+					WireValue.Write(w, item);
 				}
-				break;
 			}
-		default:
-			throw new ArgumentOutOfRangeException("Kind", $"observable op {Kind}");
+			break;
 		case ObservableOpKind.Release:
 			break;
+		default:
+			throw new ArgumentOutOfRangeException("Kind", $"observable op {Kind}");
 		}
 	}
 
 	public static ObservableOp Read(ref WireReader r)
 	{
-		ObservableOpKind observableOpKind = (ObservableOpKind)r.U8();
-		ObservableOp observableOp = new ObservableOp
+		var kind = (ObservableOpKind)r.U8();
+		var op = new ObservableOp
 		{
-			Kind = observableOpKind,
+			Kind = kind,
 			Oid = r.U32()
 		};
-		switch (observableOpKind)
+		switch (kind)
 		{
 		case ObservableOpKind.NewObject:
 		{
-			observableOp.Text = r.Str();
-			int num2 = r.U16();
-			if (num2 > 1024)
+			op.Text = r.Str();
+			int count = r.U16();
+			if (count > 1024)
 			{
-				throw new ArgumentOutOfRangeException("n", $"{num2} members");
+				throw new ArgumentOutOfRangeException("n", $"{count} members");
 			}
-			observableOp.Members = new List<(string, WireValue)>(num2);
-			for (int j = 0; j < num2; j++)
+			op.Members = new List<(string, WireValue)>(count);
+			for (int i = 0; i < count; i++)
 			{
-				string item = r.Str();
-				observableOp.Members.Add((item, WireValue.Read(ref r)));
+				string name = r.Str();
+				op.Members.Add((name, WireValue.Read(ref r)));
 			}
 			break;
 		}
 		case ObservableOpKind.NewList:
 		{
-			observableOp.Text = r.Str();
-			int num3 = r.I32();
-			if (num3 < 0 || num3 > 65536)
+			op.Text = r.Str();
+			int count = r.I32();
+			if (count < 0 || count > 65536)
 			{
-				throw new ArgumentOutOfRangeException("n", $"{num3} items");
+				throw new ArgumentOutOfRangeException("n", $"{count} items");
 			}
-			observableOp.Items = new List<WireValue>(Math.Min(num3, 1024));
-			for (int k = 0; k < num3; k++)
+			op.Items = new List<WireValue>(Math.Min(count, 1024));
+			for (int i = 0; i < count; i++)
 			{
-				observableOp.Items.Add(WireValue.Read(ref r));
+				op.Items.Add(WireValue.Read(ref r));
 			}
 			break;
 		}
 		case ObservableOpKind.Member:
-			observableOp.Text = r.Str();
-			observableOp.Value = WireValue.Read(ref r);
+			op.Text = r.Str();
+			op.Value = WireValue.Read(ref r);
 			break;
 		case ObservableOpKind.ListChange:
 		{
-			observableOp.Change = r.U8();
-			observableOp.Start = r.I32();
-			observableOp.Count = r.I32();
-			int num = r.I32();
-			if (num < -1 || num > 65536)
+			op.Change = r.U8();
+			op.Start = r.I32();
+			op.Count = r.I32();
+			int count = r.I32();
+			if (count < -1 || count > 65536)
 			{
-				throw new ArgumentOutOfRangeException("n", $"{num} items");
+				throw new ArgumentOutOfRangeException("n", $"{count} items");
 			}
-			if (num >= 0)
+			if (count >= 0)
 			{
-				observableOp.Items = new List<WireValue>(Math.Min(num, 1024));
-				for (int i = 0; i < num; i++)
+				op.Items = new List<WireValue>(Math.Min(count, 1024));
+				for (int i = 0; i < count; i++)
 				{
-					observableOp.Items.Add(WireValue.Read(ref r));
+					op.Items.Add(WireValue.Read(ref r));
 				}
 			}
 			break;
 		}
-		default:
-			throw new ArgumentOutOfRangeException("kind", $"unknown observable op {(byte)observableOpKind}");
 		case ObservableOpKind.Release:
 			break;
+		default:
+			throw new ArgumentOutOfRangeException("kind", $"unknown observable op {(byte)kind}");
 		}
-		return observableOp;
+		return op;
 	}
 
 	public override string ToString()
 	{
 		return Kind switch
 		{
-			ObservableOpKind.NewObject => $"new #{Oid} {ShortType(Text)} ({Members.Count} members)", 
-			ObservableOpKind.NewList => $"new list #{Oid} {ShortType(Text)} [{Items.Count}]", 
-			ObservableOpKind.Member => $"#{Oid}.{Text} = {Value}", 
-			ObservableOpKind.ListChange => $"list #{Oid} {ChangeName(Change)} at {Start}" + ((Change == 1) ? $" x{Count}" : $" [{Items?.Count ?? 0}]"), 
-			ObservableOpKind.Release => $"release #{Oid}", 
-			_ => Kind.ToString(), 
+			ObservableOpKind.NewObject => $"new #{Oid} {ShortType(Text)} ({Members.Count} members)",
+			ObservableOpKind.NewList => $"new list #{Oid} {ShortType(Text)} [{Items.Count}]",
+			ObservableOpKind.Member => $"#{Oid}.{Text} = {Value}",
+			ObservableOpKind.ListChange => $"list #{Oid} {ChangeName(Change)} at {Start}" + (Change == 1 ? $" x{Count}" : $" [{Items?.Count ?? 0}]"),
+			ObservableOpKind.Release => $"release #{Oid}",
+			_ => Kind.ToString(),
 		};
 	}
 
@@ -241,11 +233,11 @@ public sealed class ObservableOp
 	{
 		return c switch
 		{
-			0 => "add", 
-			1 => "remove", 
-			2 => "replace", 
-			3 => "reset", 
-			_ => $"kind {c}", 
+			0 => "add",
+			1 => "remove",
+			2 => "replace",
+			3 => "reset",
+			_ => $"kind {c}",
 		};
 	}
 
@@ -255,19 +247,17 @@ public sealed class ObservableOp
 		{
 			return t;
 		}
-		int num = t.IndexOf(',');
-		if (num >= 0)
+		int comma = t.IndexOf(',');
+		if (comma >= 0)
 		{
-			t = t.Substring(0, num);
+			t = t.Substring(0, comma);
 		}
-		int num2 = t.IndexOf('`');
-		int num3 = t.LastIndexOfAny(new char[2] { '.', '+' }, (num2 >= 0) ? num2 : (t.Length - 1));
-		if (num3 < 0)
+		int tick = t.IndexOf('`');
+		int dot = t.LastIndexOfAny(new[] { '.', '+' }, tick >= 0 ? tick : t.Length - 1);
+		if (dot < 0)
 		{
 			return t;
 		}
-		string text = t;
-		int num4 = num3 + 1;
-		return text.Substring(num4, text.Length - num4);
+		return t[(dot + 1)..];
 	}
 }
