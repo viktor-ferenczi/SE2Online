@@ -42,12 +42,12 @@ public sealed class TypeKeyTable
 			{
 				return value;
 			}
-			var (name, value2) = describe(localTypeId);
+			var (name, size) = describe(localTypeId);
 			if (_next == ushort.MaxValue)
 			{
 				throw new InvalidOperationException("type key space exhausted");
 			}
-			value = new TypeKeyDef(_next++, (ushort)Math.Clamp(value2, 0, 65535), name);
+			value = new TypeKeyDef(_next++, (ushort)Math.Clamp(size, 0, 65535), name);
 			_byTypeId[localTypeId] = value;
 			_all.Add(value);
 			_unannounced.Add(value);

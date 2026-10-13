@@ -35,8 +35,8 @@ public sealed class WireCommand
 			Key = key,
 			Payload = r.Bytes(num).ToArray()
 		};
-		int num2 = r.U8();
-		for (int i = 0; i < num2; i++)
+		int refCount = r.U8();
+		for (int i = 0; i < refCount; i++)
 		{
 			wireCommand.Refs.Add(WireValue.Read(ref r));
 		}

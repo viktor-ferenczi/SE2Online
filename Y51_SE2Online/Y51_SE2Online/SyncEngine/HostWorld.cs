@@ -980,22 +980,22 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		}
 	}
 
-	private void Assign(HostSession host, Joiner j, Entity? entity2, IdentityId identityId, Entity? entity, string text)
+	private void Assign(HostSession host, Joiner j, Entity? character, IdentityId identityId, Entity? hostCharacter, string via)
 	{
-		if (entity2 == null)
+		if (character == null)
 		{
-			host.CharacterFailed(j.Peer, "spawning through " + text + " returned nothing");
+			host.CharacterFailed(j.Peer, "spawning through " + via + " returned nothing");
 			return;
 		}
-		j.Character = entity2;
-		j.NetId = _ids.GetOrAssign(entity2);
+		j.Character = character;
+		j.NetId = _ids.GetOrAssign(character);
 		CharactersSpawned++;
 		string where = "?";
 		try
 		{
-			var spawned = entity2.Data.GetWorldTransform();
+			var spawned = character.Data.GetWorldTransform();
 			where = $"at {spawned.Position.X:0.0}, {spawned.Position.Y:0.0}, {spawned.Position.Z:0.0}";
-			if (entity != null && entity.Data.TryGet<WorldTransform>(out var hostTransform))
+			if (hostCharacter != null && hostCharacter.Data.TryGet<WorldTransform>(out var hostTransform))
 			{
 				where += $", {Vector3D.Distance(in hostTransform.Position, in spawned.Position):0.0} m from the host's character";
 			}
@@ -1003,8 +1003,8 @@ internal sealed partial class HostWorld : IHostWorld, IS2CTap
 		catch (Exception)
 		{
 		}
-		_log.Info($"host world sync: SPAWNED character for ClientId {j.ClientId} '{j.Name}': NetworkId {j.NetId}, owner IdentityId {identityId}{((long)identityId == PlayerIdentities.HotfixIdentity ? " (the host's identity)" : "")}, via {text}, {where}");
-		host.CharacterAssigned(j.Peer, j.NetId, "spawned via " + text + ", " + where);
+		_log.Info($"host world sync: SPAWNED character for ClientId {j.ClientId} '{j.Name}': NetworkId {j.NetId}, owner IdentityId {identityId}{((long)identityId == PlayerIdentities.HotfixIdentity ? " (the host's identity)" : "")}, via {via}, {where}");
+		host.CharacterAssigned(j.Peer, j.NetId, "spawned via " + via + ", " + where);
 	}
 
 	public void RequestCharacter(PeerId client, ushort clientId, string name, int choice, bool respawn)

@@ -350,7 +350,7 @@ internal sealed class ClientStories
 					Count("finish for an unknown story");
 					continue;
 				}
-				object? result2 = null;
+				object? storyResult = null;
 				Exception? ex = null;
 				if (finish.Status == 0)
 				{
@@ -358,7 +358,7 @@ internal sealed class ClientStories
 					Type type = StoryState.ResultType(story.Context);
 					space.ClearLocalIds();
 					space.LocalStubs.Clear();
-					result2 = type == typeof(DBNull) ? DBNull.Value : ObjectCodec.Decode(finish.Result, type, space, translated: false, ref fail);
+					storyResult = type == typeof(DBNull) ? DBNull.Value : ObjectCodec.Decode(finish.Result, type, space, translated: false, ref fail);
 					if (fail != null && IsWaitable(fail) && nowMs - since < WaitMs(fail))
 					{
 						_waiting.Add((finish, since));
@@ -380,7 +380,7 @@ internal sealed class ClientStories
 				string outcome;
 				if (ex == null)
 				{
-					outcome = "ok" + StoryState.Describe(result2);
+					outcome = "ok" + StoryState.Describe(storyResult);
 				}
 				else
 				{
@@ -392,7 +392,7 @@ internal sealed class ClientStories
 				}
 				NetworkStoryContext ctx = story.Context;
 				var comp = story.Comp;
-				post(() => FinishLocal(comp, ctx, result2, ex));
+				post(() => FinishLocal(comp, ctx, storyResult, ex));
 				continue;
 			}
 			if (!_byId.TryGetValue(move.StoryId, out Entry? entry))

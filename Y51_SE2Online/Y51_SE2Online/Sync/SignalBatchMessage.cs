@@ -20,14 +20,14 @@ public static class SignalBatchMessage
 	public static (uint LifeSeq, uint HostTick, List<WireCommand> Commands) Decode(ReadOnlySpan<byte> d)
 	{
 		WireReader r = new WireReader(d.Slice(1));
-		uint item = r.U32();
-		uint item2 = r.U32();
-		int num = r.U16();
-		List<WireCommand> list = new List<WireCommand>(num);
-		for (int i = 0; i < num; i++)
+		uint lifeSeq = r.U32();
+		uint hostTick = r.U32();
+		int count = r.U16();
+		List<WireCommand> commands = new List<WireCommand>(count);
+		for (int i = 0; i < count; i++)
 		{
-			list.Add(WireCommand.Read(ref r));
+			commands.Add(WireCommand.Read(ref r));
 		}
-		return (LifeSeq: item, HostTick: item2, Commands: list);
+		return (LifeSeq: lifeSeq, HostTick: hostTick, Commands: commands);
 	}
 }

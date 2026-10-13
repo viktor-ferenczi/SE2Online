@@ -156,9 +156,9 @@ public sealed class ClientStateTable
 					Expired++;
 				}
 			}
-			foreach (var item2 in list)
+			foreach (var expired in list)
 			{
-				_dirty.Remove(item2);
+				_dirty.Remove(expired);
 			}
 			ExpireTombstones(nowMs);
 		}

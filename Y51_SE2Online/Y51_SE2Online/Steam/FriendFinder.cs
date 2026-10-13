@@ -71,14 +71,13 @@ internal sealed class FriendFinder : IDisposable
 
 	public bool TakePresenceChanged()
 	{
-		bool result = false;
-		ulong result2;
-		while (_presenceUpdates.TryDequeue(out result2))
+		bool changed = false;
+		while (_presenceUpdates.TryDequeue(out _))
 		{
-			result = true;
+			changed = true;
 			PresenceUpdates++;
 		}
-		return result;
+		return changed;
 	}
 
 	public List<FriendHost> Scan(long nowMs, out int friendsTotal, out int inGame)
