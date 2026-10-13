@@ -234,7 +234,7 @@ public sealed class MpPlugin : IPlugin, IDisposable
 		if (hosting)
 		{
 			hooks.Add(Patch("host:InteractedEntityProviderServerComponent.TrySetEntity", HookTargets.ServerTrySetEntity, null, new HarmonyMethod(typeof(ToolTargetDiagnostics), "Postfix")));
-			hooks.Add(Patch("host:InteractedEntityProviderServerComponent.Validate", HookTargets.ServerValidateHit, null, new HarmonyMethod(typeof(ToolTargetDiagnostics), "ValidatePostfix")));
+			hooks.Add(Patch("host:InteractedEntityProviderServerComponent.Validate", HookTargets.ServerValidateHit, null, new HarmonyMethod(typeof(StandingToolReach), "ValidatePostfix")));
 			hooks.Add(Patch("host:ControlPanel.DetachControlPanelList", HookTargets.PanelDetachList, G(typeof(ControlGuard), "PanelDetachPrefix"), null, G(typeof(ControlGuard), "PanelDetachFinalizer")));
 			hooks.Add(Patch("host:ControlPanel.DetachAllBlockDetailsFromEntity", HookTargets.PanelDetachDetails, G(typeof(ControlGuard), "PanelDetailsPrefix")));
 		}
@@ -274,13 +274,13 @@ public sealed class MpPlugin : IPlugin, IDisposable
 			{
 				hooks.Add(Patch("client:ToppedMechanicalBlock.RequestSpawnTop", HookTargets.SpawnTop, new HarmonyMethod(typeof(BuildGuards), "SpawnTopPrefix")));
 				hooks.Add(Patch("client:PaintToolControllable.OnAddedToScene", HookTargets.PaintToolAdded, new HarmonyMethod(typeof(BuildGuards), "PaintToolAddedPrefix")));
-				try { _harmony.Patch(AccessTools.PropertyGetter(typeof(Keen.Game2.Simulation.WorldObjects.Tools.PaintToolPerPlayerData), "Color"), prefix: new HarmonyMethod(typeof(BuildGuards), nameof(BuildGuards.PaintColorPrefix))); }
+				try { _modeHarmony.Patch(AccessTools.PropertyGetter(typeof(Keen.Game2.Simulation.WorldObjects.Tools.PaintToolPerPlayerData), "Color"), prefix: new HarmonyMethod(typeof(BuildGuards), nameof(BuildGuards.PaintColorPrefix))); }
 				catch (Exception ex) { _log.Warn("client: paint colour guard not installed: " + ex.Message); }
 				try
 				{
 					var control = typeof(Keen.Game2.Client.WorldObjects.Character.CharacterMovementControlComponent);
-					_harmony.Patch(AccessTools.Method(control, "RequestSprint"), postfix: new HarmonyMethod(typeof(MpPlugin), nameof(SprintPostfix)));
-					_harmony.Patch(AccessTools.Method(control, "RequestCrouchToggle"), postfix: new HarmonyMethod(typeof(MpPlugin), nameof(CrouchPostfix)));
+					_modeHarmony.Patch(AccessTools.Method(control, "RequestSprint"), postfix: new HarmonyMethod(typeof(MpPlugin), nameof(SprintPostfix)));
+					_modeHarmony.Patch(AccessTools.Method(control, "RequestCrouchToggle"), postfix: new HarmonyMethod(typeof(MpPlugin), nameof(CrouchPostfix)));
 				}
 				catch (Exception ex) { _log.Warn("client: sprint/crouch prediction hooks not installed: " + ex.Message); }
 			}
@@ -486,6 +486,8 @@ public sealed class MpPlugin : IPlugin, IDisposable
 			NetSession.Current?.Stop("plugin disposed");
 			MpMenu.Dispose();
 			ReplicationProbe.Stop();
+			_modeHarmony.UnpatchAll(_modeHarmony.Id);
+			_harmony.UnpatchAll(_harmony.Id);
 		}
 		catch (Exception ex)
 		{

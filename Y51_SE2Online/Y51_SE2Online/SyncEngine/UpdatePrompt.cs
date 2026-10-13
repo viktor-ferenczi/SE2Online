@@ -30,7 +30,7 @@ internal static class UpdatePrompt
     /// <summary>Checks once per game start; the dialog waits for the main menu.</summary>
     public static void Tick(SharedUIComponent shared, bool atMainMenu)
     {
-        if (!_checked)
+        if (!_checked && MpMenu.Settings.CheckForUpdates)
         {
             _checked = true;
             Task.Run(async () =>

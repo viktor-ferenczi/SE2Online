@@ -417,6 +417,8 @@ internal static class MpMenu
                 var settings = JsonSerializer.Deserialize<OnlineSettings>(File.ReadAllText(SettingsPath));
                 // 256 KiB/s was the default before 0.13.3; nobody picked it, so move saved settings to the new default.
                 if (settings != null && settings.StateBudgetKiB == 256) settings.StateBudgetKiB = 1024;
+                // Before 0.14 listing was on by default; nobody chose it, so it starts off until the host turns it on.
+                if (settings != null && !settings.AdvertiseChosen) settings.Advertise = false;
                 if (settings != null && settings.Validate() == null) return settings;
             }
         }

@@ -19,7 +19,7 @@ public sealed class MpOptions
 
 	public bool Dedicated { get; internal set; }
 
-	public bool Advertise { get; internal set; } = true;
+	public bool Advertise { get; internal set; }
 
 	public string SessionName { get; internal set; } = "My SE2 session";
 

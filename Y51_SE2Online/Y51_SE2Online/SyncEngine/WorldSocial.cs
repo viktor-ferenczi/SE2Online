@@ -48,10 +48,13 @@ internal sealed class WorldSocial
         if (isServer) builder.WithComponent<WorldSocialSaveComponent>();
     }
 
+    // Single-player grids keep the game's own defaults; a world that starts hosting later gets its sharing from InitializeGrids.
     private static void GridInitialized(GridPermissionsComponent __instance, GridPermissionsObjectBuilder ob)
     {
-        if (!ob.BuildPermissions.HasValue) __instance._buildPermissions = Private;
+        if (!ob.BuildPermissions.HasValue && Online) __instance._buildPermissions = Private;
     }
+
+    private static bool Online => DedicatedRuntime.Requested || MpPlugin.Controller?.Current is { } current && (current.Host || current.Join);
 
     public sealed class WorldSocialSaveComponent : Component, IWorldSessionSaveGameListener
     {
@@ -60,7 +63,12 @@ internal sealed class WorldSocial
             var world = Entity.Get<WorldSessionComponent>();
             var social = For(world);
             byte[] data;
-            lock (social.Sync) data = social.State.Serialize();
+            lock (social.Sync)
+            {
+                // Worlds that never had factions or players online stay free of the plugin's file.
+                if (social.State.Players.Count == 0 && social.State.Factions.Count == 0) return;
+                data = social.State.Serialize();
+            }
             var container = ((FileContainerAdapter<WorldSessionSaveGameMetaData>)serializer.Container).Container;
             // Temp containers must finish cleanup before a save listener writes into them.
             var file = await container.GetWritableFileHandleAsync(SaveFile);

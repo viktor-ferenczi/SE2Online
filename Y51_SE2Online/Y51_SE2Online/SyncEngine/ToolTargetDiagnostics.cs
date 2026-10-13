@@ -11,6 +11,7 @@ using Keen.VRage.Library.Mathematics;
 
 namespace Y51_SE2Online.SyncEngine;
 
+/// <summary>Logs why the server refused a joiner's tool target. Read-only: it never changes the outcome.</summary>
 internal static class ToolTargetDiagnostics
 {
 	public static long Refused;
@@ -70,37 +71,5 @@ internal static class ToolTargetDiagnostics
 		}
 	}
 
-	public static long StandingAccepted;
-
-	// The server ray from a joiner's head grazes the deck it stands on; ApplyChange still enforces MaxInteractionDistance.
-	private const double StandingReach = 4.0;
-
-	public static void ValidatePostfix(InteractedEntityProviderServerComponent __instance, Entity entity, Vector3D intersection, ref bool __result)
-	{
-		if (__result)
-		{
-			return;
-		}
-		try
-		{
-			Entity? grid = entity.TryGet<CubeBlockComponent>()?.Grid?.Entity;
-			IToolOriginProvider? origin = __instance._origin;
-			if (grid == null || origin == null || (intersection - origin.WorldTransform.Position).LengthSquared() > StandingReach * StandingReach)
-			{
-				return;
-			}
-			Entity gridRoot = grid.GetTopLevelParent();
-			CharacterSupportTrackerComponent? support = __instance.Entity.GetTopLevelParent().TryGet<CharacterSupportTrackerComponent>();
-			if (support != null && support.SupportingEntities.Any(s => s.GetTopLevelParent() == gridRoot))
-			{
-				__result = true;
-				Interlocked.Increment(ref StandingAccepted);
-			}
-		}
-		catch (Exception)
-		{
-		}
-	}
-
-	public static string Describe() => $"tool targets refused by the server {Refused} ({RefusedStandingOnTarget} while standing on the target grid), accepted while standing on it {StandingAccepted}";
+	public static string Describe() => $"tool targets refused by the server {Refused} ({RefusedStandingOnTarget} while standing on the target grid), accepted while standing on it {StandingToolReach.Accepted}";
 }

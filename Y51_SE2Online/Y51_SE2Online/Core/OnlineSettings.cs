@@ -10,7 +10,12 @@ public sealed class OnlineSettings
 {
     public string SessionName { get; set; } = "My SE2 session";
     public string Description { get; set; } = "";
-    public bool Advertise { get; set; } = true;
+    /// <summary>Publishes the session (host SteamID64, names, player counts) to the public directory; off unless the host turns it on.</summary>
+    public bool Advertise { get; set; }
+    /// <summary>Set once the host has saved the Host screen, so Advertise reflects a real choice.</summary>
+    public bool AdvertiseChosen { get; set; }
+    /// <summary>Asks se2-online.yellow51.dev for the newest release once per game start.</summary>
+    public bool CheckForUpdates { get; set; } = true;
     public bool AllowDirectIp { get; set; } = true;
     public string BindAddress { get; set; } = "0.0.0.0";
     public int ListenPort { get; set; } = 7742;

@@ -343,6 +343,30 @@ internal static class ReplicationProbe
 		}
 	}
 
+	// The replay tables are shared with single player, so the game's own readers go back when the session ends.
+	private unsafe static void RestoreReaders()
+	{
+		lock (Sync)
+		{
+			if (_origReaders is not { } originals)
+			{
+				return;
+			}
+			delegate*<object, ref CommandBufferState, nint, ReplicationCommandBuffer, void> meter = &MeasuringReader;
+			foreach (var (stubs, _) in Instrumented)
+			{
+				for (int i = 0; i < stubs.Length && i < originals.Length; i++)
+				{
+					if ((nint)stubs[i].Wrapper.Reader == (nint)meter)
+					{
+						stubs[i].Wrapper = new ReaderSignature((delegate*<object, ref CommandBufferState, nint, ReplicationCommandBuffer, void>)originals[i]);
+					}
+				}
+			}
+			Instrumented.Clear();
+		}
+	}
+
 	private unsafe static void MeasuringReader(object context, ref CommandBufferState st, nint callback, ReplicationCommandBuffer cb)
 	{
 		if (!SlowTicks.Enabled)
@@ -1090,10 +1114,11 @@ internal static class ReplicationProbe
 		});
 	}
 
-	public static void Stop()
+	public unsafe static void Stop()
 	{
 		_tap = null;
 		_commitActive = _bundleActive = _measure = false;
+		RestoreReaders();
 		Timer? timer = Interlocked.Exchange(ref _timer, null);
 		if (timer != null)
 		{

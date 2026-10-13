@@ -57,6 +57,7 @@ public sealed class OnlineScreen : ScreenView
     private readonly TextBox _range = OnlineUi.Input("200", 8);
     private readonly OnlineToggle _spawn = new OnlineToggle("Spawn new players near the host");
     private readonly OnlineToggle _reconnect = new OnlineToggle("Automatically reconnect after connection loss");
+    private readonly OnlineToggle _updates = new OnlineToggle("Check se2-online.yellow51.dev for plugin updates when the game starts");
     private readonly TextBox _smoothing = OnlineUi.Input("60", 3);
     private readonly TextBox _bandwidth = OnlineUi.Input("256", 4);
     private readonly TextBox _password = new() { Watermark = "No password", MaxLength = 64, FontSize = 24, MinHeight = 50, PasswordChar = '*' };
@@ -100,7 +101,7 @@ public sealed class OnlineScreen : ScreenView
             OnlineUi.Section("WORLD RULES", OnlineUi.Text("New grids are private. Use Grid ownership and Factions in the pause menu to control sharing.", "SubtleNotice", 21), _team, _research, _turrets, _spawn),
             OnlineUi.Section("KEYBINDS", OnlineUi.Text("Click a binding, then press the new key or combination. Esc cancels.", "SubtleNotice", 21),
                 OnlineUi.Field("Open chat", _chatKey), OnlineUi.Field("Players list", _playersKey), OnlineUi.Field("Admin panel", _adminKey), OnlineUi.Field("Suit broadcast", _broadcastKey, "Hides or shows your name tag to other players")),
-            OnlineUi.Section("CONNECTION", _reconnect, OnlineUi.Field("Motion smoothing", _smoothing, "0-250 milliseconds"), OnlineUi.Field("Bandwidth per player", _bandwidth, "32-4096 KiB/s")),
+            OnlineUi.Section("CONNECTION", _reconnect, _updates, OnlineUi.Field("Motion smoothing", _smoothing, "0-250 milliseconds"), OnlineUi.Field("Bandwidth per player", _bandwidth, "32-4096 KiB/s")),
             OnlineUi.Text("Applying settings while hosting restarts the session and disconnects other players. Your local world stays open.", "SubtleNotice", 22), _save));
         _players = OnlineUi.Button("Players", MpMenu.OpenPlayers, "OpenPlayers", true);
         _leave = OnlineUi.Button("Stop hosting", MpMenu.Leave, "LeaveSession");
@@ -174,7 +175,7 @@ public sealed class OnlineScreen : ScreenView
         _team.IsChecked = s.TeamGrids; _research.IsChecked = s.SharedResearch; _turrets.IsChecked = s.Pvp; _nametags.IsChecked = s.Nametags;
         _range.Text = s.NametagRange.ToString(CultureInfo.InvariantCulture); _spawn.IsChecked = s.SpawnNearHost;
         _password.Text = s.Password; _chatKey.Binding = s.ChatKey; _playersKey.Binding = s.PlayersKey; _adminKey.Binding = s.AdminKey; _broadcastKey.Binding = s.BroadcastKey;
-        _reconnect.IsChecked = s.AutoReconnect; _smoothing.Text = s.InterpolationMs.ToString(CultureInfo.InvariantCulture); _bandwidth.Text = s.StateBudgetKiB.ToString(CultureInfo.InvariantCulture);
+        _reconnect.IsChecked = s.AutoReconnect; _updates.IsChecked = s.CheckForUpdates; _smoothing.Text = s.InterpolationMs.ToString(CultureInfo.InvariantCulture); _bandwidth.Text = s.StateBudgetKiB.ToString(CultureInfo.InvariantCulture);
         _directIp.IsCheckedChanged += (_, _) => RefreshControls();
     }
 
@@ -186,11 +187,11 @@ public sealed class OnlineScreen : ScreenView
         {
             ServersDirectory = MpMenu.Settings.ServersDirectory, SessionsDirectory = MpMenu.Settings.SessionsDirectory,
             PlayerName = _name.Text ?? "", SessionName = _sessionName.Text ?? "", Description = _description.Text ?? "", MaxPlayers = limit,
-            FriendsOnly = _friendsOnly.IsChecked == true, Advertise = _advertise.IsChecked == true, AllowDirectIp = _directIp.IsChecked == true,
+            FriendsOnly = _friendsOnly.IsChecked == true, Advertise = _advertise.IsChecked == true, AdvertiseChosen = true, AllowDirectIp = _directIp.IsChecked == true,
             BindAddress = _bind.Text ?? "", ListenPort = port, PublicAddress = _publicAddress.Text ?? "",
             TeamGrids = _team.IsChecked == true, SharedResearch = _research.IsChecked == true, Pvp = _turrets.IsChecked == true, Nametags = _nametags.IsChecked == true, NametagRange = range,
-            SpawnNearHost = _spawn.IsChecked == true, AutoReconnect = _reconnect.IsChecked == true, InterpolationMs = smoothing, StateBudgetKiB = bandwidth,
-            Password = _password.Text ?? "", ChatKey = _chatKey.Binding, PlayersKey = _playersKey.Binding, AdminKey = _adminKey.Binding, BroadcastKey = _broadcastKey.Binding, SuitBroadcast = MpMenu.Settings.SuitBroadcast
+            SpawnNearHost = _spawn.IsChecked == true, AutoReconnect = _reconnect.IsChecked == true, CheckForUpdates = _updates.IsChecked == true, InterpolationMs = smoothing, StateBudgetKiB = bandwidth,
+            Password = _password.Text ?? "", ChatKey = _chatKey.Binding, PlayersKey = _playersKey.Binding, AdminKey = _adminKey.Binding, BroadcastKey = _broadcastKey.Binding, SuitBroadcast = MpMenu.Settings.SuitBroadcast, SkippedUpdate = MpMenu.Settings.SkippedUpdate
         };
         string error = settings.Validate();
         if (error != null) { MpMenu.Report(error); return null; }
