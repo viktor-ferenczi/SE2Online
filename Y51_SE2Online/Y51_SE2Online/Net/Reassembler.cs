@@ -20,11 +20,11 @@ public sealed class Reassembler
 		public long StartedMs;
 	}
 
-	private readonly Dictionary<uint, Pending> _pending = new Dictionary<uint, Pending>();
+	private readonly Dictionary<uint, Pending> _pending = new();
 
-	private readonly HashSet<uint> _recentlyCompleted = new HashSet<uint>();
+	private readonly HashSet<uint> _recentlyCompleted = new();
 
-	private readonly Queue<uint> _recentOrder = new Queue<uint>();
+	private readonly Queue<uint> _recentOrder = new();
 
 	public int MaxMessageBytes { get; }
 
@@ -58,29 +58,29 @@ public sealed class Reassembler
 
 	public bool TryGetProgress(uint transferId, out int received, out int count, out long startedMs)
 	{
-		if (_pending.TryGetValue(transferId, out Pending value))
+		if (_pending.TryGetValue(transferId, out var pending))
 		{
-			received = value.Received;
-			count = value.Have.Length;
-			startedMs = value.StartedMs;
+			received = pending.Received;
+			count = pending.Have.Length;
+			startedMs = pending.StartedMs;
 			return true;
 		}
-		received = (count = 0);
-		startedMs = 0L;
+		received = count = 0;
+		startedMs = 0;
 		return false;
 	}
 
 	public ReassemblyResult Add(in FragmentHeader h, ReadOnlySpan<byte> payload, long nowMs, out byte[]? complete)
 	{
 		complete = null;
-		string text = h.Validate(payload.Length);
-		if (text == null && h.TotalLength > MaxMessageBytes)
+		string error = h.Validate(payload.Length);
+		if (error is null && h.TotalLength > MaxMessageBytes)
 		{
-			text = $"message of {h.TotalLength} B exceeds limit {MaxMessageBytes}";
+			error = $"message of {h.TotalLength} B exceeds limit {MaxMessageBytes}";
 		}
-		if (text != null)
+		if (error is not null)
 		{
-			return Reject(text);
+			return Reject(error);
 		}
 		if (_recentlyCompleted.Contains(h.TransferId))
 		{
@@ -94,7 +94,7 @@ public sealed class Reassembler
 			Completed++;
 			return ReassemblyResult.Complete;
 		}
-		if (!_pending.TryGetValue(h.TransferId, out Pending value))
+		if (!_pending.TryGetValue(h.TransferId, out var pending))
 		{
 			if (_pending.Count >= MaxConcurrent)
 			{
@@ -104,62 +104,62 @@ public sealed class Reassembler
 			{
 				return Reject($"buffer limit: {BufferedBytes} + {h.TotalLength} > {MaxBufferedBytes}");
 			}
-			value = new Pending
+			pending = new Pending
 			{
 				First = h,
 				Buffer = new byte[h.TotalLength],
 				Have = new bool[h.Count],
 				StartedMs = nowMs
 			};
-			_pending.Add(h.TransferId, value);
+			_pending.Add(h.TransferId, pending);
 			BufferedBytes += h.TotalLength;
 		}
-		else if (value.First.Count != h.Count || value.First.TotalLength != h.TotalLength || value.First.FragmentSize != h.FragmentSize)
+		else if (pending.First.Count != h.Count || pending.First.TotalLength != h.TotalLength || pending.First.FragmentSize != h.FragmentSize)
 		{
-			Drop(h.TransferId, value);
+			Drop(h.TransferId, pending);
 			return Reject($"transfer {h.TransferId}: geometry changed mid-transfer");
 		}
-		value.LastActivityMs = nowMs;
-		if (value.Have[h.Index])
+		pending.LastActivityMs = nowMs;
+		if (pending.Have[h.Index])
 		{
 			Duplicates++;
 			return ReassemblyResult.Duplicate;
 		}
-		payload.CopyTo(value.Buffer.AsSpan((int)((long)h.Index * (long)h.FragmentSize)));
-		value.Have[h.Index] = true;
-		value.Received++;
-		if (value.Received < value.Have.Length)
+		payload.CopyTo(pending.Buffer.AsSpan((int)((long)h.Index * h.FragmentSize)));
+		pending.Have[h.Index] = true;
+		pending.Received++;
+		if (pending.Received < pending.Have.Length)
 		{
 			return ReassemblyResult.Partial;
 		}
-		Drop(h.TransferId, value);
+		Drop(h.TransferId, pending);
 		Remember(h.TransferId);
 		Completed++;
-		complete = value.Buffer;
+		complete = pending.Buffer;
 		return ReassemblyResult.Complete;
 	}
 
 	public int Expire(long nowMs)
 	{
-		List<uint> list = null;
-		foreach (KeyValuePair<uint, Pending> item in _pending)
+		List<uint> expired = null;
+		foreach (var pair in _pending)
 		{
-			if (nowMs - item.Value.LastActivityMs > TimeoutMs)
+			if (nowMs - pair.Value.LastActivityMs > TimeoutMs)
 			{
-				(list ?? (list = new List<uint>())).Add(item.Key);
+				(expired ??= new List<uint>()).Add(pair.Key);
 			}
 		}
-		if (list == null)
+		if (expired is null)
 		{
 			return 0;
 		}
-		foreach (uint item2 in list)
+		foreach (uint id in expired)
 		{
-			Drop(item2, _pending[item2]);
+			Drop(id, _pending[id]);
 			TimedOut++;
-			LastError = $"transfer {item2} timed out";
+			LastError = $"transfer {id} timed out";
 		}
-		return list.Count;
+		return expired.Count;
 	}
 
 	private void Drop(uint id, Pending p)

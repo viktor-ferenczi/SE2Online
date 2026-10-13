@@ -1,7 +1,7 @@
-using System.Linq;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using Y51_SE2Online.Core;
 
@@ -36,17 +36,17 @@ public sealed class MpTransport : ITransport, IDisposable
 
 		public readonly uint[] TxSeq = new uint[3];
 
-		public readonly ReliableSequenceChecker ControlRx = new ReliableSequenceChecker();
+		public readonly ReliableSequenceChecker ControlRx = new();
 
-		public readonly ReliableSequenceChecker BulkRx = new ReliableSequenceChecker();
+		public readonly ReliableSequenceChecker BulkRx = new();
 
-		public readonly ReceiveWindow StateRx = new ReceiveWindow();
+		public readonly ReceiveWindow StateRx = new();
 
-		public readonly AckTracker StateAcks = new AckTracker();
+		public readonly AckTracker StateAcks = new();
 
 		public Reassembler Reassembler;
 
-		public readonly Queue<BulkOut> Bulk = new Queue<BulkOut>();
+		public readonly Queue<BulkOut> Bulk = new();
 
 		public long BulkQueuedBytes;
 
@@ -64,7 +64,7 @@ public sealed class MpTransport : ITransport, IDisposable
 
 		public double RttSum;
 
-		public readonly PeerStats Stats = new PeerStats();
+		public readonly PeerStats Stats = new();
 	}
 
 	private readonly struct OutRequest
@@ -98,7 +98,7 @@ public sealed class MpTransport : ITransport, IDisposable
 			Peer = peer;
 			Channel = Channel.Control;
 			Payload = default;
-			Token = 0uL;
+			Token = 0;
 			DisconnectCode = code;
 			DisconnectReason = reason;
 		}
@@ -112,17 +112,17 @@ public sealed class MpTransport : ITransport, IDisposable
 
 	private readonly Func<long> _clock;
 
-	private readonly Dictionary<uint, PeerState> _byConn = new Dictionary<uint, PeerState>();
+	private readonly Dictionary<uint, PeerState> _byConn = new();
 
-	private readonly Dictionary<PeerId, PeerState> _byPeer = new Dictionary<PeerId, PeerState>();
+	private readonly Dictionary<PeerId, PeerState> _byPeer = new();
 
-	private readonly ConcurrentQueue<OutRequest> _out = new ConcurrentQueue<OutRequest>();
+	private readonly ConcurrentQueue<OutRequest> _out = new();
 
-	private readonly List<LinkEvent> _events = new List<LinkEvent>();
+	private readonly List<LinkEvent> _events = new();
 
-	private readonly List<LinkMessage> _messages = new List<LinkMessage>();
+	private readonly List<LinkMessage> _messages = new();
 
-	private readonly List<ulong> _scratchTokens = new List<ulong>();
+	private readonly List<ulong> _scratchTokens = new();
 
 	private PeerId[] _peers = Array.Empty<PeerId>();
 
@@ -150,52 +150,50 @@ public sealed class MpTransport : ITransport, IDisposable
 		_o = options;
 		_log = log;
 		_clock = clock ?? new Func<long>(MpClock.NowMs);
-		int num = 29 + _o.FragmentPayload;
-		if (num > link.MaxMessageSize)
+		int fragmentFrame = Frame.HeaderSize + FragmentHeader.Size + _o.FragmentPayload;
+		if (fragmentFrame > link.MaxMessageSize)
 		{
-			throw new ArgumentException($"fragment frame {num} B exceeds link limit {link.MaxMessageSize} B");
+			throw new ArgumentException($"fragment frame {fragmentFrame} B exceeds link limit {link.MaxMessageSize} B");
 		}
 	}
 
+	// Thread-safe: requests are queued and dispatched on the next Poll.
 	public ulong Send(PeerId peer, Channel channel, ReadOnlyMemory<byte> payload)
 	{
-		int num = MaxDirectPayload(channel);
-		if (channel != Channel.Bulk && payload.Length > num)
+		int maxDirect = MaxDirectPayload(channel);
+		if (channel != Channel.Bulk && payload.Length > maxDirect)
 		{
-			_log.WarnOnce($"oversize-{channel}", $"{channel} message of {payload.Length} B exceeds {num} B; use Channel.Bulk");
-			return 0uL;
+			_log.WarnOnce($"oversize-{channel}", $"{channel} message of {payload.Length} B exceeds {maxDirect} B; use Channel.Bulk");
+			return 0;
 		}
 		if (channel == Channel.Bulk && payload.Length > _o.MaxBulkMessageBytes)
 		{
 			_log.WarnOnce("oversize-bulk", $"bulk message of {payload.Length} B exceeds {_o.MaxBulkMessageBytes} B");
-			return 0uL;
+			return 0;
 		}
-		ulong num2 = (ulong)Interlocked.Increment(ref _nextToken);
-		_out.Enqueue(new OutRequest(peer, channel, payload, num2));
-		return num2;
+		ulong token = (ulong)Interlocked.Increment(ref _nextToken);
+		_out.Enqueue(new OutRequest(peer, channel, payload, token));
+		return token;
 	}
 
-	public void Disconnect(PeerId peer, int code, string reason)
-	{
-		_out.Enqueue(new OutRequest(peer, code, reason));
-	}
+	public void Disconnect(PeerId peer, int code, string reason) => _out.Enqueue(new OutRequest(peer, code, reason));
 
 	public int MaxDirectPayload(Channel channel)
 	{
-		int num = _link.MaxMessageSize - 9;
+		int max = _link.MaxMessageSize - Frame.HeaderSize;
 		if (channel != Channel.State)
 		{
-			return num;
+			return max;
 		}
-		return num - 8;
+		return max - StatePrefix.Size;
 	}
 
 	public bool TryGetStats(PeerId peer, out PeerStats stats)
 	{
-		if (_byPeer.TryGetValue(peer, out PeerState value))
+		if (_byPeer.TryGetValue(peer, out var p))
 		{
-			FillStats(value);
-			stats = value.Stats.Clone();
+			FillStats(p);
+			stats = p.Stats.Clone();
 			return true;
 		}
 		stats = null;
@@ -212,50 +210,51 @@ public sealed class MpTransport : ITransport, IDisposable
 		_events.Clear();
 		_messages.Clear();
 		_link.Pump(_events, _messages);
-		foreach (LinkEvent @event in _events)
+		// Connects first so a message arriving in the same pump finds its peer; disconnects last so
+		// the peer's final messages are still delivered.
+		foreach (var linkEvent in _events)
 		{
-			LinkEvent e = @event;
+			var e = linkEvent;
 			if (e.Kind == LinkEventKind.Connected)
 			{
 				OnLinkEvent(in e, now);
 			}
 		}
-		foreach (LinkMessage message in _messages)
+		foreach (var message in _messages)
 		{
 			OnLinkMessage(message, now);
 		}
-		foreach (LinkEvent event2 in _events)
+		foreach (var linkEvent in _events)
 		{
-			LinkEvent e2 = event2;
-			if (e2.Kind != LinkEventKind.Connected)
+			var e = linkEvent;
+			if (e.Kind != LinkEventKind.Connected)
 			{
-				OnLinkEvent(in e2, now);
+				OnLinkEvent(in e, now);
 			}
 		}
-		OutRequest result;
-		while (_out.TryDequeue(out result))
+		OutRequest request;
+		while (_out.TryDequeue(out request))
 		{
-			Dispatch(in result, now);
+			Dispatch(in request, now);
 		}
 		if (_byConn.Count == 0)
 		{
 			return;
 		}
-		PeerState[] array = ToArray();
-		foreach (PeerState peerState in array)
+		foreach (var p in ToArray())
 		{
-			if (!peerState.Closed)
+			if (!p.Closed)
 			{
-				Service(peerState, now);
+				Service(p, now);
 			}
 		}
 	}
 
 	private PeerState[] ToArray()
 	{
-		PeerState[] array = new PeerState[_byConn.Count];
-		_byConn.Values.CopyTo(array, 0);
-		return array;
+		var peers = new PeerState[_byConn.Count];
+		_byConn.Values.CopyTo(peers, 0);
+		return peers;
 	}
 
 	private void Service(PeerState p, long now)
@@ -264,25 +263,25 @@ public sealed class MpTransport : ITransport, IDisposable
 		{
 			if (now - p.LinkConnectedMs > _o.HelloTimeoutMs)
 			{
-				Close(p, 1002, $"no Hello within {_o.HelloTimeoutMs} ms", byPeer: false, "timeout", notifyPeer: true);
+				Close(p, DisconnectCodes.HelloTimeout, $"no Hello within {_o.HelloTimeoutMs} ms", byPeer: false, "timeout", notifyPeer: true);
 			}
 			return;
 		}
 		if (p.StateAckDirty && now - p.LastStateSentMs >= _o.StateAckDelayMs)
 		{
-			SendStateFrame(p, FrameKind.Ack, default, 0uL, now);
+			SendStateFrame(p, FrameKind.Ack, default, 0, now);
 		}
 		if (now - p.LastPingSentMs >= _o.PingIntervalMs)
 		{
 			p.LastPingSentMs = now;
-			WireWriter wireWriter = new WireWriter(16).U32(p.NextPingId++).I64(_clock());
-			SendFrame(p, Channel.Control, FrameKind.Ping, wireWriter.ToArray(), reliable: true);
+			var ping = new WireWriter(16).U32(p.NextPingId++).I64(_clock());
+			SendFrame(p, Channel.Control, FrameKind.Ping, ping.ToArray(), reliable: true);
 			p.Stats.PingsSent++;
 		}
-		long num = ((p.Stats.LastPongMs > 0) ? p.Stats.LastPongMs : p.Stats.ConnectedMs);
-		if (now - num > _o.PingTimeoutMs)
+		long lastHeardMs = p.Stats.LastPongMs > 0 ? p.Stats.LastPongMs : p.Stats.ConnectedMs;
+		if (now - lastHeardMs > _o.PingTimeoutMs)
 		{
-			Close(p, 1003, $"no Pong for {_o.PingTimeoutMs} ms", byPeer: false, "timeout", notifyPeer: true);
+			Close(p, DisconnectCodes.PingTimeout, $"no Pong for {_o.PingTimeoutMs} ms", byPeer: false, "timeout", notifyPeer: true);
 			return;
 		}
 		_scratchTokens.Clear();
@@ -298,19 +297,21 @@ public sealed class MpTransport : ITransport, IDisposable
 		PumpBulk(p);
 	}
 
+	// Feeds bulk fragments only while the link's reliable backlog is under the high-water mark,
+	// so a large transfer cannot starve Control and State traffic.
 	private void PumpBulk(PeerState p)
 	{
 		while (p.Bulk.Count > 0 && _link.GetPendingReliableBytes(p.Conn) < (_link.HasLanePriorities(p.Conn) ? _o.BulkHighWaterLanesBytes : _o.BulkHighWaterBytes))
 		{
-			BulkOut bulkOut = p.Bulk.Peek();
-			ReadOnlyMemory<byte> readOnlyMemory = Fragmenter.Slice(bulkOut.Data, bulkOut.Next, (uint)_o.FragmentPayload);
-			FragmentHeader fragmentHeader = new FragmentHeader(bulkOut.TransferId, bulkOut.Next, bulkOut.Count, (uint)bulkOut.Data.Length, (uint)_o.FragmentPayload);
-			byte[] array = new byte[29 + readOnlyMemory.Length];
-			uint num = p.TxSeq[1] + 1;
-			Frame.Write(array, new FrameHeader(Channel.Bulk, FrameKind.Fragment, num, 0));
-			fragmentHeader.Write(array.AsSpan(9));
-			readOnlyMemory.Span.CopyTo(array.AsSpan(29));
-			switch (_link.Send(p.Conn, Channel.Bulk, reliable: true, array))
+			var bulk = p.Bulk.Peek();
+			var chunk = Fragmenter.Slice(bulk.Data, bulk.Next, (uint)_o.FragmentPayload);
+			var fragment = new FragmentHeader(bulk.TransferId, bulk.Next, bulk.Count, (uint)bulk.Data.Length, (uint)_o.FragmentPayload);
+			byte[] frame = new byte[Frame.HeaderSize + FragmentHeader.Size + chunk.Length];
+			uint seq = p.TxSeq[(int)Channel.Bulk] + 1;
+			Frame.Write(frame, new FrameHeader(Channel.Bulk, FrameKind.Fragment, seq, 0));
+			fragment.Write(frame.AsSpan(Frame.HeaderSize));
+			chunk.Span.CopyTo(frame.AsSpan(Frame.HeaderSize + FragmentHeader.Size));
+			switch (_link.Send(p.Conn, Channel.Bulk, reliable: true, frame))
 			{
 			case LinkSendResult.Busy:
 				p.Stats.SendBusy++;
@@ -318,22 +319,22 @@ public sealed class MpTransport : ITransport, IDisposable
 			case LinkSendResult.Failed:
 				return;
 			}
-			p.TxSeq[1] = num;
-			ref ChannelStats reference = ref p.Stats.Channels[1];
-			reference.FramesSent++;
-			reference.BytesSent += array.Length;
-			if (++bulkOut.Next == bulkOut.Count)
+			p.TxSeq[(int)Channel.Bulk] = seq;
+			ref var stats = ref p.Stats.Channels[(int)Channel.Bulk];
+			stats.FramesSent++;
+			stats.BytesSent += frame.Length;
+			if (++bulk.Next == bulk.Count)
 			{
 				p.Bulk.Dequeue();
-				p.BulkQueuedBytes -= bulkOut.Data.Length;
-				reference.MessagesSent++;
+				p.BulkQueuedBytes -= bulk.Data.Length;
+				stats.MessagesSent++;
 			}
 		}
 	}
 
 	private void Dispatch(in OutRequest req, long now)
 	{
-		if (!_byPeer.TryGetValue(req.Peer, out PeerState value) || value.Closed)
+		if (!_byPeer.TryGetValue(req.Peer, out var p) || p.Closed)
 		{
 			if (!req.IsDisconnect)
 			{
@@ -343,10 +344,10 @@ public sealed class MpTransport : ITransport, IDisposable
 		}
 		if (req.IsDisconnect)
 		{
-			Close(value, req.DisconnectCode, req.DisconnectReason, byPeer: false, "local", notifyPeer: true);
+			Close(p, req.DisconnectCode, req.DisconnectReason, byPeer: false, "local", notifyPeer: true);
 			return;
 		}
-		if (!value.Ready)
+		if (!p.Ready)
 		{
 			_log.WarnOnce($"send-notready-{req.Peer}", $"dropping {req.Channel} message for peer {req.Peer}: handshake not finished");
 			return;
@@ -354,148 +355,150 @@ public sealed class MpTransport : ITransport, IDisposable
 		switch (req.Channel)
 		{
 		case Channel.Control:
-			SendFrame(value, Channel.Control, FrameKind.Data, req.Payload.Span, reliable: true);
-			value.Stats.Channels[0].MessagesSent++;
+			SendFrame(p, Channel.Control, FrameKind.Data, req.Payload.Span, reliable: true);
+			p.Stats.Channels[(int)Channel.Control].MessagesSent++;
 			break;
 		case Channel.State:
-			SendStateFrame(value, FrameKind.Data, req.Payload.Span, req.Token, now);
-			value.Stats.Channels[2].MessagesSent++;
+			SendStateFrame(p, FrameKind.Data, req.Payload.Span, req.Token, now);
+			p.Stats.Channels[(int)Channel.State].MessagesSent++;
 			break;
 		case Channel.Bulk:
-			value.Bulk.Enqueue(new BulkOut
+			p.Bulk.Enqueue(new BulkOut
 			{
-				TransferId = value.NextTransferId++,
+				TransferId = p.NextTransferId++,
 				Data = req.Payload,
 				Count = Fragmenter.CountFor((uint)req.Payload.Length, (uint)_o.FragmentPayload)
 			});
-			value.BulkQueuedBytes += req.Payload.Length;
+			p.BulkQueuedBytes += req.Payload.Length;
 			break;
 		}
 	}
 
+	// Every State frame piggybacks our receive window so the peer can resolve its in-flight tokens.
 	private void SendStateFrame(PeerState p, FrameKind kind, ReadOnlySpan<byte> payload, ulong token, long now)
 	{
-		byte[] array = new byte[8 + payload.Length];
-		StatePrefix.Write(array, p.StateRx.Latest, p.StateRx.Bits);
-		payload.CopyTo(array.AsSpan(8));
-		uint num = SendFrame(p, Channel.State, kind, array, reliable: false);
-		if (kind == FrameKind.Data && token != 0L && num != 0)
+		byte[] body = new byte[StatePrefix.Size + payload.Length];
+		StatePrefix.Write(body, p.StateRx.Latest, p.StateRx.Bits);
+		payload.CopyTo(body.AsSpan(StatePrefix.Size));
+		uint seq = SendFrame(p, Channel.State, kind, body, reliable: false);
+		if (kind == FrameKind.Data && token != 0 && seq != 0)
 		{
-			p.StateAcks.Register(num, token, now);
+			p.StateAcks.Register(seq, token, now);
 		}
 		p.StateAckDirty = false;
 		p.LastStateSentMs = now;
 	}
 
+	// Returns the frame's sequence number, or 0 if the link refused it.
 	private uint SendFrame(PeerState p, Channel ch, FrameKind kind, ReadOnlySpan<byte> payload, bool reliable)
 	{
-		uint num = p.TxSeq[(uint)ch] + 1;
-		byte[] array = new byte[9 + payload.Length];
-		Frame.Write(array, new FrameHeader(ch, kind, num, 0));
-		payload.CopyTo(array.AsSpan(9));
-		LinkSendResult linkSendResult = _link.Send(p.Conn, ch, reliable, array);
-		if (linkSendResult != LinkSendResult.Ok)
+		uint seq = p.TxSeq[(uint)ch] + 1;
+		byte[] frame = new byte[Frame.HeaderSize + payload.Length];
+		Frame.Write(frame, new FrameHeader(ch, kind, seq, 0));
+		payload.CopyTo(frame.AsSpan(Frame.HeaderSize));
+		var result = _link.Send(p.Conn, ch, reliable, frame);
+		if (result != LinkSendResult.Ok)
 		{
-			if (linkSendResult == LinkSendResult.Busy)
+			if (result == LinkSendResult.Busy)
 			{
 				p.Stats.SendBusy++;
 			}
-			_log.WarnOnce($"send-{linkSendResult}-{p.Id}-{ch}", $"peer {p.Id}: link refused {ch}/{kind} frame ({linkSendResult})");
-			return 0u;
+			_log.WarnOnce($"send-{result}-{p.Id}-{ch}", $"peer {p.Id}: link refused {ch}/{kind} frame ({result})");
+			return 0;
 		}
-		p.TxSeq[(uint)ch] = num;
-		ref ChannelStats reference = ref p.Stats.Channels[(uint)ch];
-		reference.FramesSent++;
-		reference.BytesSent += array.Length;
-		return num;
+		p.TxSeq[(uint)ch] = seq;
+		ref var stats = ref p.Stats.Channels[(uint)ch];
+		stats.FramesSent++;
+		stats.BytesSent += frame.Length;
+		return seq;
 	}
 
 	private void OnLinkEvent(in LinkEvent e, long now)
 	{
-		PeerState value2;
+		PeerState closing;
 		if (e.Kind == LinkEventKind.Connected)
 		{
 			if (!_byConn.ContainsKey(e.Conn))
 			{
-				PeerId peerId = new PeerId(e.RemoteId);
-				if (_byPeer.TryGetValue(peerId, out PeerState value))
+				var peerId = new PeerId(e.RemoteId);
+				if (_byPeer.TryGetValue(peerId, out var old))
 				{
 					_log.Warn($"peer {peerId} reconnected on a new connection; dropping the old one");
-					Close(value, 1000, "replaced by new connection", byPeer: false, "local", notifyPeer: false);
+					Close(old, DisconnectCodes.Bye, "replaced by new connection", byPeer: false, "local", notifyPeer: false);
 				}
-				PeerState peerState = new PeerState
+				var p = new PeerState
 				{
 					Conn = e.Conn,
 					Id = peerId,
 					LinkConnectedMs = now,
 					Reassembler = new Reassembler(_o.MaxBulkMessageBytes, 8, 536870912L)
 				};
-				peerState.Stats.Peer = peerId;
-				peerState.Stats.ConnectedMs = now;
-				_byConn[e.Conn] = peerState;
-				_byPeer[peerId] = peerState;
-				WireWriter wireWriter = new WireWriter(128).U16(2).U8(_o.Role).U64(_o.LocalId)
+				p.Stats.Peer = peerId;
+				p.Stats.ConnectedMs = now;
+				_byConn[e.Conn] = p;
+				_byPeer[peerId] = p;
+				var hello = new WireWriter(128)
+					.U16(Frame.ProtocolVersion)
+					.U8(_o.Role)
+					.U64(_o.LocalId)
 					.Str(_o.PluginVersion)
 					.Str(_o.GameVersion)
 					.Str(_o.LocalName)
 					.U64(_o.InstanceId);
-				SendFrame(peerState, Channel.Control, FrameKind.Hello, wireWriter.ToArray(), reliable: true);
+				SendFrame(p, Channel.Control, FrameKind.Hello, hello.ToArray(), reliable: true);
 				_log.Info($"link up to {peerId} (conn {e.Conn}), Hello sent");
 			}
 		}
-		else if (_byConn.TryGetValue(e.Conn, out value2))
+		else if (_byConn.TryGetValue(e.Conn, out closing))
 		{
-			Close(value2, e.Code, e.Reason, e.ByPeer, "link", notifyPeer: false);
+			Close(closing, e.Code, e.Reason, e.ByPeer, "link", notifyPeer: false);
 		}
 	}
 
 	private void OnLinkMessage(in LinkMessage m, long now)
 	{
-		if (!_byConn.TryGetValue(m.Conn, out PeerState value) || value.Closed)
+		if (!_byConn.TryGetValue(m.Conn, out var p) || p.Closed)
 		{
 			return;
 		}
-		if (!Frame.TryRead(m.Data, out FrameHeader header, out ReadOnlySpan<byte> payload, out string error))
+		if (!Frame.TryRead(m.Data, out var header, out var payload, out string error))
 		{
-			ProtocolError(value, error);
+			ProtocolError(p, error);
 		}
-		else if (!value.Ready && header.Kind != FrameKind.Hello && header.Kind != FrameKind.Bye)
+		else if (!p.Ready && header.Kind != FrameKind.Hello && header.Kind != FrameKind.Bye)
 		{
-			PeerState peerState = value;
-			if (peerState.Early == null)
+			// Frames can overtake the Hello across lanes; hold them until the handshake completes.
+			p.Early ??= new List<byte[]>();
+			if (p.Early.Count >= _o.MaxEarlyFrames)
 			{
-				peerState.Early = new List<byte[]>();
-			}
-			if (value.Early.Count >= _o.MaxEarlyFrames)
-			{
-				ProtocolError(value, $"more than {_o.MaxEarlyFrames} frames before Hello");
+				ProtocolError(p, $"more than {_o.MaxEarlyFrames} frames before Hello");
 			}
 			else
 			{
-				value.Early.Add(m.Data);
+				p.Early.Add(m.Data);
 			}
 		}
 		else
 		{
-			HandleFrame(value, in header, payload, m.Data.Length, now);
+			HandleFrame(p, in header, payload, m.Data.Length, now);
 		}
 	}
 
 	private void HandleFrame(PeerState p, in FrameHeader h, ReadOnlySpan<byte> payload, int frameBytes, long now)
 	{
-		ref ChannelStats reference = ref p.Stats.Channels[(uint)h.Channel];
-		reference.FramesReceived++;
-		reference.BytesReceived += frameBytes;
+		ref var channelStats = ref p.Stats.Channels[(uint)h.Channel];
+		channelStats.FramesReceived++;
+		channelStats.BytesReceived += frameBytes;
 		if (h.Channel == Channel.State)
 		{
 			HandleState(p, in h, payload, now);
 			return;
 		}
-		ReliableCheck reliableCheck = ((h.Channel == Channel.Control) ? p.ControlRx : p.BulkRx).Observe(h.Seq);
-		if (reliableCheck != ReliableCheck.Ok)
+		var check = (h.Channel == Channel.Control ? p.ControlRx : p.BulkRx).Observe(h.Seq);
+		if (check != ReliableCheck.Ok)
 		{
-			ProtocolError(p, $"{h.Channel} sequence {reliableCheck} at #{h.Seq}");
-			if (reliableCheck == ReliableCheck.Duplicate)
+			ProtocolError(p, $"{h.Channel} sequence {check} at #{h.Seq}");
+			if (check == ReliableCheck.Duplicate)
 			{
 				return;
 			}
@@ -507,64 +510,65 @@ public sealed class MpTransport : ITransport, IDisposable
 			break;
 		case FrameKind.Ping:
 		{
-			WireWriter wireWriter = new WireWriter(payload.Length);
-			wireWriter.Bytes(payload);
-			SendFrame(p, Channel.Control, FrameKind.Pong, wireWriter.ToArray(), reliable: true);
+			var pong = new WireWriter(payload.Length);
+			pong.Bytes(payload);
+			SendFrame(p, Channel.Control, FrameKind.Pong, pong.ToArray(), reliable: true);
 			break;
 		}
 		case FrameKind.Pong:
 		{
+			// Ping payload echoed back: [u32 ping id][i64 our send time]
 			if (payload.Length < 12)
 			{
 				ProtocolError(p, "short Pong");
 				break;
 			}
-			WireReader wireReader = new WireReader(payload);
-			wireReader.U32();
-			long num = wireReader.I64();
-			double num2 = Math.Max(0L, _clock() - num);
-			PeerStats stats = p.Stats;
+			var reader = new WireReader(payload);
+			reader.U32();
+			long sentMs = reader.I64();
+			double rtt = Math.Max(0L, _clock() - sentMs);
+			var stats = p.Stats;
 			stats.PongsReceived++;
 			stats.LastPongMs = now;
-			stats.LastRttMs = num2;
-			stats.MinRttMs = Math.Min(stats.MinRttMs, num2);
-			stats.MaxRttMs = Math.Max(stats.MaxRttMs, num2);
-			p.RttSum += num2;
-			stats.AvgRttMs = p.RttSum / (double)stats.PongsReceived;
+			stats.LastRttMs = rtt;
+			stats.MinRttMs = Math.Min(stats.MinRttMs, rtt);
+			stats.MaxRttMs = Math.Max(stats.MaxRttMs, rtt);
+			p.RttSum += rtt;
+			stats.AvgRttMs = p.RttSum / stats.PongsReceived;
 			break;
 		}
 		case FrameKind.Bye:
 		{
-			int code = 1000;
+			int code = DisconnectCodes.Bye;
 			string reason = "bye";
 			if (payload.Length >= 6)
 			{
-				WireReader wireReader2 = new WireReader(payload);
-				code = wireReader2.I32();
-				reason = wireReader2.Str();
+				var reader = new WireReader(payload);
+				code = reader.I32();
+				reason = reader.Str();
 			}
 			Close(p, code, reason, byPeer: true, "bye", notifyPeer: false);
 			break;
 		}
 		case FrameKind.Data:
-			reference.MessagesReceived++;
+			channelStats.MessagesReceived++;
 			Raise(p.Id, h.Channel, payload.ToArray());
 			break;
 		case FrameKind.Fragment:
 		{
-			if (h.Channel != Channel.Bulk || !FragmentHeader.TryRead(payload, out var h2, out var payload2))
+			if (h.Channel != Channel.Bulk || !FragmentHeader.TryRead(payload, out var fragment, out var chunk))
 			{
 				ProtocolError(p, "malformed fragment");
 				break;
 			}
 			byte[] complete;
-			switch (p.Reassembler.Add(in h2, payload2, now, out complete))
+			switch (p.Reassembler.Add(in fragment, chunk, now, out complete))
 			{
 			case ReassemblyResult.Rejected:
 				ProtocolError(p, "fragment rejected: " + p.Reassembler.LastError);
 				break;
 			case ReassemblyResult.Complete:
-				reference.MessagesReceived++;
+				channelStats.MessagesReceived++;
 				Raise(p.Id, Channel.Bulk, complete);
 				break;
 			}
@@ -607,11 +611,11 @@ public sealed class MpTransport : ITransport, IDisposable
 			ProtocolError(p, $"unexpected {h.Kind} on State");
 			return;
 		}
-		ReceiveResult receiveResult = p.StateRx.Observe(h.Seq);
-		if (receiveResult != ReceiveResult.Duplicate && receiveResult != ReceiveResult.TooOld)
+		var result = p.StateRx.Observe(h.Seq);
+		if (result != ReceiveResult.Duplicate && result != ReceiveResult.TooOld)
 		{
 			p.StateAckDirty = true;
-			p.Stats.Channels[2].MessagesReceived++;
+			p.Stats.Channels[(int)Channel.State].MessagesReceived++;
 			Raise(p.Id, Channel.State, rest.ToArray());
 		}
 	}
@@ -623,33 +627,34 @@ public sealed class MpTransport : ITransport, IDisposable
 			ProtocolError(p, "second Hello");
 			return;
 		}
-		ushort num;
-		byte b;
-		ulong num2;
-		string text;
-		string text2;
-		string text3;
+		ushort protocol;
+		byte role;
+		ulong claimedId;
+		string pluginVersion;
+		string gameVersion;
+		string name;
 		try
 		{
-			WireReader wireReader = new WireReader(payload);
-			num = wireReader.U16();
-			b = wireReader.U8();
-			num2 = wireReader.U64();
-			text = wireReader.Str();
-			text2 = wireReader.Str();
-			text3 = wireReader.Str();
-			p.InstanceId = wireReader.Remaining >= 8 ? wireReader.U64() : 0;
+			var reader = new WireReader(payload);
+			protocol = reader.U16();
+			role = reader.U8();
+			claimedId = reader.U64();
+			pluginVersion = reader.Str();
+			gameVersion = reader.Str();
+			name = reader.Str();
+			// Older builds end the Hello here.
+			p.InstanceId = reader.Remaining >= 8 ? reader.U64() : 0;
 		}
 		catch (ArgumentOutOfRangeException)
 		{
 			ProtocolError(p, "malformed Hello");
 			return;
 		}
-		if (num != 2)
+		if (protocol != Frame.ProtocolVersion)
 		{
-			string text4 = $"version mismatch: peer runs Y51_SE2Online {text} (protocol {num}), this PC runs {_o.PluginVersion} (protocol {2}); " + "both players need the same plugin build";
-			_log.Error($"peer {p.Id} '{text3}': {text4}");
-			Close(p, 1007, text4, byPeer: false, "local", notifyPeer: true);
+			string message = $"version mismatch: peer runs Y51_SE2Online {pluginVersion} (protocol {protocol}), this PC runs {_o.PluginVersion} (protocol {2}); " + "both players need the same plugin build";
+			_log.Error($"peer {p.Id} '{name}': {message}");
+			Close(p, DisconnectCodes.VersionMismatch, message, byPeer: false, "local", notifyPeer: true);
 			return;
 		}
 		if (p.InstanceId != 0)
@@ -659,58 +664,58 @@ public sealed class MpTransport : ITransport, IDisposable
 				if (other != p && !other.Closed && other.InstanceId == p.InstanceId && PeerAlias.SteamOf(other.Id.Value) == PeerAlias.SteamOf(p.Id.Value))
 				{
 					_log.Warn($"peer {other.Id} reconnected from the same game instance as {p.Id}; dropping the old connection");
-					Close(other, 1000, "replaced by new connection", byPeer: false, "local", notifyPeer: false);
+					Close(other, DisconnectCodes.Bye, "replaced by new connection", byPeer: false, "local", notifyPeer: false);
 				}
 			}
 		}
-		if (num2 != 0L && num2 != PeerAlias.SteamOf(p.Id.Value) && _link.AuthenticatesPeers)
+		if (claimedId != 0 && claimedId != PeerAlias.SteamOf(p.Id.Value) && _link.AuthenticatesPeers)
 		{
-			_log.Warn($"peer {p.Id}: Hello claims id {num2}");
+			_log.Warn($"peer {p.Id}: Hello claims id {claimedId}");
 		}
-		p.Stats.RemoteSteamId = num2;
-		if (b == _o.Role)
+		p.Stats.RemoteSteamId = claimedId;
+		if (role == _o.Role)
 		{
-			_log.Warn($"peer {p.Id}: both sides are {((b == 0) ? "host" : "client")}");
+			_log.Warn($"peer {p.Id}: both sides are {(role == 0 ? "host" : "client")}");
 		}
-		if (text != _o.PluginVersion)
+		if (pluginVersion != _o.PluginVersion)
 		{
-			_log.Warn($"peer {p.Id}: plugin version {text} differs from ours ({_o.PluginVersion})");
+			_log.Warn($"peer {p.Id}: plugin version {pluginVersion} differs from ours ({_o.PluginVersion})");
 		}
-		if (text2 != _o.GameVersion)
+		if (gameVersion != _o.GameVersion)
 		{
-			_log.Warn($"peer {p.Id}: game version {text2} differs from ours ({_o.GameVersion})");
+			_log.Warn($"peer {p.Id}: game version {gameVersion} differs from ours ({_o.GameVersion})");
 		}
 		p.Ready = true;
 		p.Stats.Ready = true;
-		p.Stats.RemoteName = text3;
-		p.Stats.RemotePluginVersion = text;
-		p.Stats.RemoteGameVersion = text2;
+		p.Stats.RemoteName = name;
+		p.Stats.RemotePluginVersion = pluginVersion;
+		p.Stats.RemoteGameVersion = gameVersion;
 		RefreshPeers();
-		_log.Info($"handshake OK with {p.Id} '{text3}' ({((b == 0) ? "host" : "client")}, plugin {text}, game {text2})");
+		_log.Info($"handshake OK with {p.Id} '{name}' ({(role == 0 ? "host" : "client")}, plugin {pluginVersion}, game {gameVersion})");
 		try
 		{
 			PeerConnected?.Invoke(p.Id);
 		}
-		catch (Exception value)
+		catch (Exception ex)
 		{
-			_log.Error($"PeerConnected handler threw: {value}");
+			_log.Error($"PeerConnected handler threw: {ex}");
 		}
 		if (p.Early == null)
 		{
 			return;
 		}
-		List<byte[]>? early = p.Early;
+		var early = p.Early;
 		p.Early = null;
 		long now = _clock();
-		foreach (byte[] item in early)
+		foreach (byte[] frame in early)
 		{
 			if (p.Closed)
 			{
 				break;
 			}
-			if (Frame.TryRead(item, out FrameHeader header, out ReadOnlySpan<byte> payload2, out string _))
+			if (Frame.TryRead(frame, out var header, out var framePayload, out string _))
 			{
-				HandleFrame(p, in header, payload2, item.Length, now);
+				HandleFrame(p, in header, framePayload, frame.Length, now);
 			}
 		}
 	}
@@ -721,7 +726,7 @@ public sealed class MpTransport : ITransport, IDisposable
 		_log.Warn($"peer {p.Id}: protocol error: {error}");
 		if (p.Stats.ProtocolErrors >= _o.MaxProtocolErrors && !p.Closed)
 		{
-			Close(p, 1001, "too many protocol errors (last: " + error + ")", byPeer: false, "local", notifyPeer: true);
+			Close(p, DisconnectCodes.ProtocolError, "too many protocol errors (last: " + error + ")", byPeer: false, "local", notifyPeer: true);
 		}
 	}
 
@@ -734,52 +739,54 @@ public sealed class MpTransport : ITransport, IDisposable
 		p.Closed = true;
 		if (notifyPeer)
 		{
-			WireWriter wireWriter = new WireWriter(32 + reason.Length).I32(code).Str(reason);
-			SendFrame(p, Channel.Control, FrameKind.Bye, wireWriter.ToArray(), reliable: true);
+			var bye = new WireWriter(32 + reason.Length).I32(code).Str(reason);
+			SendFrame(p, Channel.Control, FrameKind.Bye, bye.ToArray(), reliable: true);
 		}
 		if (source != "link")
 		{
+			// Linger only when a Bye was queued, so it reaches the peer before the link closes.
 			_link.Close(p.Conn, code, reason, notifyPeer);
 		}
 		_byConn.Remove(p.Conn);
-		if (_byPeer.TryGetValue(p.Id, out PeerState value) && value == p)
+		if (_byPeer.TryGetValue(p.Id, out var current) && current == p)
 		{
 			_byPeer.Remove(p.Id);
 		}
-		bool ready = p.Ready;
+		bool wasReady = p.Ready;
 		RefreshPeers();
-		DisconnectInfo disconnectInfo = new DisconnectInfo(code, reason, byPeer, source);
-		_log.Info($"peer {p.Id} disconnected: {disconnectInfo}");
-		if (!ready)
+		var info = new DisconnectInfo(code, reason, byPeer, source);
+		_log.Info($"peer {p.Id} disconnected: {info}");
+		if (!wasReady)
 		{
 			return;
 		}
 		try
 		{
-			PeerDisconnected?.Invoke(p.Id, disconnectInfo);
+			PeerDisconnected?.Invoke(p.Id, info);
 		}
-		catch (Exception value2)
+		catch (Exception ex)
 		{
-			_log.Error($"PeerDisconnected handler threw: {value2}");
+			_log.Error($"PeerDisconnected handler threw: {ex}");
 		}
 	}
 
+	// Peers is read from other threads, so it is swapped as a fresh array rather than mutated.
 	private void RefreshPeers()
 	{
-		List<PeerId> list = new List<PeerId>();
-		foreach (PeerState value in _byPeer.Values)
+		var ready = new List<PeerId>();
+		foreach (var p in _byPeer.Values)
 		{
-			if (value.Ready && !value.Closed)
+			if (p.Ready && !p.Closed)
 			{
-				list.Add(value.Id);
+				ready.Add(p.Id);
 			}
 		}
-		Volatile.Write(ref _peers, list.ToArray());
+		Volatile.Write(ref _peers, ready.ToArray());
 	}
 
 	private void FillStats(PeerState p)
 	{
-		PeerStats stats = p.Stats;
+		var stats = p.Stats;
 		stats.BulkQueuedMessages = p.Bulk.Count;
 		stats.BulkQueuedBytes = p.BulkQueuedBytes;
 		stats.ReassemblyInProgress = p.Reassembler.InProgress;
@@ -795,11 +802,11 @@ public sealed class MpTransport : ITransport, IDisposable
 
 	public bool TryGetIncomingBulkProgress(PeerId peer, uint transferId, out int received, out int count)
 	{
-		received = (count = 0);
+		received = count = 0;
 		long startedMs;
-		if (_byPeer.TryGetValue(peer, out PeerState value))
+		if (_byPeer.TryGetValue(peer, out var p))
 		{
-			return value.Reassembler.TryGetProgress(transferId, out received, out count, out startedMs);
+			return p.Reassembler.TryGetProgress(transferId, out received, out count, out startedMs);
 		}
 		return false;
 	}
@@ -810,9 +817,9 @@ public sealed class MpTransport : ITransport, IDisposable
 		{
 			MessageReceived?.Invoke(peer, ch, data);
 		}
-		catch (Exception value)
+		catch (Exception ex)
 		{
-			_log.Error($"MessageReceived handler threw: {value}");
+			_log.Error($"MessageReceived handler threw: {ex}");
 		}
 	}
 
@@ -822,16 +829,15 @@ public sealed class MpTransport : ITransport, IDisposable
 		{
 			ev?.Invoke(peer, tokens);
 		}
-		catch (Exception value)
+		catch (Exception ex)
 		{
-			_log.Error($"State ack handler threw: {value}");
+			_log.Error($"State ack handler threw: {ex}");
 		}
 	}
 
 	public void DisconnectAll(int code, string reason)
 	{
-		PeerState[] array = ToArray();
-		foreach (PeerState p in array)
+		foreach (var p in ToArray())
 		{
 			Close(p, code, reason, byPeer: false, "local", notifyPeer: true);
 		}
@@ -841,7 +847,7 @@ public sealed class MpTransport : ITransport, IDisposable
 	{
 		if (!_disposed)
 		{
-			DisconnectAll(1004, "shutting down");
+			DisconnectAll(DisconnectCodes.Shutdown, "shutting down");
 			_disposed = true;
 		}
 	}
